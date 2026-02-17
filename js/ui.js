@@ -845,6 +845,9 @@ export class UIRenderer {
         const playerBar = document.querySelector('.now-playing-bar');
         if (playerBar) playerBar.style.display = 'none';
 
+        // Add fullscreen-open class to body so CSS hides tab bar + now-playing bar
+        document.body.classList.add('fullscreen-open');
+
         this.setupFullscreenControls(audioPlayer);
 
         overlay.style.display = 'flex';
@@ -866,37 +869,22 @@ export class UIRenderer {
             }
         };
 
-        if (localStorage.getItem('epilepsy-warning-dismissed') === 'true') {
-            startVisualizer();
-        } else {
-            const modal = document.getElementById('epilepsy-warning-modal');
-            if (modal) {
-                modal.classList.add('active');
-
-                const acceptBtn = document.getElementById('epilepsy-accept-btn');
-                const cancelBtn = document.getElementById('epilepsy-cancel-btn');
-
-                acceptBtn.onclick = () => {
-                    modal.classList.remove('active');
-                    localStorage.setItem('epilepsy-warning-dismissed', 'true');
-                    startVisualizer();
-                };
-                cancelBtn.onclick = () => {
-                    modal.classList.remove('active');
-                    this.closeFullscreenCover();
-                };
-            } else {
         startVisualizer();
-            }
-        }
     }
 
     closeFullscreenCover() {
         const overlay = document.getElementById('fullscreen-cover-overlay');
         overlay.style.display = 'none';
 
+        // Remove fullscreen-open class so tab bar + now-playing bar restore
+        document.body.classList.remove('fullscreen-open');
+
+        // Only restore now-playing bar if a track has been played
         const playerBar = document.querySelector('.now-playing-bar');
-        if (playerBar) playerBar.style.removeProperty('display');
+        if (playerBar && playerBar.dataset.hasTrack === 'true') {
+            playerBar.style.removeProperty('display');
+            if (!playerBar.classList.contains('npb-visible')) playerBar.classList.add('npb-visible');
+        }
 
         if (this.fullscreenUpdateInterval) {
             cancelAnimationFrame(this.fullscreenUpdateInterval);
@@ -1223,6 +1211,9 @@ export class UIRenderer {
                 (tabId === 'home' && pageId === 'home')
             );
         });
+
+        // Hide mobile tab bar on admin page (slide-down)
+        document.body.classList.toggle('hide-tab-bar', pageId === 'admin');
 
         // Clear background and color if not on album, artist, playlist, or mix page
         if (!['album', 'artist', 'playlist', 'mix'].includes(pageId)) {
@@ -1588,9 +1579,132 @@ export class UIRenderer {
         });
     }
 
-    /** Wire sort dropdown + list/grid toggle (stub for now) */
-    _wireLibrarySort(_container) {
-        // Sort and view-toggle are wired via ui-interactions.js; nothing extra needed here.
+    /** Wire library toolbar: search toggle, create dropdown, sort dropdown, view toggle */
+    _wireLibrarySort(container) {
+        // ─── Search Toggle ───
+        const searchToggleBtn = document.getElementById('library-search-toggle-btn');
+        const searchBar = document.getElementById('library-search-bar');
+        const searchInput = document.getElementById('library-search-input');
+        const searchCloseBtn = document.getElementById('library-search-close-btn');
+
+        if (searchToggleBtn && searchBar && searchInput) {
+            searchToggleBtn.addEventListener('click', () => {
+                const isOpen = searchBar.style.display !== 'none';
+                searchBar.style.display = isOpen ? 'none' : 'flex';
+                if (!isOpen) {
+                    searchInput.value = '';
+                    searchInput.focus();
+                } else {
+                    searchInput.value = '';
+                    // Reset filter
+                    if (container) container.querySelectorAll('.library-row').forEach((r) => (r.style.display = ''));
+                }
+            });
+        }
+        if (searchCloseBtn && searchBar && searchInput) {
+            searchCloseBtn.addEventListener('click', () => {
+                searchBar.style.display = 'none';
+                searchInput.value = '';
+                if (container) container.querySelectorAll('.library-row').forEach((r) => (r.style.display = ''));
+            });
+        }
+        if (searchInput && container) {
+            searchInput.addEventListener('input', () => {
+                const q = searchInput.value.trim().toLowerCase();
+                container.querySelectorAll('.library-row').forEach((row) => {
+                    if (!q) { row.style.display = ''; return; }
+                    const title = (row.querySelector('.library-row-title')?.textContent || '').toLowerCase();
+                    const subtitle = (row.querySelector('.library-row-subtitle')?.textContent || '').toLowerCase();
+                    row.style.display = title.includes(q) || subtitle.includes(q) ? '' : 'none';
+                });
+            });
+        }
+
+        // ─── Create Dropdown ───
+        const createToggle = document.getElementById('library-create-toggle');
+        const createDropdown = document.getElementById('library-create-dropdown');
+        if (createToggle && createDropdown) {
+            createToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = createDropdown.style.display !== 'none';
+                createDropdown.style.display = isOpen ? 'none' : 'block';
+            });
+            // Close on outside click
+            document.addEventListener('click', (e) => {
+                if (!createToggle.contains(e.target) && !createDropdown.contains(e.target)) {
+                    createDropdown.style.display = 'none';
+                }
+            });
+        }
+        const createPlaylistBtn = document.getElementById('create-playlist-btn');
+        if (createPlaylistBtn) {
+            createPlaylistBtn.addEventListener('click', async () => {
+                if (createDropdown) createDropdown.style.display = 'none';
+                const name = prompt('Playlist name:');
+                if (!name || !name.trim()) return;
+                try {
+                    await db.createPlaylist(name.trim());
+                    showNotification(`Playlist "${name.trim()}" created`);
+                    this.renderLibraryPage();
+                } catch (err) {
+                    console.error('[Library] Create playlist error:', err);
+                    showNotification('Failed to create playlist');
+                }
+            });
+        }
+
+        // ─── Sort Dropdown ───
+        const sortBtn = document.getElementById('library-sort-btn');
+        const sortDropdown = document.getElementById('library-sort-dropdown');
+        const sortLabel = document.getElementById('library-sort-label');
+        if (sortBtn && sortDropdown) {
+            sortBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = sortDropdown.style.display !== 'none';
+                sortDropdown.style.display = isOpen ? 'none' : 'block';
+            });
+            document.addEventListener('click', (e) => {
+                if (!sortBtn.contains(e.target) && !sortDropdown.contains(e.target)) {
+                    sortDropdown.style.display = 'none';
+                }
+            });
+            sortDropdown.querySelectorAll('.library-sort-option').forEach((opt) => {
+                opt.addEventListener('click', () => {
+                    sortDropdown.querySelectorAll('.library-sort-option').forEach((o) => o.classList.remove('active'));
+                    opt.classList.add('active');
+                    if (sortLabel) sortLabel.textContent = opt.textContent.trim();
+                    sortDropdown.style.display = 'none';
+
+                    const sortKey = opt.dataset.sort; // 'recents', 'alpha', 'creator'
+                    if (!container) return;
+                    const rows = [...container.querySelectorAll('.library-row:not(.library-row--pinned)')];
+                    rows.sort((a, b) => {
+                        const titleA = (a.querySelector('.library-row-title')?.textContent || '').toLowerCase();
+                        const titleB = (b.querySelector('.library-row-title')?.textContent || '').toLowerCase();
+                        const subA = (a.querySelector('.library-row-subtitle')?.textContent || '').toLowerCase();
+                        const subB = (b.querySelector('.library-row-subtitle')?.textContent || '').toLowerCase();
+                        if (sortKey === 'alpha') return titleA.localeCompare(titleB);
+                        if (sortKey === 'creator') return subA.localeCompare(subB);
+                        // 'recents' – keep original order (reverse DOM order)
+                        return 0;
+                    });
+                    // Re-append in new order (pinned rows stay on top)
+                    rows.forEach((r) => container.appendChild(r));
+                });
+            });
+        }
+
+        // ─── View Toggle (list ↔ grid) ───
+        const viewToggleBtn = document.getElementById('library-view-toggle-btn');
+        const viewIcon = document.getElementById('library-view-icon');
+        if (viewToggleBtn && container && viewIcon) {
+            viewToggleBtn.addEventListener('click', () => {
+                const isList = container.classList.contains('library-list-view');
+                container.classList.toggle('library-list-view', !isList);
+                container.classList.toggle('library-grid-view', isList);
+                viewIcon.textContent = isList ? 'format_list_bulleted' : 'grid_view';
+            });
+        }
     }
 
     /* ── Downloads Sub-View ─────────────────────────────────────────────── */
@@ -1790,10 +1904,89 @@ export class UIRenderer {
                 </div>`;
         }).join('')}</div>`;
 
-        // Click → navigate to album page
+        // Click → show only downloaded tracks from this album (offline view)
         container.querySelectorAll('.dl-album-card').forEach((card) => {
             card.addEventListener('click', () => {
-                navigate(`/album/${card.dataset.albumId}`);
+                const albumId = String(card.dataset.albumId);
+                const albumTracks = catalog.filter((t) => String(t.albumId) === albumId);
+                const albumInfo = albumMap.get(albumId);
+                this._showDownloadedAlbumDetail(albumInfo, albumTracks);
+            });
+        });
+    }
+
+    /** Show a detail view of downloaded tracks from a specific album */
+    _showDownloadedAlbumDetail(albumInfo, tracks) {
+        // Reuse the downloaded-tracks panel as a detail view
+        const dlView = document.getElementById('library-downloaded-detail');
+        if (!dlView) return;
+
+        // Create a detail overlay inside the downloads sub-view
+        let detailEl = dlView.querySelector('#dl-album-detail-overlay');
+        if (!detailEl) {
+            detailEl = document.createElement('div');
+            detailEl.id = 'dl-album-detail-overlay';
+            detailEl.className = 'dl-detail-overlay';
+            detailEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            dlView.style.position = 'relative';
+            dlView.appendChild(detailEl);
+        }
+        detailEl.style.display = 'block';
+
+        const coverUrl = albumInfo?.cover ? this.api.getCoverUrl(albumInfo.cover, '320') : 'assets/logo.svg';
+        detailEl.innerHTML = `
+            <button class="dl-detail-back-btn" id="dl-album-detail-back">
+                <span class="material-symbols-rounded">arrow_back</span> Back to Downloads
+            </button>
+            <div class="dl-detail-header">
+                <img class="dl-detail-cover" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <div class="dl-detail-info">
+                    <div class="dl-detail-title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</div>
+                    <div class="dl-detail-meta">${escapeHtml(albumInfo?.artist || 'Unknown')} · ${tracks.length} downloaded track${tracks.length !== 1 ? 's' : ''}</div>
+                    <button class="dl-detail-play-btn" id="dl-album-play-all">
+                        <span class="material-symbols-rounded">play_arrow</span> Play All
+                    </button>
+                </div>
+            </div>
+            <div class="dl-detail-tracks">
+                ${tracks.map((t, i) => {
+                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                    const dur = t.duration ? formatTime(t.duration) : '';
+                    return `
+                    <div class="dl-track-item" data-dl-detail-idx="${i}">
+                        <img class="dl-track-item-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <div class="dl-track-item-info">
+                            <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
+                            <div class="dl-track-item-meta"><span>${escapeHtml(t.artist || 'Unknown')}</span></div>
+                        </div>
+                        <span class="dl-track-item-duration">${dur}</span>
+                    </div>`;
+                }).join('')}
+            </div>`;
+
+        // Back button
+        detailEl.querySelector('#dl-album-detail-back')?.addEventListener('click', () => {
+            detailEl.style.display = 'none';
+        });
+
+        // Play all
+        const playerTracks = tracks.map((t) => ({
+            id: t.id, title: t.title,
+            artist: { name: t.artist, id: t.artistId },
+            album: { title: t.album, id: t.albumId, cover: t.cover },
+            duration: t.duration,
+        }));
+        detailEl.querySelector('#dl-album-play-all')?.addEventListener('click', () => {
+            this.player.setQueue(playerTracks, 0);
+            this.player.playTrackFromQueue();
+        });
+
+        // Track clicks
+        detailEl.querySelectorAll('.dl-track-item[data-dl-detail-idx]').forEach((item) => {
+            item.addEventListener('click', () => {
+                const idx = parseInt(item.dataset.dlDetailIdx, 10);
+                this.player.setQueue(playerTracks, idx);
+                this.player.playTrackFromQueue();
             });
         });
     }
@@ -1830,21 +2023,210 @@ export class UIRenderer {
                 </div>`;
         }).join('')}</div>`;
 
-        // Click → navigate to artist page
+        // Click → show only downloaded tracks from this artist (offline view)
         container.querySelectorAll('.dl-artist-card').forEach((card) => {
             card.addEventListener('click', () => {
-                navigate(`/artist/${card.dataset.artistId}`);
+                const artistId = String(card.dataset.artistId);
+                const artistTracks = catalog.filter((t) => String(t.artistId) === artistId);
+                const artistInfo = artistMap.get(artistId);
+                this._showDownloadedArtistDetail(artistInfo, artistTracks);
             });
         });
     }
 
-    /** Render downloaded playlists. */
-    _renderDownloadedPlaylists(_catalog) {
+    /** Show a detail view of downloaded tracks from a specific artist */
+    _showDownloadedArtistDetail(artistInfo, tracks) {
+        const dlView = document.getElementById('library-downloaded-detail');
+        if (!dlView) return;
+
+        let detailEl = dlView.querySelector('#dl-artist-detail-overlay');
+        if (!detailEl) {
+            detailEl = document.createElement('div');
+            detailEl.id = 'dl-artist-detail-overlay';
+            detailEl.className = 'dl-detail-overlay';
+            detailEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            dlView.style.position = 'relative';
+            dlView.appendChild(detailEl);
+        }
+        detailEl.style.display = 'block';
+
+        const coverUrl = artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/logo.svg';
+        detailEl.innerHTML = `
+            <button class="dl-detail-back-btn" id="dl-artist-detail-back">
+                <span class="material-symbols-rounded">arrow_back</span> Back to Downloads
+            </button>
+            <div class="dl-detail-header">
+                <img class="dl-detail-cover artist-cover" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <div class="dl-detail-info">
+                    <div class="dl-detail-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
+                    <div class="dl-detail-meta">${tracks.length} downloaded track${tracks.length !== 1 ? 's' : ''}</div>
+                    <button class="dl-detail-play-btn" id="dl-artist-play-all">
+                        <span class="material-symbols-rounded">play_arrow</span> Play All
+                    </button>
+                </div>
+            </div>
+            <div class="dl-detail-tracks">
+                ${tracks.map((t, i) => {
+                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                    const dur = t.duration ? formatTime(t.duration) : '';
+                    return `
+                    <div class="dl-track-item" data-dl-detail-idx="${i}">
+                        <img class="dl-track-item-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <div class="dl-track-item-info">
+                            <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
+                            <div class="dl-track-item-meta">
+                                <span>${escapeHtml(t.artist || 'Unknown')}</span>
+                                ${t.album ? `<span class="dl-track-item-dot"></span><span>${escapeHtml(t.album)}</span>` : ''}
+                            </div>
+                        </div>
+                        <span class="dl-track-item-duration">${dur}</span>
+                    </div>`;
+                }).join('')}
+            </div>`;
+
+        // Back button
+        detailEl.querySelector('#dl-artist-detail-back')?.addEventListener('click', () => {
+            detailEl.style.display = 'none';
+        });
+
+        // Play all
+        const playerTracks = tracks.map((t) => ({
+            id: t.id, title: t.title,
+            artist: { name: t.artist, id: t.artistId },
+            album: { title: t.album, id: t.albumId, cover: t.cover },
+            duration: t.duration,
+        }));
+        detailEl.querySelector('#dl-artist-play-all')?.addEventListener('click', () => {
+            this.player.setQueue(playerTracks, 0);
+            this.player.playTrackFromQueue();
+        });
+
+        // Track clicks
+        detailEl.querySelectorAll('.dl-track-item[data-dl-detail-idx]').forEach((item) => {
+            item.addEventListener('click', () => {
+                const idx = parseInt(item.dataset.dlDetailIdx, 10);
+                this.player.setQueue(playerTracks, idx);
+                this.player.playTrackFromQueue();
+            });
+        });
+    }
+
+    /** Render downloaded playlists (grouped by playlistId if available). */
+    _renderDownloadedPlaylists(catalog) {
         const container = document.getElementById('downloaded-playlists-list');
         if (!container) return;
-        // Currently downloads only catalog individual tracks.
-        // We show a friendly placeholder for now.
-        container.innerHTML = this._dlEmptyState('queue_music', 'Coming soon', 'Playlist downloads will show here');
+
+        // Group by playlistId if tracks have one
+        const playlistMap = new Map();
+        catalog.forEach((t) => {
+            if (!t.playlistId) return;
+            const key = String(t.playlistId);
+            if (!playlistMap.has(key)) {
+                playlistMap.set(key, { id: t.playlistId, name: t.playlistName || 'Unknown Playlist', cover: t.cover, count: 0 });
+            }
+            playlistMap.get(key).count++;
+        });
+
+        const playlists = [...playlistMap.values()];
+        if (!playlists.length) {
+            container.innerHTML = this._dlEmptyState('queue_music', 'No playlists', 'Downloaded playlist tracks will appear here');
+            return;
+        }
+
+        container.innerHTML = `<div class="dl-albums-grid">${playlists.map((p) => {
+            const coverUrl = p.cover ? this.api.getCoverUrl(p.cover) : 'assets/logo.svg';
+            return `
+                <div class="dl-album-card" data-playlist-id="${p.id}">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                    <div class="dl-album-card-info">
+                        <div class="dl-album-card-title">${escapeHtml(p.name)}</div>
+                        <div class="dl-album-card-subtitle">${p.count} track${p.count !== 1 ? 's' : ''}</div>
+                    </div>
+                </div>`;
+        }).join('')}</div>`;
+
+        container.querySelectorAll('.dl-album-card[data-playlist-id]').forEach((card) => {
+            card.addEventListener('click', () => {
+                const pid = String(card.dataset.playlistId);
+                const pTracks = catalog.filter((t) => String(t.playlistId) === pid);
+                const pInfo = playlistMap.get(pid);
+                this._showDownloadedPlaylistDetail(pInfo, pTracks);
+            });
+        });
+    }
+
+    /** Show a detail view of downloaded tracks from a specific playlist */
+    _showDownloadedPlaylistDetail(playlistInfo, tracks) {
+        const dlView = document.getElementById('library-downloaded-detail');
+        if (!dlView) return;
+
+        let detailEl = dlView.querySelector('#dl-playlist-detail-overlay');
+        if (!detailEl) {
+            detailEl = document.createElement('div');
+            detailEl.id = 'dl-playlist-detail-overlay';
+            detailEl.className = 'dl-detail-overlay';
+            detailEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            dlView.style.position = 'relative';
+            dlView.appendChild(detailEl);
+        }
+        detailEl.style.display = 'block';
+
+        const coverUrl = playlistInfo?.cover ? this.api.getCoverUrl(playlistInfo.cover, '320') : 'assets/logo.svg';
+        detailEl.innerHTML = `
+            <button class="dl-detail-back-btn" id="dl-playlist-detail-back">
+                <span class="material-symbols-rounded">arrow_back</span> Back to Downloads
+            </button>
+            <div class="dl-detail-header">
+                <img class="dl-detail-cover" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <div class="dl-detail-info">
+                    <div class="dl-detail-title">${escapeHtml(playlistInfo?.name || 'Unknown Playlist')}</div>
+                    <div class="dl-detail-meta">${tracks.length} downloaded track${tracks.length !== 1 ? 's' : ''}</div>
+                    <button class="dl-detail-play-btn" id="dl-playlist-play-all">
+                        <span class="material-symbols-rounded">play_arrow</span> Play All
+                    </button>
+                </div>
+            </div>
+            <div class="dl-detail-tracks">
+                ${tracks.map((t, i) => {
+                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                    const dur = t.duration ? formatTime(t.duration) : '';
+                    return `
+                    <div class="dl-track-item" data-dl-detail-idx="${i}">
+                        <img class="dl-track-item-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <div class="dl-track-item-info">
+                            <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
+                            <div class="dl-track-item-meta">
+                                <span>${escapeHtml(t.artist || 'Unknown')}</span>
+                                ${t.album ? `<span class="dl-track-item-dot"></span><span>${escapeHtml(t.album)}</span>` : ''}
+                            </div>
+                        </div>
+                        <span class="dl-track-item-duration">${dur}</span>
+                    </div>`;
+                }).join('')}
+            </div>`;
+
+        detailEl.querySelector('#dl-playlist-detail-back')?.addEventListener('click', () => {
+            detailEl.style.display = 'none';
+        });
+
+        const playerTracks = tracks.map((t) => ({
+            id: t.id, title: t.title,
+            artist: { name: t.artist, id: t.artistId },
+            album: { title: t.album, id: t.albumId, cover: t.cover },
+            duration: t.duration,
+        }));
+        detailEl.querySelector('#dl-playlist-play-all')?.addEventListener('click', () => {
+            this.player.setQueue(playerTracks, 0);
+            this.player.playTrackFromQueue();
+        });
+
+        detailEl.querySelectorAll('.dl-track-item[data-dl-detail-idx]').forEach((item) => {
+            item.addEventListener('click', () => {
+                const idx = parseInt(item.dataset.dlDetailIdx, 10);
+                this.player.setQueue(playerTracks, idx);
+                this.player.playTrackFromQueue();
+            });
+        });
     }
 
     /** Reusable empty-state HTML for download tabs. */
@@ -2242,200 +2624,97 @@ export class UIRenderer {
         const signal = this.searchAbortController.signal;
 
         try {
-            // Fetch tracks, artists, albums, playlists, Last.fm popularity, AND AI intent in parallel
+            // ══════════════════════════════════════════════════════
+            //  CLEAN SEARCH: AI corrects query → search corrected
+            //  query → sort by raw popularity. That's it.
+            // ══════════════════════════════════════════════════════
+
+            // 1) Fire AI + original query searches in parallel
+            //    AI runs WITHOUT abort signal so it survives fast typing
             const aiSearchPromise = fetch('/api/ai-search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query }),
-                signal,
             }).then(r => r.ok ? r.json() : null).catch(() => null);
 
-            const [tracksResult, artistsResult, albumsResult, playlistsResult, lastFmTrackPop, lastFmArtistPop, aiResult] = await Promise.all([
+            const [tracksResult, artistsResult, albumsResult, playlistsResult, aiResult] = await Promise.all([
                 this.api.searchTracks(query, { signal }),
                 this.api.searchArtists(query, { signal }),
                 this.api.searchAlbums(query, { signal }),
                 this.api.searchPlaylists(query, { signal }),
-                this.api.getLastFmTrackPopularity(query, { signal }).catch(() => new Map()),
-                this.api.getLastFmArtistPopularity(query, { signal }).catch(() => new Map()),
                 aiSearchPromise,
             ]);
 
-            // Extract AI intent (if available)
             const aiIntent = aiResult?.intent || null;
-            console.log('[AI Search]', query, '→', aiIntent);
 
-            let finalTracks = tracksResult.items;
+            // #region agent log — AI intent
+            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:search:step1',message:'AI intent + original results',data:{query,aiIntent,tracks:tracksResult.items.length,artists:artistsResult.items.length,albums:albumsResult.items.length},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-AI'})}).catch(()=>{});
+            // #endregion
+
+            // 2) Collect original results into maps for dedup
+            const trackMap = new Map();
+            const artistMap = new Map();
+            const albumMap = new Map();
+
+            for (const t of tracksResult.items) trackMap.set(t.id, t);
+            for (const a of artistsResult.items) artistMap.set(a.id, a);
+            for (const a of albumsResult.items) albumMap.set(a.id, a);
+
+            // Also extract artists/albums from tracks
+            for (const t of tracksResult.items) {
+                if (t.artist && !artistMap.has(t.artist.id)) artistMap.set(t.artist.id, t.artist);
+                if (t.artists) t.artists.forEach(a => { if (a && !artistMap.has(a.id)) artistMap.set(a.id, a); });
+                if (t.album && !albumMap.has(t.album.id)) albumMap.set(t.album.id, t.album);
+            }
+
+            // 3) If AI identified a DIFFERENT query, do a SECONDARY search
+            //    e.g. user typed "justn" → AI says "Justin Bieber" → search "Justin Bieber"
+            //    e.g. user typed "graduation" → AI says artist:"Kanye West" title:"Graduation" → search "Kanye West Graduation"
+            let aiQuery = '';
+            if (aiIntent && aiIntent.confidence >= 50) {
+                const parts = [aiIntent.artist, aiIntent.title].filter(Boolean);
+                aiQuery = parts.join(' ').trim();
+            }
+
+            if (aiQuery && aiQuery.toLowerCase() !== query.toLowerCase()) {
+                try {
+                    const [aiTracks, aiArtists, aiAlbums] = await Promise.all([
+                        this.api.searchTracks(aiQuery, { signal }),
+                        this.api.searchArtists(aiQuery, { signal }),
+                        this.api.searchAlbums(aiQuery, { signal }),
+                    ]);
+                    for (const t of (aiTracks.items || [])) { if (!trackMap.has(t.id)) trackMap.set(t.id, t); }
+                    for (const a of (aiArtists.items || [])) { if (!artistMap.has(a.id)) artistMap.set(a.id, a); }
+                    for (const a of (aiAlbums.items || [])) { if (!albumMap.has(a.id)) albumMap.set(a.id, a); }
+                    // Extract artists/albums from AI tracks too
+                    for (const t of (aiTracks.items || [])) {
+                        if (t.artist && !artistMap.has(t.artist.id)) artistMap.set(t.artist.id, t.artist);
+                        if (t.artists) t.artists.forEach(a => { if (a && !artistMap.has(a.id)) artistMap.set(a.id, a); });
+                        if (t.album && !albumMap.has(t.album.id)) albumMap.set(t.album.id, t.album);
+                    }
+                } catch (e) { /* secondary search failed, continue */ }
+            }
+
+            let finalTracks = Array.from(trackMap.values());
+            let finalArtists = Array.from(artistMap.values());
+            let finalAlbums = Array.from(albumMap.values());
             let finalPlaylists = playlistsResult.items;
 
-            // Merge API search artists (with proper popularity) + track-extracted artists
-            const artistMap = new Map();
-            const artistTrackCount = new Map();
-            // API search artists first — they have real popularity data
-            for (const artist of artistsResult.items) {
-                artistMap.set(artist.id, artist);
-                artistTrackCount.set(artist.id, 0);
-            }
-            // Then add track-extracted artists (don't overwrite API artists with richer data)
-            finalTracks.forEach((track) => {
-                const addArtist = (artist) => {
-                    if (!artist) return;
-                    if (!artistMap.has(artist.id)) {
-                        artistMap.set(artist.id, artist);
-                        artistTrackCount.set(artist.id, 0);
-                    }
-                    artistTrackCount.set(artist.id, (artistTrackCount.get(artist.id) || 0) + 1);
-                };
-                addArtist(track.artist);
-                if (track.artists) track.artists.forEach(addArtist);
-            });
-            let finalArtists = Array.from(artistMap.values());
+            // #region agent log — after merge
+            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:search:step2',message:'After AI re-search merge',data:{query,aiQuery,aiIntent,tracks:finalTracks.length,artists:finalArtists.length,albums:finalAlbums.length,topAlbums:finalAlbums.slice(0,8).map(a=>({t:a.title,ar:a.artist?.name,p:a.popularity})),topArtists:finalArtists.slice(0,5).map(a=>({n:a.name,p:a.popularity}))},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-MERGE'})}).catch(()=>{});
+            // #endregion
 
-            // Merge API search albums (with proper popularity) + track-extracted albums
-            const albumMap = new Map();
-            // API search albums first — they have real popularity data
-            for (const album of albumsResult.items) {
-                albumMap.set(album.id, album);
-            }
-            // Then add track-extracted albums (don't overwrite API albums)
-            finalTracks.forEach((track) => {
-                if (track.album && !albumMap.has(track.album.id)) {
-                    albumMap.set(track.album.id, track.album);
-                }
-            });
-            let finalAlbums = Array.from(albumMap.values());
+            // 4) Sort EVERYTHING by raw popularity. Nothing else.
+            finalTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            finalArtists.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            finalAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            finalPlaylists.sort((a, b) => (b.numberOfTracks || 0) - (a.numberOfTracks || 0));
 
-            // ── Combined relevance + popularity scoring ──
-            const queryLower = query.toLowerCase();
+            // #region agent log — after sort
+            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:search:step3',message:'After popularity sort',data:{query,aiIntent,topTracks:finalTracks.slice(0,3).map(t=>({t:t.title,ar:t.artist?.name,p:t.popularity})),topAlbums:finalAlbums.slice(0,5).map(a=>({t:a.title,ar:a.artist?.name,p:a.popularity})),topArtists:finalArtists.slice(0,3).map(a=>({n:a.name,p:a.popularity}))},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-SORT'})}).catch(()=>{});
+            // #endregion
 
-            // ── AI Intent Boost: massive score bonus for items matching AI's interpretation ──
-            const _aiBoost = (name, artistName, type) => {
-                if (!aiIntent || !aiIntent.confidence || aiIntent.confidence < 40) return 0;
-                const n = (name || '').toLowerCase();
-                const a = (artistName || '').toLowerCase();
-                const aiArtist = (aiIntent.artist || '').toLowerCase();
-                const aiTitle = (aiIntent.title || '').toLowerCase();
-                const aiType = (aiIntent.type || '').toLowerCase();
-
-                let boost = 0;
-                const HUGE = 500; // Overwhelming boost to guarantee top placement
-
-                // If AI identified an artist and this item's artist matches
-                if (aiArtist && (a === aiArtist || n === aiArtist)) {
-                    boost += HUGE;
-                }
-                // If AI identified a title and this item's title matches
-                if (aiTitle && (n === aiTitle || n.includes(aiTitle) || aiTitle.includes(n))) {
-                    boost += HUGE;
-                }
-                // Extra boost if the type also matches what the AI predicted
-                if (aiType === type && boost > 0) {
-                    boost += 200;
-                }
-                // If artist matches but this isn't the identified title, partial boost
-                if (aiArtist && a === aiArtist && boost < HUGE) {
-                    boost += 150;
-                }
-
-                return Math.round(boost * (aiIntent.confidence / 100));
-            };
-
-            // Text relevance: how well does the name match the query?
-            const _textScore = (name) => {
-                if (!name) return 0;
-                const n = name.toLowerCase();
-                if (n === queryLower) return 100;
-                if (n.startsWith(queryLower)) return 80;
-                if (queryLower.startsWith(n)) return 70;
-                if (n.includes(queryLower)) return 60;
-                const words = n.split(/\s+/);
-                if (words.some(w => w === queryLower)) return 55;
-                if (words.some(w => w.startsWith(queryLower))) return 45;
-                // Fuzzy: check if all query chars appear in order (subsequence)
-                let qi = 0;
-                for (let ni = 0; ni < n.length && qi < queryLower.length; ni++) {
-                    if (n[ni] === queryLower[qi]) qi++;
-                }
-                if (qi === queryLower.length) return 20 + Math.round(15 * (queryLower.length / Math.max(n.length, 1)));
-                // Typo tolerance: check if any word shares most prefix chars with query
-                if (queryLower.length >= 3) {
-                    for (const w of words) {
-                        let m = 0;
-                        for (let i = 0; i < Math.min(w.length, queryLower.length); i++) {
-                            if (w[i] === queryLower[i]) m++; else break;
-                        }
-                        if (m >= queryLower.length - 1 && m >= 3) return 35;
-                    }
-                }
-                return 0;
-            };
-
-            // Normalize a popularity value into 0-200 range (popularity dominates over text match)
-            const _popNorm = (pop, maxPop) => maxPop > 0 ? Math.round((pop / maxPop) * 200) : 0;
-
-            // Get Last.fm listeners for a track
-            const _lastFmTrackListeners = (track) => {
-                const key = `${(track.title || '').toLowerCase()}|${(track.artist?.name || '').toLowerCase()}`;
-                return lastFmTrackPop.get(key) || 0;
-            };
-
-            // Get Last.fm listeners for an artist
-            const _lastFmArtistListeners = (artist) => {
-                return lastFmArtistPop.get((artist.name || '').toLowerCase()) || 0;
-            };
-
-            // Find max popularity values for normalization
-            const maxTrackPop = Math.max(...finalTracks.map(t => t.popularity || 0), 1);
-            const maxTrackFm = Math.max(...finalTracks.map(t => _lastFmTrackListeners(t)), 1);
-            const maxArtistFm = Math.max(...finalArtists.map(a => _lastFmArtistListeners(a)), 1);
-            const maxAlbumPop = Math.max(...finalAlbums.map(a => a.popularity || 0), 1);
-
-            // Sort tracks: AI boost + text relevance + API popularity + Last.fm popularity
-            finalTracks.sort((a, b) => {
-                const aiA = _aiBoost(a.title, a.artist?.name, 'track');
-                const aiB = _aiBoost(b.title, b.artist?.name, 'track');
-                const textA = Math.max(_textScore(a.title), _textScore(a.artist?.name));
-                const textB = Math.max(_textScore(b.title), _textScore(b.artist?.name));
-                const popA = _popNorm(a.popularity || 0, maxTrackPop) + _popNorm(_lastFmTrackListeners(a), maxTrackFm);
-                const popB = _popNorm(b.popularity || 0, maxTrackPop) + _popNorm(_lastFmTrackListeners(b), maxTrackFm);
-                return (aiB + textB + popB) - (aiA + textA + popA);
-            });
-
-            // Sort artists: AI boost + text relevance + API popularity + Last.fm popularity + track count proxy
-            const maxArtistPop = Math.max(...finalArtists.map(a => a.popularity || 0), 1);
-            const maxArtistTrackCount = Math.max(...finalArtists.map(a => artistTrackCount.get(a.id) || 0), 1);
-            finalArtists.sort((a, b) => {
-                const aiA = _aiBoost(a.name, a.name, 'artist');
-                const aiB = _aiBoost(b.name, b.name, 'artist');
-                const textA = _textScore(a.name);
-                const textB = _textScore(b.name);
-                const popA = _popNorm(a.popularity || 0, maxArtistPop) + _popNorm(_lastFmArtistListeners(a), maxArtistFm) + _popNorm(artistTrackCount.get(a.id) || 0, maxArtistTrackCount);
-                const popB = _popNorm(b.popularity || 0, maxArtistPop) + _popNorm(_lastFmArtistListeners(b), maxArtistFm) + _popNorm(artistTrackCount.get(b.id) || 0, maxArtistTrackCount);
-                return (aiB + textB + popB) - (aiA + textA + popA);
-            });
-
-            // Sort albums: AI boost + text relevance + API popularity
-            finalAlbums.sort((a, b) => {
-                const aiA = _aiBoost(a.title, a.artist?.name, 'album');
-                const aiB = _aiBoost(b.title, b.artist?.name, 'album');
-                const textA = Math.max(_textScore(a.title), _textScore(a.artist?.name));
-                const textB = Math.max(_textScore(b.title), _textScore(b.artist?.name));
-                const popA = _popNorm(a.popularity || 0, maxAlbumPop);
-                const popB = _popNorm(b.popularity || 0, maxAlbumPop);
-                return (aiB + textB + popB) - (aiA + textA + popA);
-            });
-
-            // Sort playlists: AI boost + text relevance + track count as popularity proxy
-            const maxPlTracks = Math.max(...finalPlaylists.map(p => p.numberOfTracks || 0), 1);
-            finalPlaylists.sort((a, b) => {
-                const aiA = _aiBoost(a.title || a.name, '', 'playlist');
-                const aiB = _aiBoost(b.title || b.name, '', 'playlist');
-                const textA = _textScore(a.title || a.name);
-                const textB = _textScore(b.title || b.name);
-                const popA = _popNorm(a.numberOfTracks || 0, maxPlTracks);
-                const popB = _popNorm(b.numberOfTracks || 0, maxPlTracks);
-                return (aiB + textB + popB) - (aiA + textA + popA);
-            });
-
+            // 5) Render each tab
             if (finalTracks.length) {
                 this.renderListWithTracks(tracksContainer, finalTracks, true);
             } else {
@@ -2445,64 +2724,33 @@ export class UIRenderer {
             artistsContainer.innerHTML = finalArtists.length
                 ? finalArtists.map((artist) => this.createArtistCardHTML(artist)).join('')
                 : createPlaceholder('No artists found.');
-
             finalArtists.forEach((artist) => {
                 const el = artistsContainer.querySelector(`[data-artist-id="${artist.id}"]`);
-                if (el) {
-                    trackDataStore.set(el, artist);
-                    this.updateLikeState(el, 'artist', artist.id);
-                }
+                if (el) { trackDataStore.set(el, artist); this.updateLikeState(el, 'artist', artist.id); }
             });
 
             albumsContainer.innerHTML = finalAlbums.length
                 ? finalAlbums.map((album) => this.createAlbumCardHTML(album)).join('')
                 : createPlaceholder('No albums found.');
-
             finalAlbums.forEach((album) => {
                 const el = albumsContainer.querySelector(`[data-album-id="${album.id}"]`);
-                if (el) {
-                    trackDataStore.set(el, album);
-                    this.updateLikeState(el, 'album', album.id);
-                }
+                if (el) { trackDataStore.set(el, album); this.updateLikeState(el, 'album', album.id); }
             });
 
             playlistsContainer.innerHTML = finalPlaylists.length
                 ? finalPlaylists.map((playlist) => this.createPlaylistCardHTML(playlist)).join('')
                 : createPlaceholder('No playlists found.');
-
             finalPlaylists.forEach((playlist) => {
                 const el = playlistsContainer.querySelector(`[data-playlist-id="${playlist.uuid}"]`);
-                if (el) {
-                    trackDataStore.set(el, playlist);
-                    this.updateLikeState(el, 'playlist', playlist.uuid);
-                }
+                if (el) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
             });
 
-            // ── Populate "All" tab: Top Result hero + mixed interleaved feed ──
-            // Build a unified scoring function that includes AI boost + popularity for "All" tab
-            const _combinedScore = (item, type) => {
-                let ai = 0, text = 0, pop = 0;
-                if (type === 'track') {
-                    ai = _aiBoost(item.title, item.artist?.name, 'track');
-                    text = Math.max(_textScore(item.title), _textScore(item.artist?.name));
-                    pop = _popNorm(item.popularity || 0, maxTrackPop) + _popNorm(_lastFmTrackListeners(item), maxTrackFm);
-                } else if (type === 'artist') {
-                    ai = _aiBoost(item.name, item.name, 'artist');
-                    text = _textScore(item.name);
-                    pop = _popNorm(item.popularity || 0, maxArtistPop) + _popNorm(_lastFmArtistListeners(item), maxArtistFm) + _popNorm(artistTrackCount.get(item.id) || 0, maxArtistTrackCount);
-                } else if (type === 'album') {
-                    ai = _aiBoost(item.title, item.artist?.name, 'album');
-                    text = Math.max(_textScore(item.title), _textScore(item.artist?.name));
-                    pop = _popNorm(item.popularity || 0, maxAlbumPop);
-                } else if (type === 'playlist') {
-                    ai = _aiBoost(item.title || item.name, '', 'playlist');
-                    text = _textScore(item.title || item.name);
-                    pop = _popNorm(item.numberOfTracks || 0, maxPlTracks);
-                }
-                return ai + text + pop;
+            // 6) "All" tab: simple popularity score, AI intent passed for top result pinning
+            const _popScore = (item, type) => {
+                return (type === 'playlist') ? (item.numberOfTracks || 0) : (item.popularity || 0);
             };
 
-            this._populateAllTab(query, _combinedScore, finalTracks, finalAlbums, finalArtists, finalPlaylists);
+            this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, aiIntent);
         } catch (error) {
             if (error.name === 'AbortError') return;
             console.error('Search failed:', error);
@@ -2517,18 +2765,65 @@ export class UIRenderer {
     // ═══════════════════════════════════════════════════════════════
     //  ALL TAB: Top Result hero card + mixed interleaved feed
     // ═══════════════════════════════════════════════════════════════
-    _populateAllTab(query, _score, tracks, albums, artists, playlists) {
-        const allContainer = document.getElementById('search-all-container');
-        if (!allContainer) return;
+    _populateAllTab(query, _score, tracks, albums, artists, playlists, aiIntent) {
+        // #region agent log — entry
+        fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab:ENTRY',message:'_populateAllTab called',data:{query,version:'clean-v2',aiIntent,trackCount:tracks.length,albumCount:albums.length,artistCount:artists.length,topAlbums:albums.slice(0,3).map(a=>({t:a.title,ar:a.artist?.name,p:a.popularity})),topArtists:artists.slice(0,3).map(a=>({n:a.name,p:a.popularity}))},timestamp:Date.now(),runId:'clean2',hypothesisId:'H-CACHE,H-AI-NULL'})}).catch(()=>{});
+        // #endregion
 
-        // ── Determine top result using combined relevance + popularity ──
-        const topCandidates = [
-            ...artists.slice(0, 3).map(a => ({ type: 'artist', item: a, score: _score(a, 'artist') })),
-            ...tracks.slice(0, 3).map(t => ({ type: 'track', item: t, score: _score(t, 'track') })),
-            ...albums.slice(0, 3).map(a => ({ type: 'album', item: a, score: _score(a, 'album') })),
-        ];
-        topCandidates.sort((a, b) => b.score - a.score);
-        const topResult = topCandidates[0] || null;
+        const allContainer = document.getElementById('search-all-container');
+        if (!allContainer) {
+            // #region agent log — no container
+            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab:NO_CONTAINER',message:'allContainer is null!',data:{query},timestamp:Date.now(),runId:'clean2',hypothesisId:'H-RENDER'})}).catch(()=>{});
+            // #endregion
+            return;
+        }
+
+        // ── Determine top result ──
+        // If AI has an intent, try to find the EXACT item AI identified and pin it
+        let topResult = null;
+
+        if (aiIntent && aiIntent.confidence >= 50) {
+            const aiArtist = (aiIntent.artist || '').toLowerCase();
+            const aiTitle = (aiIntent.title || '').toLowerCase();
+            const aiType = (aiIntent.type || '').toLowerCase();
+
+            // Try to find the AI's pick in our results
+            if (aiType === 'artist' && aiArtist) {
+                const match = artists.find(a => (a.name || '').toLowerCase() === aiArtist);
+                if (match) topResult = { type: 'artist', item: match, score: match.popularity || 0 };
+            } else if (aiType === 'album' && aiTitle) {
+                // Look for album matching title (and optionally artist)
+                let match = albums.find(a =>
+                    (a.title || '').toLowerCase() === aiTitle &&
+                    (!aiArtist || (a.artist?.name || '').toLowerCase() === aiArtist)
+                );
+                // Fallback: title contains
+                if (!match) match = albums.find(a => (a.title || '').toLowerCase().includes(aiTitle));
+                if (match) topResult = { type: 'album', item: match, score: match.popularity || 0 };
+            } else if (aiType === 'track' && aiTitle) {
+                let match = tracks.find(t =>
+                    (t.title || '').toLowerCase() === aiTitle &&
+                    (!aiArtist || (t.artist?.name || '').toLowerCase() === aiArtist)
+                );
+                if (!match) match = tracks.find(t => (t.title || '').toLowerCase().includes(aiTitle));
+                if (match) topResult = { type: 'track', item: match, score: match.popularity || 0 };
+            }
+        }
+
+        // Fallback: pick the most popular item across all categories
+        if (!topResult) {
+            const topCandidates = [
+                ...artists.slice(0, 3).map(a => ({ type: 'artist', item: a, score: _score(a, 'artist') })),
+                ...tracks.slice(0, 3).map(t => ({ type: 'track', item: t, score: _score(t, 'track') })),
+                ...albums.slice(0, 3).map(a => ({ type: 'album', item: a, score: _score(a, 'album') })),
+            ];
+            topCandidates.sort((a, b) => b.score - a.score);
+            topResult = topCandidates[0] || null;
+        }
+
+        // #region agent log — All tab top result
+        fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab',message:'All-tab top result',data:{query,aiIntent,topResultName:topResult?.item?.title||topResult?.item?.name,topResultType:topResult?.type,topResultScore:topResult?.score,usedAI:!!(aiIntent&&aiIntent.confidence>=50)},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-TOP'})}).catch(()=>{});
+        // #endregion
 
         let html = '';
 
@@ -2627,14 +2922,7 @@ export class UIRenderer {
             id: a.id, isRound: true,
         }));
 
-        // Add top 2 playlists
-        _addItems(playlists.slice(0, 4), 'playlist', p => p.uuid, p => ({
-            type: 'playlist', item: p,
-            title: escapeHtml(p.title || p.name || ''),
-            subtitle: `${p.numberOfTracks || 0} tracks`,
-            imgSrc: p.image || p.squareImage || '',
-            id: p.uuid, isRound: false,
-        }));
+        // Playlists excluded from All tab per user request
 
         // Sort all mixed items by their combined score (most popular first)
         mixedItems.sort((a, b) => b.score - a.score);
@@ -2656,6 +2944,10 @@ export class UIRenderer {
         }
 
         allContainer.innerHTML = html || createPlaceholder('No results found.');
+
+        // #region agent log — after render
+        fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab:RENDERED',message:'All tab HTML set',data:{query,htmlLength:html.length,mixedCount:mixedItems.length,topResultName:topResult?.item?.title||topResult?.item?.name,allContainerChildCount:allContainer.childElementCount,allContainerVisible:allContainer.offsetParent!==null,mixedItems:mixedItems.slice(0,6).map(m=>({type:m.type,title:m.title,score:m.score}))},timestamp:Date.now(),runId:'clean2',hypothesisId:'H-RENDER,H-CRASH'})}).catch(()=>{});
+        // #endregion
 
         // ── Wire up click events ──
         const topResultEl = allContainer.querySelector('.search-top-result');

@@ -455,7 +455,16 @@ kbd {
     /* Lumina deep shadow */
     transition: all var(--transition-normal) var(--ease-out-back);
     height: var(--player-bar-height-desktop);
-    animation: slide-up var(--transition-slow) var(--ease-out-back);
+}
+
+/* Slide-up entrance animation */
+@keyframes npb-slide-up {
+    from { transform: translateY(100%); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+}
+.now-playing-bar.npb-visible {
+    display: grid !important;
+    animation: npb-slide-up 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 :root[data-theme='light'] .now-playing-bar {
@@ -1244,24 +1253,29 @@ input[type='search']::-webkit-search-cancel-button {
     position: sticky;
     top: 0;
     z-index: 10;
-    background: rgba(10, 10, 10, 0.72);
-    backdrop-filter: blur(20px) saturate(1.6);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6);
-    padding: 0.5rem 0 0;
+    background: rgba(10, 10, 10, 0.78);
+    backdrop-filter: blur(24px) saturate(1.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    padding: 0.65rem 0 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 
 .library-toolbar-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.5rem;
 }
 
 .library-title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
     margin: 0;
+    background: linear-gradient(135deg, #fff 60%, rgba(255,255,255,0.6));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .library-header-actions {
@@ -1271,8 +1285,8 @@ input[type='search']::-webkit-search-cancel-button {
 }
 
 .library-icon-btn {
-    background: none;
-    border: none;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.06);
     color: var(--muted-foreground);
     cursor: pointer;
     width: 36px;
@@ -1280,12 +1294,16 @@ input[type='search']::-webkit-search-cancel-button {
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
-    transition: color var(--transition-fast), background var(--transition-fast);
+    border-radius: 10px;
+    transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease, border-color 0.2s ease;
 }
 .library-icon-btn:hover {
     color: var(--foreground);
-    background: rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.1);
+}
+.library-icon-btn:active {
+    transform: scale(0.92);
 }
 
 .library-icon-btn-sm {
@@ -1380,30 +1398,28 @@ input[type='search']::-webkit-search-cancel-button {
 
 .library-chip {
     background: none;
-    border: none;
-    color: rgba(255,255,255,0.35);
-    padding: 0.4rem 0.7rem;
-    border-radius: 0;
-    font-size: 0.82rem;
+    border: 1px solid transparent;
+    color: rgba(255,255,255,0.4);
+    padding: 0.35rem 0.85rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
     font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
     flex-shrink: 0;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
     position: relative;
-    transition: color 0.2s ease, transform 0.15s ease;
+    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
 }
-.library-chip:hover { color: rgba(255,255,255,0.7); }
+.library-chip:hover { color: rgba(255,255,255,0.75); background: rgba(255,255,255,0.04); }
 .library-chip:active { transform: scale(0.95); }
-.library-chip.active { color: #fff; font-weight: 700; }
-.library-chip.active::after {
-    content: '';
-    position: absolute;
-    bottom: -0.4rem; left: 15%; right: 15%;
-    height: 2.5px;
-    background: var(--primary, #6366f1);
-    border-radius: 2px;
+.library-chip.active {
+    color: #fff;
+    font-weight: 700;
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.12);
 }
+.library-chip.active::after { display: none; }
 
 /* --- Search bar --- */
 .library-search-bar {
@@ -1489,34 +1505,43 @@ input[type='search']::-webkit-search-cancel-button {
 .library-list-view {
     display: flex;
     flex-direction: column;
+    gap: 3px;
+    padding: 0.25rem 0;
 }
 
 .library-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0.25rem;
-    border-radius: 0.5rem;
+    gap: 0.9rem;
+    padding: 0.6rem 0.5rem;
+    border-radius: 14px;
     cursor: pointer;
     text-decoration: none;
     color: inherit;
-    transition: background var(--transition-fast);
+    transition: background 0.2s ease, transform 0.15s ease;
+    position: relative;
 }
-.library-row:hover { background: rgba(255,255,255,0.05); }
+.library-row:hover { background: rgba(255,255,255,0.045); }
+.library-row:active { transform: scale(0.985); }
 
 .library-row-thumb {
-    width: 48px;
-    height: 48px;
-    border-radius: 0.4rem;
+    width: 54px;
+    height: 54px;
+    border-radius: 12px;
     object-fit: cover;
     flex-shrink: 0;
     background: rgba(255,255,255,0.05);
+    box-shadow: 0 3px 12px rgba(0,0,0,0.2);
+    transition: box-shadow 0.2s ease;
+}
+.library-row:hover .library-row-thumb {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
 }
 .library-row-thumb.artist-thumb {
     border-radius: 50%;
 }
 .library-row-thumb.folder-thumb {
-    border-radius: 0.35rem;
+    border-radius: 12px;
 }
 
 .library-row-info {
@@ -1526,51 +1551,55 @@ input[type='search']::-webkit-search-cancel-button {
 
 .library-row-title {
     font-size: 0.88rem;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.3;
-}
-.library-row.pinned .library-row-title::before {
-    content: '';
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    background: var(--highlight, #1db954);
-    border-radius: 50%;
-    margin-right: 0.4rem;
-    vertical-align: middle;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
 }
 
 .library-row-subtitle {
-    font-size: 0.75rem;
+    font-size: 0.74rem;
     color: var(--muted-foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.3;
+    margin-top: 2px;
+    opacity: 0.8;
 }
 
 /* --- Grid-view --- */
 .library-grid-view {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 0.75rem;
+    gap: 0.85rem;
+    animation: dl-fade-in 0.25s ease;
 }
 .library-grid-view .library-row {
     flex-direction: column;
     align-items: stretch;
-    padding: 0.5rem;
+    padding: 0.6rem;
     text-align: center;
     gap: 0.5rem;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.library-grid-view .library-row:hover {
+    background: rgba(255,255,255,0.05);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2);
 }
 .library-grid-view .library-row-thumb {
     width: 100%;
     height: auto;
     aspect-ratio: 1;
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
 }
 .library-grid-view .library-row-thumb.artist-thumb {
     border-radius: 50%;
@@ -1583,6 +1612,12 @@ input[type='search']::-webkit-search-cancel-button {
 }
 .library-grid-view .library-row-subtitle {
     font-size: 0.7rem;
+}
+.library-grid-view .library-row-chevron {
+    display: none;
+}
+.library-grid-view .library-row--pinned {
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
 }
 
 /* --- Sub-views --- */
@@ -2560,9 +2595,9 @@ input[type='search']::-webkit-search-cancel-button {
 .dl-track-item {
     display: flex;
     align-items: center;
-    gap: 0.7rem;
-    padding: 0.55rem 0.45rem;
-    border-radius: 10px;
+    gap: 0.75rem;
+    padding: 0.6rem 0.5rem;
+    border-radius: 12px;
     cursor: pointer;
     transition: background 0.15s ease;
     position: relative;
@@ -2652,12 +2687,12 @@ input[type='search']::-webkit-search-cancel-button {
 .dl-albums-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.7rem;
-    padding: 0.15rem 0;
+    gap: 0.85rem;
+    padding: 0.25rem 0;
 }
 .dl-album-card {
-    background: rgba(255,255,255,0.03);
-    border-radius: 12px;
+    background: rgba(255,255,255,0.025);
+    border-radius: 16px;
     overflow: hidden;
     cursor: pointer;
     transition: transform 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
@@ -2665,8 +2700,9 @@ input[type='search']::-webkit-search-cancel-button {
 }
 .dl-album-card:hover {
     transform: translateY(-3px);
-    background: rgba(255,255,255,0.06);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    background: rgba(255,255,255,0.055);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    border-color: rgba(255,255,255,0.08);
 }
 .dl-album-card:active {
     transform: translateY(-1px) scale(0.98);
@@ -2679,7 +2715,7 @@ input[type='search']::-webkit-search-cancel-button {
     background: rgba(255,255,255,0.04);
 }
 .dl-album-card-info {
-    padding: 0.55rem 0.65rem 0.65rem;
+    padding: 0.6rem 0.7rem 0.7rem;
 }
 .dl-album-card-title {
     font-size: 0.82rem;
@@ -2689,7 +2725,7 @@ input[type='search']::-webkit-search-cancel-button {
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.3;
-    margin-bottom: 0.1rem;
+    margin-bottom: 0.15rem;
 }
 .dl-album-card-subtitle {
     font-size: 0.7rem;
@@ -2697,40 +2733,48 @@ input[type='search']::-webkit-search-cancel-button {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    opacity: 0.85;
 }
 
 /* Downloaded artist card */
 .dl-artists-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 0.75rem;
+    gap: 0.85rem;
     text-align: center;
-    padding: 0.15rem 0;
+    padding: 0.25rem 0;
 }
 .dl-artist-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.45rem;
     cursor: pointer;
-    padding: 0.65rem 0.35rem;
-    border-radius: 14px;
-    transition: background 0.15s ease, transform 0.15s ease;
+    padding: 0.7rem 0.35rem;
+    border-radius: 16px;
+    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    border: 1px solid transparent;
 }
 .dl-artist-card:hover {
     background: rgba(255,255,255,0.04);
-    transform: translateY(-2px);
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    border-color: rgba(255,255,255,0.05);
 }
 .dl-artist-card:active {
     transform: scale(0.97);
 }
 .dl-artist-card-avatar {
-    width: 68px;
-    height: 68px;
+    width: 72px;
+    height: 72px;
     border-radius: 50%;
     object-fit: cover;
     background: rgba(255,255,255,0.05);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    transition: box-shadow 0.2s ease;
+}
+.dl-artist-card:hover .dl-artist-card-avatar {
+    box-shadow: 0 6px 24px rgba(0,0,0,0.3);
 }
 .dl-artist-card-name {
     font-size: 0.78rem;
@@ -2745,6 +2789,7 @@ input[type='search']::-webkit-search-cancel-button {
 .dl-artist-card-count {
     font-size: 0.68rem;
     color: var(--muted-foreground);
+    opacity: 0.8;
 }
 
 /* Empty state */
@@ -2784,9 +2829,100 @@ input[type='search']::-webkit-search-cancel-button {
     line-height: 1.4;
 }
 
+/* ─── Downloaded Album/Artist Detail Sub-view ─── */
+.dl-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0 1rem;
+}
+.dl-detail-cover {
+    width: 100px;
+    height: 100px;
+    border-radius: 14px;
+    object-fit: cover;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+    flex-shrink: 0;
+}
+.dl-detail-cover.artist-cover {
+    border-radius: 50%;
+}
+.dl-detail-info {
+    flex: 1;
+    min-width: 0;
+}
+.dl-detail-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--foreground);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin-bottom: 0.2rem;
+}
+.dl-detail-meta {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    opacity: 0.85;
+}
+.dl-detail-play-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.6rem;
+    padding: 0.4rem 1rem;
+    border: none;
+    border-radius: 20px;
+    background: var(--primary, #6366f1);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.15s;
+}
+.dl-detail-play-btn:hover { opacity: 0.85; }
+.dl-detail-play-btn:active { transform: scale(0.95); }
+.dl-detail-play-btn .material-symbols-rounded {
+    font-size: 16px;
+}
+.dl-detail-tracks {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.dl-detail-back-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: none;
+    border: none;
+    color: var(--muted-foreground);
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 0.5rem 0;
+    transition: color 0.2s;
+}
+.dl-detail-back-btn:hover { color: var(--foreground); }
+.dl-detail-back-btn .material-symbols-rounded { font-size: 18px; }
+
+/* Detail overlay animation */
+.dl-detail-overlay {
+    animation: dl-slide-in 0.25s ease-out;
+}
+@keyframes dl-slide-in {
+    from { opacity: 0; transform: translateX(30px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
 /* Library row pinned sections (Liked/Downloads/Recent) */
 .library-row--pinned {
-    padding: 0.6rem 0.35rem;
+    padding: 0.65rem 0.55rem;
+    background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+    border: 1px solid rgba(255,255,255,0.04);
+    margin-bottom: 4px;
+}
+.library-row--pinned:hover {
+    background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%);
+    border-color: rgba(255,255,255,0.07);
 }
 .library-row[data-subview] {
     cursor: pointer;
@@ -2798,13 +2934,23 @@ input[type='search']::-webkit-search-cancel-button {
 
 /* Icon box used by pinned rows */
 .library-row-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 0.5rem;
+    width: 50px;
+    height: 50px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.25);
+    position: relative;
+    overflow: hidden;
+}
+.library-row-icon::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 60%);
+    pointer-events: none;
 }
 .library-row-icon--muted {
     background: rgba(255,255,255,0.06);
@@ -2817,12 +2963,13 @@ input[type='search']::-webkit-search-cancel-button {
 .library-row-chevron {
     font-size: 1.1rem;
     color: var(--muted-foreground);
-    opacity: 0.35;
-    transition: opacity 0.15s ease;
+    opacity: 0.3;
+    transition: opacity 0.2s ease, transform 0.2s ease;
     margin-left: auto;
 }
 .library-row:hover .library-row-chevron {
-    opacity: 0.65;
+    opacity: 0.6;
+    transform: translateX(2px);
 }
 
 .track-like-btn {
@@ -8005,10 +8152,18 @@ textarea:focus {
         color: var(--highlight, #fff);
     }
 
-    /* Hide tab bar when fullscreen or lyrics panel is open */
+    /* Slide-down animation for hiding tab bar */
+    @keyframes tab-bar-slide-down {
+        from { transform: translateY(0); opacity: 1; }
+        to   { transform: translateY(100%); opacity: 0; }
+    }
+
+    /* Hide tab bar when fullscreen, lyrics panel, admin, or now-playing is open */
     body.fullscreen-open .mobile-tab-bar,
-    body:has(#side-panel.active) .mobile-tab-bar {
-        display: none !important;
+    body:has(#side-panel.active) .mobile-tab-bar,
+    body.hide-tab-bar .mobile-tab-bar {
+        animation: tab-bar-slide-down 0.3s ease forwards;
+        pointer-events: none;
     }
 
     /* Push now-playing-bar above the tab bar on mobile */

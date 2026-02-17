@@ -314,6 +314,14 @@ export class Player {
         const trackArtistsHTML = getTrackArtistsHTML(track);
         const yearDisplay = getTrackYearDisplay(track);
 
+        // Show now-playing bar on first play (slide-up)
+        const npBar = document.querySelector('.now-playing-bar');
+        if (npBar && !npBar.classList.contains('npb-visible')) {
+            npBar.style.display = '';          // remove inline display:none
+            npBar.classList.add('npb-visible');
+            npBar.dataset.hasTrack = 'true';
+        }
+
         document.querySelector('.now-playing-bar .cover').src = this.api.getCoverUrl(track.album?.cover);
         document.querySelector('.now-playing-bar .title').innerHTML = `${trackTitle} ${createQualityBadgeHTML(track)}`;
         const albumEl = document.querySelector('.now-playing-bar .album');
