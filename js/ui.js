@@ -2242,15 +2242,27 @@ export class UIRenderer {
         const signal = this.searchAbortController.signal;
 
         try {
-            // Fetch tracks, artists, albums, playlists AND Last.fm popularity in parallel
-            const [tracksResult, artistsResult, albumsResult, playlistsResult, lastFmTrackPop, lastFmArtistPop] = await Promise.all([
+            // Fetch tracks, artists, albums, playlists, Last.fm popularity, AND AI intent in parallel
+            const aiSearchPromise = fetch('/api/ai-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+                signal,
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+            const [tracksResult, artistsResult, albumsResult, playlistsResult, lastFmTrackPop, lastFmArtistPop, aiResult] = await Promise.all([
                 this.api.searchTracks(query, { signal }),
                 this.api.searchArtists(query, { signal }),
                 this.api.searchAlbums(query, { signal }),
                 this.api.searchPlaylists(query, { signal }),
                 this.api.getLastFmTrackPopularity(query, { signal }).catch(() => new Map()),
                 this.api.getLastFmArtistPopularity(query, { signal }).catch(() => new Map()),
+                aiSearchPromise,
             ]);
+
+            // Extract AI intent (if available)
+            const aiIntent = aiResult?.intent || null;
+            console.log('[AI Search]', query, '→', aiIntent);
 
             let finalTracks = tracksResult.items;
             let finalPlaylists = playlistsResult.items;
@@ -2294,6 +2306,38 @@ export class UIRenderer {
 
             // ── Combined relevance + popularity scoring ──
             const queryLower = query.toLowerCase();
+
+            // ── AI Intent Boost: massive score bonus for items matching AI's interpretation ──
+            const _aiBoost = (name, artistName, type) => {
+                if (!aiIntent || !aiIntent.confidence || aiIntent.confidence < 40) return 0;
+                const n = (name || '').toLowerCase();
+                const a = (artistName || '').toLowerCase();
+                const aiArtist = (aiIntent.artist || '').toLowerCase();
+                const aiTitle = (aiIntent.title || '').toLowerCase();
+                const aiType = (aiIntent.type || '').toLowerCase();
+
+                let boost = 0;
+                const HUGE = 500; // Overwhelming boost to guarantee top placement
+
+                // If AI identified an artist and this item's artist matches
+                if (aiArtist && (a === aiArtist || n === aiArtist)) {
+                    boost += HUGE;
+                }
+                // If AI identified a title and this item's title matches
+                if (aiTitle && (n === aiTitle || n.includes(aiTitle) || aiTitle.includes(n))) {
+                    boost += HUGE;
+                }
+                // Extra boost if the type also matches what the AI predicted
+                if (aiType === type && boost > 0) {
+                    boost += 200;
+                }
+                // If artist matches but this isn't the identified title, partial boost
+                if (aiArtist && a === aiArtist && boost < HUGE) {
+                    boost += 150;
+                }
+
+                return Math.round(boost * (aiIntent.confidence / 100));
+            };
 
             // Text relevance: how well does the name match the query?
             const _textScore = (name) => {
@@ -2345,43 +2389,51 @@ export class UIRenderer {
             const maxArtistFm = Math.max(...finalArtists.map(a => _lastFmArtistListeners(a)), 1);
             const maxAlbumPop = Math.max(...finalAlbums.map(a => a.popularity || 0), 1);
 
-            // Sort tracks: text relevance (0-100) + API popularity (0-50) + Last.fm popularity (0-50) = max 200
+            // Sort tracks: AI boost + text relevance + API popularity + Last.fm popularity
             finalTracks.sort((a, b) => {
+                const aiA = _aiBoost(a.title, a.artist?.name, 'track');
+                const aiB = _aiBoost(b.title, b.artist?.name, 'track');
                 const textA = Math.max(_textScore(a.title), _textScore(a.artist?.name));
                 const textB = Math.max(_textScore(b.title), _textScore(b.artist?.name));
                 const popA = _popNorm(a.popularity || 0, maxTrackPop) + _popNorm(_lastFmTrackListeners(a), maxTrackFm);
                 const popB = _popNorm(b.popularity || 0, maxTrackPop) + _popNorm(_lastFmTrackListeners(b), maxTrackFm);
-                return (textB + popB) - (textA + popA);
+                return (aiB + textB + popB) - (aiA + textA + popA);
             });
 
-            // Sort artists: text relevance + API popularity + Last.fm popularity + track count proxy
+            // Sort artists: AI boost + text relevance + API popularity + Last.fm popularity + track count proxy
             const maxArtistPop = Math.max(...finalArtists.map(a => a.popularity || 0), 1);
             const maxArtistTrackCount = Math.max(...finalArtists.map(a => artistTrackCount.get(a.id) || 0), 1);
             finalArtists.sort((a, b) => {
+                const aiA = _aiBoost(a.name, a.name, 'artist');
+                const aiB = _aiBoost(b.name, b.name, 'artist');
                 const textA = _textScore(a.name);
                 const textB = _textScore(b.name);
                 const popA = _popNorm(a.popularity || 0, maxArtistPop) + _popNorm(_lastFmArtistListeners(a), maxArtistFm) + _popNorm(artistTrackCount.get(a.id) || 0, maxArtistTrackCount);
                 const popB = _popNorm(b.popularity || 0, maxArtistPop) + _popNorm(_lastFmArtistListeners(b), maxArtistFm) + _popNorm(artistTrackCount.get(b.id) || 0, maxArtistTrackCount);
-                return (textB + popB) - (textA + popA);
+                return (aiB + textB + popB) - (aiA + textA + popA);
             });
 
-            // Sort albums: text relevance + API popularity
+            // Sort albums: AI boost + text relevance + API popularity
             finalAlbums.sort((a, b) => {
+                const aiA = _aiBoost(a.title, a.artist?.name, 'album');
+                const aiB = _aiBoost(b.title, b.artist?.name, 'album');
                 const textA = Math.max(_textScore(a.title), _textScore(a.artist?.name));
                 const textB = Math.max(_textScore(b.title), _textScore(b.artist?.name));
                 const popA = _popNorm(a.popularity || 0, maxAlbumPop);
                 const popB = _popNorm(b.popularity || 0, maxAlbumPop);
-                return (textB + popB) - (textA + popA);
+                return (aiB + textB + popB) - (aiA + textA + popA);
             });
 
-            // Sort playlists: text relevance + track count as popularity proxy
+            // Sort playlists: AI boost + text relevance + track count as popularity proxy
             const maxPlTracks = Math.max(...finalPlaylists.map(p => p.numberOfTracks || 0), 1);
             finalPlaylists.sort((a, b) => {
+                const aiA = _aiBoost(a.title || a.name, '', 'playlist');
+                const aiB = _aiBoost(b.title || b.name, '', 'playlist');
                 const textA = _textScore(a.title || a.name);
                 const textB = _textScore(b.title || b.name);
                 const popA = _popNorm(a.numberOfTracks || 0, maxPlTracks);
                 const popB = _popNorm(b.numberOfTracks || 0, maxPlTracks);
-                return (textB + popB) - (textA + popA);
+                return (aiB + textB + popB) - (aiA + textA + popA);
             });
 
             if (finalTracks.length) {
@@ -2427,55 +2479,28 @@ export class UIRenderer {
             });
 
             // ── Populate "All" tab: Top Result hero + mixed interleaved feed ──
-            // Build a unified scoring function that includes popularity for "All" tab
+            // Build a unified scoring function that includes AI boost + popularity for "All" tab
             const _combinedScore = (item, type) => {
-                let text = 0, pop = 0;
+                let ai = 0, text = 0, pop = 0;
                 if (type === 'track') {
+                    ai = _aiBoost(item.title, item.artist?.name, 'track');
                     text = Math.max(_textScore(item.title), _textScore(item.artist?.name));
                     pop = _popNorm(item.popularity || 0, maxTrackPop) + _popNorm(_lastFmTrackListeners(item), maxTrackFm);
                 } else if (type === 'artist') {
+                    ai = _aiBoost(item.name, item.name, 'artist');
                     text = _textScore(item.name);
                     pop = _popNorm(item.popularity || 0, maxArtistPop) + _popNorm(_lastFmArtistListeners(item), maxArtistFm) + _popNorm(artistTrackCount.get(item.id) || 0, maxArtistTrackCount);
                 } else if (type === 'album') {
+                    ai = _aiBoost(item.title, item.artist?.name, 'album');
                     text = Math.max(_textScore(item.title), _textScore(item.artist?.name));
                     pop = _popNorm(item.popularity || 0, maxAlbumPop);
                 } else if (type === 'playlist') {
+                    ai = _aiBoost(item.title || item.name, '', 'playlist');
                     text = _textScore(item.title || item.name);
                     pop = _popNorm(item.numberOfTracks || 0, maxPlTracks);
                 }
-                return text + pop;
+                return ai + text + pop;
             };
-
-            // Debug: log top results with scores for verification
-            try {
-                const dbg = {
-                    query,
-                    topArtists: finalArtists.slice(0, 5).map(a => ({
-                        name: a.name, pop: a.popularity, lastfm: _lastFmArtistListeners(a),
-                        trackCount: artistTrackCount.get(a.id) || 0,
-                        textScore: _textScore(a.name), combined: _combinedScore(a, 'artist')
-                    })),
-                    topAlbums: finalAlbums.slice(0, 5).map(a => ({
-                        title: a.title, artist: a.artist?.name, pop: a.popularity,
-                        textScore: Math.max(_textScore(a.title), _textScore(a.artist?.name)),
-                        combined: _combinedScore(a, 'album')
-                    })),
-                    topTracks: finalTracks.slice(0, 3).map(t => ({
-                        title: t.title, artist: t.artist?.name, pop: t.popularity,
-                        lastfm: _lastFmTrackListeners(t),
-                        combined: _combinedScore(t, 'track')
-                    })),
-                    apiArtistCount: artistsResult.items.length,
-                    apiAlbumCount: albumsResult.items.length,
-                    lastFmArtistMapSize: lastFmArtistPop.size,
-                    lastFmTrackMapSize: lastFmTrackPop.size,
-                    maxes: { maxTrackPop, maxTrackFm, maxArtistFm, maxArtistPop, maxAlbumPop }
-                };
-                fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ts: Date.now(), event: 'search_scores', ...dbg })
-                }).catch(() => {});
-            } catch (_) {}
 
             this._populateAllTab(query, _combinedScore, finalTracks, finalAlbums, finalArtists, finalPlaylists);
         } catch (error) {

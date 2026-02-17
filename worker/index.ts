@@ -13,6 +13,7 @@ interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
+  AI: any; // Workers AI binding
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -465,6 +466,87 @@ async function handleDeleteAnnouncement(request: Request, env: Env): Promise<Res
   );
   if (!res.ok) return Response.json({ error: 'Delete failed' }, { status: 500, headers: CORS_HEADERS });
   return Response.json({ success: true }, { headers: CORS_HEADERS });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   AI SEARCH — Workers AI powered search intent resolution
+   ══════════════════════════════════════════════════════════════ */
+
+const AI_SYSTEM_PROMPT = `You are a music search assistant. Given a user's search query (which may contain typos, abbreviations, or slang), determine what they most likely mean.
+
+Return a JSON object with these fields:
+- "artist": the most likely artist name (full, correct spelling), or null
+- "title": the most likely song/album title (full, correct spelling), or null
+- "type": one of "artist", "album", "track", or "unknown"
+- "confidence": a number 0-100
+
+Examples:
+Query: "justn" → {"artist":"Justin Bieber","title":null,"type":"artist","confidence":95}
+Query: "graduation" → {"artist":"Kanye West","title":"Graduation","type":"album","confidence":90}
+Query: "ye" → {"artist":"Kanye West","title":null,"type":"artist","confidence":85}
+Query: "swag ii" → {"artist":"Justin Bieber","title":"Journals","type":"album","confidence":60}
+Query: "bohemian" → {"artist":"Queen","title":"Bohemian Rhapsody","type":"track","confidence":90}
+Query: "thriller" → {"artist":"Michael Jackson","title":"Thriller","type":"album","confidence":92}
+Query: "bad guy" → {"artist":"Billie Eilish","title":"bad guy","type":"track","confidence":90}
+Query: "donda" → {"artist":"Kanye West","title":"Donda","type":"album","confidence":95}
+
+ONLY return valid JSON. No explanation, no markdown, just the JSON object.`;
+
+async function handleAiSearch(request: Request, env: Env): Promise<Response> {
+  if (!env.AI) {
+    return Response.json(
+      { error: 'AI binding not configured' },
+      { status: 500, headers: CORS_HEADERS }
+    );
+  }
+
+  try {
+    const body: any = await request.json();
+    const query = (body.query || '').trim();
+    if (!query) {
+      return Response.json({ error: 'Missing query' }, { status: 400, headers: CORS_HEADERS });
+    }
+
+    // Build user prompt — include candidate context if provided
+    let userPrompt = `Query: "${query}"`;
+    if (body.candidates && body.candidates.length > 0) {
+      const candidateList = body.candidates
+        .slice(0, 15)
+        .map((c: any, i: number) => `${i + 1}. ${c.name}${c.artist ? ` by ${c.artist}` : ''} (${c.type})`)
+        .join('\n');
+      userPrompt += `\n\nSearch results found. Pick the best match or suggest the globally popular one:\n${candidateList}`;
+    }
+
+    const aiResponse: any = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: AI_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 150,
+      temperature: 0.1,
+    });
+
+    const text = (aiResponse.response || '').trim();
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        parsed = { artist: null, title: null, type: 'unknown', confidence: 0 };
+      }
+    }
+
+    return Response.json({ query, intent: parsed }, { headers: CORS_HEADERS });
+  } catch (err: any) {
+    console.error('AI search error:', err);
+    return Response.json(
+      { error: err.message || 'AI inference failed' },
+      { status: 500, headers: CORS_HEADERS }
+    );
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -966,6 +1048,11 @@ export default {
     }
 
     // ── Public API routes (no auth required) ──
+    if (url.pathname === '/api/ai-search') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      if (request.method === 'POST') return await handleAiSearch(request, env);
+      return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
+    }
     if (url.pathname === '/api/updates/check') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
       return await handleCheckUpdates(request, env);
