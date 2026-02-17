@@ -1915,13 +1915,11 @@ export class UIRenderer {
         });
     }
 
-    /** Show a detail view of downloaded tracks from a specific album */
+    /** Show a premium hero detail view of downloaded tracks from a specific album */
     _showDownloadedAlbumDetail(albumInfo, tracks) {
-        // Reuse the downloaded-tracks panel as a detail view
         const dlView = document.getElementById('library-downloaded-detail');
         if (!dlView) return;
 
-        // Create a detail overlay inside the downloads sub-view
         let detailEl = dlView.querySelector('#dl-album-detail-overlay');
         if (!detailEl) {
             detailEl = document.createElement('div');
@@ -1935,31 +1933,39 @@ export class UIRenderer {
 
         const coverUrl = albumInfo?.cover ? this.api.getCoverUrl(albumInfo.cover, '320') : 'assets/logo.svg';
         detailEl.innerHTML = `
-            <button class="dl-detail-back-btn" id="dl-album-detail-back">
-                <span class="material-symbols-rounded">arrow_back</span> Back to Downloads
-            </button>
-            <div class="dl-detail-header">
-                <img class="dl-detail-cover" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
-                <div class="dl-detail-info">
-                    <div class="dl-detail-title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</div>
-                    <div class="dl-detail-meta">${escapeHtml(albumInfo?.artist || 'Unknown')} · ${tracks.length} downloaded track${tracks.length !== 1 ? 's' : ''}</div>
+            <div class="dl-detail-nav">
+                <button class="dl-detail-nav-back" id="dl-album-detail-back">
+                    <span class="material-symbols-rounded">arrow_back</span>
+                </button>
+                <span class="dl-detail-nav-title">Downloads</span>
+            </div>
+            <div class="dl-detail-hero">
+                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <div class="dl-detail-hero-title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</div>
+                <div class="dl-detail-hero-meta">${escapeHtml(albumInfo?.artist || 'Unknown')} · ${tracks.length} track${tracks.length !== 1 ? 's' : ''}</div>
+                <div class="dl-detail-actions">
                     <button class="dl-detail-play-btn" id="dl-album-play-all">
                         <span class="material-symbols-rounded">play_arrow</span> Play All
                     </button>
+                    <button class="dl-detail-delete-btn" id="dl-album-delete">
+                        <span class="material-symbols-rounded">delete_outline</span> Delete
+                    </button>
                 </div>
             </div>
+            <div class="dl-detail-divider"></div>
             <div class="dl-detail-tracks">
                 ${tracks.map((t, i) => {
                     const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
                     const dur = t.duration ? formatTime(t.duration) : '';
                     return `
-                    <div class="dl-track-item" data-dl-detail-idx="${i}">
-                        <img class="dl-track-item-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
-                        <div class="dl-track-item-info">
-                            <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
-                            <div class="dl-track-item-meta"><span>${escapeHtml(t.artist || 'Unknown')}</span></div>
+                    <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
+                        <span class="dl-track-number">${i + 1}</span>
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <div class="dl-detail-track-info">
+                            <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
+                            <div class="dl-detail-track-meta">${escapeHtml(t.artist || 'Unknown')}</div>
                         </div>
-                        <span class="dl-track-item-duration">${dur}</span>
+                        <span class="dl-detail-track-duration">${dur}</span>
                     </div>`;
                 }).join('')}
             </div>`;
@@ -1981,8 +1987,23 @@ export class UIRenderer {
             this.player.playTrackFromQueue();
         });
 
+        // Delete album with confirmation
+        detailEl.querySelector('#dl-album-delete')?.addEventListener('click', () => {
+            this._showDeleteConfirmation(albumInfo?.title || 'this album', async () => {
+                const removed = removeAlbumFromDownloadedCatalog(albumInfo?.id);
+                if (removed && removed.length) {
+                    for (const t of removed) {
+                        try { await db.removeCachedTrack(t.id); } catch (_) { /* skip */ }
+                    }
+                }
+                showNotification('Album deleted from downloads');
+                detailEl.style.display = 'none';
+                this._populateDownloads();
+            });
+        });
+
         // Track clicks
-        detailEl.querySelectorAll('.dl-track-item[data-dl-detail-idx]').forEach((item) => {
+        detailEl.querySelectorAll('.dl-detail-track-item[data-dl-detail-idx]').forEach((item) => {
             item.addEventListener('click', () => {
                 const idx = parseInt(item.dataset.dlDetailIdx, 10);
                 this.player.setQueue(playerTracks, idx);
@@ -2034,7 +2055,7 @@ export class UIRenderer {
         });
     }
 
-    /** Show a detail view of downloaded tracks from a specific artist */
+    /** Show a premium hero detail view of downloaded tracks from a specific artist */
     _showDownloadedArtistDetail(artistInfo, tracks) {
         const dlView = document.getElementById('library-downloaded-detail');
         if (!dlView) return;
@@ -2052,34 +2073,38 @@ export class UIRenderer {
 
         const coverUrl = artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/logo.svg';
         detailEl.innerHTML = `
-            <button class="dl-detail-back-btn" id="dl-artist-detail-back">
-                <span class="material-symbols-rounded">arrow_back</span> Back to Downloads
-            </button>
-            <div class="dl-detail-header">
-                <img class="dl-detail-cover artist-cover" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
-                <div class="dl-detail-info">
-                    <div class="dl-detail-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
-                    <div class="dl-detail-meta">${tracks.length} downloaded track${tracks.length !== 1 ? 's' : ''}</div>
+            <div class="dl-detail-nav">
+                <button class="dl-detail-nav-back" id="dl-artist-detail-back">
+                    <span class="material-symbols-rounded">arrow_back</span>
+                </button>
+                <span class="dl-detail-nav-title">Downloads</span>
+            </div>
+            <div class="dl-detail-hero dl-detail-hero--artist">
+                <img class="dl-detail-cover-lg dl-detail-cover--round" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <div class="dl-detail-hero-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
+                <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
+                <div class="dl-detail-actions">
                     <button class="dl-detail-play-btn" id="dl-artist-play-all">
                         <span class="material-symbols-rounded">play_arrow</span> Play All
                     </button>
                 </div>
             </div>
+            <div class="dl-detail-divider"></div>
             <div class="dl-detail-tracks">
                 ${tracks.map((t, i) => {
                     const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
                     const dur = t.duration ? formatTime(t.duration) : '';
                     return `
-                    <div class="dl-track-item" data-dl-detail-idx="${i}">
-                        <img class="dl-track-item-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
-                        <div class="dl-track-item-info">
-                            <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
-                            <div class="dl-track-item-meta">
-                                <span>${escapeHtml(t.artist || 'Unknown')}</span>
-                                ${t.album ? `<span class="dl-track-item-dot"></span><span>${escapeHtml(t.album)}</span>` : ''}
+                    <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
+                        <span class="dl-track-number">${i + 1}</span>
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <div class="dl-detail-track-info">
+                            <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
+                            <div class="dl-detail-track-meta">
+                                ${escapeHtml(t.artist || 'Unknown')}${t.album ? ` · ${escapeHtml(t.album)}` : ''}
                             </div>
                         </div>
-                        <span class="dl-track-item-duration">${dur}</span>
+                        <span class="dl-detail-track-duration">${dur}</span>
                     </div>`;
                 }).join('')}
             </div>`;
@@ -2102,7 +2127,7 @@ export class UIRenderer {
         });
 
         // Track clicks
-        detailEl.querySelectorAll('.dl-track-item[data-dl-detail-idx]').forEach((item) => {
+        detailEl.querySelectorAll('.dl-detail-track-item[data-dl-detail-idx]').forEach((item) => {
             item.addEventListener('click', () => {
                 const idx = parseInt(item.dataset.dlDetailIdx, 10);
                 this.player.setQueue(playerTracks, idx);
@@ -2173,34 +2198,38 @@ export class UIRenderer {
 
         const coverUrl = playlistInfo?.cover ? this.api.getCoverUrl(playlistInfo.cover, '320') : 'assets/logo.svg';
         detailEl.innerHTML = `
-            <button class="dl-detail-back-btn" id="dl-playlist-detail-back">
-                <span class="material-symbols-rounded">arrow_back</span> Back to Downloads
-            </button>
-            <div class="dl-detail-header">
-                <img class="dl-detail-cover" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
-                <div class="dl-detail-info">
-                    <div class="dl-detail-title">${escapeHtml(playlistInfo?.name || 'Unknown Playlist')}</div>
-                    <div class="dl-detail-meta">${tracks.length} downloaded track${tracks.length !== 1 ? 's' : ''}</div>
+            <div class="dl-detail-nav">
+                <button class="dl-detail-nav-back" id="dl-playlist-detail-back">
+                    <span class="material-symbols-rounded">arrow_back</span>
+                </button>
+                <span class="dl-detail-nav-title">Downloads</span>
+            </div>
+            <div class="dl-detail-hero">
+                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <div class="dl-detail-hero-title">${escapeHtml(playlistInfo?.name || 'Unknown Playlist')}</div>
+                <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
+                <div class="dl-detail-actions">
                     <button class="dl-detail-play-btn" id="dl-playlist-play-all">
                         <span class="material-symbols-rounded">play_arrow</span> Play All
                     </button>
                 </div>
             </div>
+            <div class="dl-detail-divider"></div>
             <div class="dl-detail-tracks">
                 ${tracks.map((t, i) => {
                     const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
                     const dur = t.duration ? formatTime(t.duration) : '';
                     return `
-                    <div class="dl-track-item" data-dl-detail-idx="${i}">
-                        <img class="dl-track-item-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
-                        <div class="dl-track-item-info">
-                            <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
-                            <div class="dl-track-item-meta">
-                                <span>${escapeHtml(t.artist || 'Unknown')}</span>
-                                ${t.album ? `<span class="dl-track-item-dot"></span><span>${escapeHtml(t.album)}</span>` : ''}
+                    <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
+                        <span class="dl-track-number">${i + 1}</span>
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <div class="dl-detail-track-info">
+                            <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
+                            <div class="dl-detail-track-meta">
+                                ${escapeHtml(t.artist || 'Unknown')}${t.album ? ` · ${escapeHtml(t.album)}` : ''}
                             </div>
                         </div>
-                        <span class="dl-track-item-duration">${dur}</span>
+                        <span class="dl-detail-track-duration">${dur}</span>
                     </div>`;
                 }).join('')}
             </div>`;
@@ -2220,7 +2249,7 @@ export class UIRenderer {
             this.player.playTrackFromQueue();
         });
 
-        detailEl.querySelectorAll('.dl-track-item[data-dl-detail-idx]').forEach((item) => {
+        detailEl.querySelectorAll('.dl-detail-track-item[data-dl-detail-idx]').forEach((item) => {
             item.addEventListener('click', () => {
                 const idx = parseInt(item.dataset.dlDetailIdx, 10);
                 this.player.setQueue(playerTracks, idx);
@@ -2237,6 +2266,46 @@ export class UIRenderer {
                 <div class="dl-empty-title">${title}</div>
                 <div class="dl-empty-subtitle">${subtitle}</div>
             </div>`;
+    }
+
+    /** Shows a premium confirmation modal before destructive actions */
+    _showDeleteConfirmation(itemName, onConfirm) {
+        // Remove any existing modal
+        document.querySelector('.dl-delete-modal-backdrop')?.remove();
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'dl-delete-modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="dl-delete-modal">
+                <div class="dl-delete-modal-icon">
+                    <span class="material-symbols-rounded">warning</span>
+                </div>
+                <div class="dl-delete-modal-title">Delete download?</div>
+                <div class="dl-delete-modal-text">
+                    Are you sure you want to remove <strong>${escapeHtml(itemName)}</strong> from your downloads? This will free up storage but remove offline access.
+                </div>
+                <div class="dl-delete-modal-actions">
+                    <button class="dl-delete-modal-cancel">Cancel</button>
+                    <button class="dl-delete-modal-confirm">Delete</button>
+                </div>
+            </div>`;
+
+        document.body.appendChild(backdrop);
+
+        // Animate in
+        requestAnimationFrame(() => backdrop.classList.add('dl-delete-modal-backdrop--visible'));
+
+        const close = () => {
+            backdrop.classList.remove('dl-delete-modal-backdrop--visible');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.querySelector('.dl-delete-modal-cancel').addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        backdrop.querySelector('.dl-delete-modal-confirm').addEventListener('click', () => {
+            close();
+            onConfirm();
+        });
     }
 
     async _showWrappedBannerIfAvailable() {
