@@ -601,10 +601,23 @@ const syncManager = {
 
     /** Log a listening event to the listening_events table for trending/analytics */
     async logListeningEvent(track) {
-        if (!supabase) return;
         const user = authManager.user;
         if (!user) return;
 
+        // Import offline sync manager dynamically to avoid circular deps
+        const { offlineSync } = await import('../offlineSync.js');
+        
+        // Check if online
+        const isOnline = await offlineSync.checkOnline();
+        
+        if (!isOnline) {
+            // Queue for offline sync
+            await offlineSync.queueListeningEvent(track);
+            return;
+        }
+
+        // Try direct insert if online
+        if (!supabase) return;
         try {
             const artistName = Array.isArray(track.artists)
                 ? track.artists[0]?.name || 'Unknown'
@@ -622,11 +635,14 @@ const syncManager = {
             });
 
             if (error) {
-                console.warn('[Supabase] Failed to log listening event:', error.message);
+                // If insert fails, queue for retry
+                console.warn('[Supabase] Failed to log listening event, queuing:', error.message);
+                await offlineSync.queueListeningEvent(track);
             }
         } catch (e) {
-            // Non-critical, don't break playback
-            console.warn('[Supabase] Listening event error:', e);
+            // Network error or other issue — queue for offline sync
+            console.warn('[Supabase] Listening event error, queuing:', e);
+            await offlineSync.queueListeningEvent(track);
         }
     },
     /** Fetch global trending data from listening_events (all users) */

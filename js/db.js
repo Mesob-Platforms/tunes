@@ -1,7 +1,7 @@
 export class MusicDatabase {
     constructor() {
         this.dbName = 'MonochromeDB';
-        this.version = 11;
+        this.version = 12; // Bumped for offline_events store
         this.db = null;
     }
 
@@ -71,6 +71,13 @@ export class MusicDatabase {
                 // Cached lyrics for offline access
                 if (!db.objectStoreNames.contains('cached_lyrics')) {
                     db.createObjectStore('cached_lyrics', { keyPath: 'id' });
+                }
+                // Offline event queue — stores events to sync when online
+                if (!db.objectStoreNames.contains('offline_events')) {
+                    const store = db.createObjectStore('offline_events', { keyPath: 'id', autoIncrement: true });
+                    store.createIndex('eventType', 'eventType', { unique: false });
+                    store.createIndex('createdAt', 'createdAt', { unique: false });
+                    store.createIndex('synced', 'synced', { unique: false });
                 }
             };
         });
@@ -932,6 +939,87 @@ export class MusicDatabase {
         await this.performTransaction('cached_lyrics', 'readwrite', (store) =>
             store.delete(String(trackId))
         );
+    }
+
+    /* ── Offline Event Queue ────────────────────────────────────── */
+
+    /**
+     * Queue an event to be synced when online.
+     * @param {string} eventType - 'listening_event' | 'track_event' | 'scrobble'
+     * @param {object} eventData - The event payload
+     * @returns {Promise<number>} The queued event ID
+     */
+    async queueOfflineEvent(eventType, eventData) {
+        const event = {
+            eventType,
+            eventData,
+            createdAt: Date.now(),
+            synced: false,
+        };
+        return await this.performTransaction('offline_events', 'readwrite', (store) =>
+            store.add(event)
+        );
+    }
+
+    /**
+     * Get all unsynced events.
+     * @returns {Promise<Array>} Array of unsynced events
+     */
+    async getUnsyncedEvents() {
+        const db = await this._getValidDb();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction('offline_events', 'readonly');
+            const store = transaction.objectStore('offline_events');
+            const index = store.index('synced');
+            const request = index.getAll(false); // Get all where synced = false
+
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    /**
+     * Mark an event as synced (or delete it).
+     * @param {number} eventId - The event ID
+     */
+    async markEventSynced(eventId) {
+        await this.performTransaction('offline_events', 'readwrite', (store) =>
+            store.delete(eventId)
+        );
+    }
+
+    /**
+     * Get count of unsynced events.
+     * @returns {Promise<number>} Count of pending events
+     */
+    async getUnsyncedEventCount() {
+        const events = await this.getUnsyncedEvents();
+        return events.length;
+    }
+
+    /**
+     * Clear all synced events (cleanup old data).
+     * Keeps only unsynced events.
+     */
+    async clearSyncedEvents() {
+        const db = await this._getValidDb();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction('offline_events', 'readwrite');
+            const store = transaction.objectStore('offline_events');
+            const index = store.index('synced');
+            const request = index.openCursor(true); // Get all where synced = true
+
+            request.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    cursor.delete();
+                    cursor.continue();
+                } else {
+                    resolve();
+                }
+            };
+            request.onerror = () => reject(request.error);
+        });
     }
 }
 

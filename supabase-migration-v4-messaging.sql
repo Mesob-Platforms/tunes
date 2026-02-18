@@ -50,6 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_admin_tracking_item
     ON admin_tracking (item_type, item_id, event_type);
 
 -- ─── UPDATE RPC: get_active_updates ────────────────────────
+-- Drop old version first (return type changed: target_versions → category)
+DROP FUNCTION IF EXISTS get_active_updates(TEXT);
 -- No longer filters by version; returns category instead
 CREATE OR REPLACE FUNCTION get_active_updates(app_version TEXT DEFAULT NULL)
 RETURNS TABLE (
@@ -72,6 +74,8 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ─── UPDATE RPC: get_active_announcements ──────────────────
+-- Drop old version first (return type changed: added body, tag, type, gradients, cta_buttons, frequency)
+DROP FUNCTION IF EXISTS get_active_announcements();
 -- Returns new fields; no starts_at filter (starts immediately)
 CREATE OR REPLACE FUNCTION get_active_announcements()
 RETURNS TABLE (
@@ -103,6 +107,8 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ─── UPDATE RPC: admin_list_updates ────────────────────────
+-- Drop old version first (return type changed: target_versions → category)
+DROP FUNCTION IF EXISTS admin_list_updates();
 CREATE OR REPLACE FUNCTION admin_list_updates()
 RETURNS TABLE (
     id BIGINT,
@@ -119,6 +125,8 @@ RETURNS TABLE (
 $$ LANGUAGE sql SECURITY DEFINER;
 
 -- ─── UPDATE RPC: admin_list_announcements ──────────────────
+-- Drop old version first (return type changed: added body, tag, type, gradients, cta_buttons, frequency)
+DROP FUNCTION IF EXISTS admin_list_announcements();
 CREATE OR REPLACE FUNCTION admin_list_announcements()
 RETURNS TABLE (
     id BIGINT,

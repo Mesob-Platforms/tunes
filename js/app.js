@@ -1658,15 +1658,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    window.addEventListener('online', () => {
+    window.addEventListener('online', async () => {
         hideOfflineNotification();
         console.log('Back online');
+        
+        // Sync pending offline events
+        const { offlineSync } = await import('./offlineSync.js');
+        offlineSync.syncPendingEvents();
     });
 
     window.addEventListener('offline', () => {
         showOfflineNotification();
         console.log('Gone offline');
     });
+
+    // Initialize offline sync and start periodic sync
+    (async () => {
+        const { offlineSync } = await import('./offlineSync.js');
+        offlineSync.startPeriodicSync();
+        // Sync any pending events on startup
+        if (navigator.onLine) {
+            setTimeout(() => offlineSync.syncPendingEvents(), 2000); // Wait 2s for auth to settle
+        }
+    })();
 
     document.querySelector('.now-playing-bar .play-pause-btn').innerHTML = SVG_PLAY;
 
@@ -1913,9 +1927,9 @@ async function _initUpdateNotificationBar() {
         bar.innerHTML = `
             <div class="tunes-update-inner">
                 <span class="tunes-update-icon">${icon}</span>
-                <span class="tunes-update-text">${_esc(latest.title)}</span>
+                    <span class="tunes-update-text">${_esc(latest.title)}</span>
                 ${count > 1 ? `<span class="tunes-update-badge">${count}</span>` : ''}
-                <span class="tunes-update-arrow">→</span>
+                    <span class="tunes-update-arrow">→</span>
             </div>
         `;
 
@@ -2082,11 +2096,17 @@ function _markAnnouncementSeen(ann) {
     if (freq === 'once_per_session') sessionStorage.setItem(key, '1');
 }
 
+// Global store for announcement data (used by modal)
+const _annDataMap = new Map();
+
 async function _initAnnouncementBanners() {
     try {
         const res = await fetch('/api/announcements/active');
         const announcements = await res.json();
         if (!Array.isArray(announcements) || announcements.length === 0) return;
+
+        // Store data for modal access
+        announcements.forEach(a => _annDataMap.set(String(a.id), a));
 
         // Filter by frequency cap
         const visible = announcements.filter(a => _shouldShowAnnouncement(a));
@@ -2109,13 +2129,25 @@ async function _initAnnouncementBanners() {
         // Track impressions for each visible announcement
         visible.forEach(a => _trackEvent('announcement', a.id, 'impression'));
 
-        // Wire CTA click tracking
+        // Wire CTA click tracking + card click → fullscreen modal
         document.querySelectorAll('[data-ann-id]').forEach(el => {
             if (el.tagName === 'A' || el.classList.contains('tunes-ann-cta-btn') || el.classList.contains('tunes-ann-compact-link')) {
-                el.addEventListener('click', () => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
                     _trackEvent('announcement', el.getAttribute('data-ann-id'), 'click');
                 });
             }
+        });
+
+        // Wire card body click → open fullscreen modal
+        document.querySelectorAll('.tunes-ann-card').forEach(card => {
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', (e) => {
+                // Don't open modal if clicking a CTA link
+                if (e.target.closest('a')) return;
+                const annId = card.getAttribute('data-ann-id');
+                _openAnnouncementModal(annId);
+            });
         });
 
     } catch (e) {
@@ -2144,7 +2176,7 @@ function _buildAnnouncementBanner(ann, compact = false) {
 
     if (compact) {
         // Sidebar compact variant
-        return `
+    return `
             <div class="tunes-ann-card compact" data-ann-id="${ann.id}"
                  style="--ann-gs:${gs};--ann-ge:${ge};">
                 <div class="tunes-ann-card-glow"></div>
@@ -2156,7 +2188,7 @@ function _buildAnnouncementBanner(ann, compact = false) {
                     : ann.link ?
                         `<a href="${_esc(ann.link)}" target="_blank" rel="noopener" class="tunes-ann-compact-link" data-ann-id="${ann.id}">Go →</a>`
                     : ''}
-                </div>
+            </div>
             </div>
         `;
     }
@@ -2187,6 +2219,111 @@ function _setAnnouncementSlot(elementId, html) {
     if (!el) return;
     el.innerHTML = html;
     el.style.display = html ? '' : 'none';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ANNOUNCEMENT FULLSCREEN MODAL
+   ══════════════════════════════════════════════════════════════ */
+function _openAnnouncementModal(annId) {
+    const ann = _annDataMap.get(String(annId));
+    if (!ann) return;
+
+    // Remove existing modal if any
+    const old = document.getElementById('ann-modal-overlay');
+    if (old) old.remove();
+
+    const gs = ann.gradient_start || '#a855f7';
+    const ge = ann.gradient_end || '#ec4899';
+    const tag = _esc(ann.tag || 'NEW');
+    const typeLabel = (ann.type || 'announcement').toUpperCase();
+
+    // CTA buttons
+    let ctaHTML = '';
+    const buttons = Array.isArray(ann.cta_buttons) ? ann.cta_buttons.slice(0, 3) : [];
+    if (buttons.length > 0) {
+        ctaHTML = buttons.map((b, i) =>
+            `<a href="${_esc(b.url || '#')}" target="_blank" rel="noopener"
+                class="ann-modal-cta${i === 0 ? ' primary' : ''}"
+                style="--ann-gs:${gs};--ann-ge:${ge};"
+                data-ann-id="${ann.id}">${_esc(b.text || 'Learn more')}</a>`
+        ).join('');
+    } else if (ann.link) {
+        ctaHTML = `<a href="${_esc(ann.link)}" target="_blank" rel="noopener"
+            class="ann-modal-cta primary"
+            style="--ann-gs:${gs};--ann-ge:${ge};"
+            data-ann-id="${ann.id}">Learn more →</a>`;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ann-modal-overlay';
+    overlay.style.cssText = `--ann-gs:${gs};--ann-ge:${ge};`;
+    overlay.innerHTML = `
+        <div class="ann-modal-backdrop"></div>
+        <div class="ann-modal-container">
+            <!-- Close button -->
+            <button class="ann-modal-close" aria-label="Close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+
+            <!-- Hero image area -->
+            ${ann.image_url ? `
+            <div class="ann-modal-hero">
+                <img src="${_esc(ann.image_url)}" alt="" class="ann-modal-hero-img" />
+                <div class="ann-modal-hero-fade"></div>
+                <div class="ann-modal-hero-glow"></div>
+            </div>
+            ` : `
+            <div class="ann-modal-hero no-img">
+                <div class="ann-modal-hero-gradient" style="background:linear-gradient(135deg,${gs},${ge});"></div>
+                <div class="ann-modal-hero-fade"></div>
+                <div class="ann-modal-hero-pattern"></div>
+            </div>
+            `}
+
+            <!-- Content -->
+            <div class="ann-modal-content">
+                <div class="ann-modal-meta">
+                    <span class="ann-modal-tag" style="background:linear-gradient(135deg,${gs},${ge});">${tag}</span>
+                    <span class="ann-modal-type">${typeLabel}</span>
+                    ${ann.created_at ? `<span class="ann-modal-date">${new Date(ann.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>` : ''}
+                </div>
+                <h2 class="ann-modal-title">${_esc(ann.title)}</h2>
+                ${ann.body ? `<p class="ann-modal-body">${_esc(ann.body)}</p>` : ''}
+                ${ctaHTML ? `<div class="ann-modal-ctas">${ctaHTML}</div>` : ''}
+            </div>
+
+            <!-- Bottom gradient accent -->
+            <div class="ann-modal-bottom-bar" style="background:linear-gradient(90deg,${gs},${ge});"></div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Animate in
+    requestAnimationFrame(() => {
+        overlay.classList.add('ann-modal-visible');
+    });
+
+    // Close handlers
+    const close = () => {
+        overlay.classList.remove('ann-modal-visible');
+        overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+        // Fallback removal
+        setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 400);
+    };
+    overlay.querySelector('.ann-modal-close').addEventListener('click', close);
+    overlay.querySelector('.ann-modal-backdrop').addEventListener('click', close);
+
+    // Track click
+    _trackEvent('announcement', ann.id, 'click');
+
+    // Wire CTA tracking
+    overlay.querySelectorAll('.ann-modal-cta').forEach(cta => {
+        cta.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _trackEvent('announcement', ann.id, 'click');
+        });
+    });
 }
 
 function _injectAnnouncementStyles() {
@@ -2411,6 +2548,228 @@ function _injectAnnouncementStyles() {
     from{opacity:0;transform:translateY(10px)}
     to{opacity:1;transform:translateY(0)}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ANNOUNCEMENT FULLSCREEN MODAL
+   ══════════════════════════════════════════════════════════════ */
+#ann-modal-overlay{
+    position:fixed;
+    inset:0;
+    z-index:99999;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    opacity:0;
+    transition:opacity 0.3s cubic-bezier(.22,1,.36,1);
+    pointer-events:none;
+}
+#ann-modal-overlay.ann-modal-visible{
+    opacity:1;
+    pointer-events:all;
+}
+
+/* Blurred backdrop */
+.ann-modal-backdrop{
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,0.75);
+    backdrop-filter:blur(20px) saturate(0.8);
+    -webkit-backdrop-filter:blur(20px) saturate(0.8);
+}
+
+/* Modal container */
+.ann-modal-container{
+    position:relative;
+    width:92vw;
+    max-width:420px;
+    max-height:90vh;
+    border-radius:1.4rem;
+    overflow:hidden;
+    overflow-y:auto;
+    background:rgba(12,12,16,0.92);
+    backdrop-filter:blur(40px) saturate(1.5);
+    -webkit-backdrop-filter:blur(40px) saturate(1.5);
+    border:1px solid rgba(255,255,255,0.08);
+    box-shadow:
+        0 0 0 1px rgba(255,255,255,0.04),
+        0 0 60px color-mix(in srgb, var(--ann-gs) 15%, transparent),
+        0 0 120px color-mix(in srgb, var(--ann-ge) 8%, transparent),
+        0 24px 80px rgba(0,0,0,0.6);
+    transform:translateY(20px) scale(0.97);
+    transition:transform 0.35s cubic-bezier(.22,1,.36,1);
+}
+#ann-modal-overlay.ann-modal-visible .ann-modal-container{
+    transform:translateY(0) scale(1);
+}
+
+/* Hide scrollbar */
+.ann-modal-container::-webkit-scrollbar{display:none;}
+.ann-modal-container{-ms-overflow-style:none;scrollbar-width:none;}
+
+/* Close button */
+.ann-modal-close{
+    position:absolute;
+    top:0.85rem;
+    right:0.85rem;
+    z-index:10;
+    width:36px;height:36px;
+    display:flex;align-items:center;justify-content:center;
+    border-radius:50%;
+    background:rgba(0,0,0,0.5);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,0.1);
+    color:rgba(255,255,255,0.7);
+    cursor:pointer;
+    transition:all 0.2s;
+}
+.ann-modal-close:hover{
+    background:rgba(255,255,255,0.1);
+    color:#fff;
+    transform:scale(1.08);
+}
+
+/* Hero image area */
+.ann-modal-hero{
+    position:relative;
+    width:100%;
+    height:220px;
+    overflow:hidden;
+}
+.ann-modal-hero.no-img{
+    height:160px;
+}
+.ann-modal-hero-img{
+    width:100%;height:100%;
+    object-fit:cover;
+    display:block;
+}
+.ann-modal-hero-gradient{
+    width:100%;height:100%;
+    opacity:0.6;
+}
+.ann-modal-hero-fade{
+    position:absolute;
+    bottom:0;left:0;right:0;
+    height:80px;
+    background:linear-gradient(to top, rgba(12,12,16,0.92), transparent);
+    pointer-events:none;
+}
+.ann-modal-hero-glow{
+    position:absolute;
+    top:0;left:0;
+    width:100%;height:100%;
+    background:radial-gradient(ellipse at 50% 80%, color-mix(in srgb, var(--ann-gs) 15%, transparent), transparent 65%);
+    pointer-events:none;
+}
+.ann-modal-hero-pattern{
+    position:absolute;
+    inset:0;
+    background:
+        radial-gradient(circle at 20% 30%, color-mix(in srgb, var(--ann-gs) 20%, transparent) 0%, transparent 50%),
+        radial-gradient(circle at 80% 60%, color-mix(in srgb, var(--ann-ge) 15%, transparent) 0%, transparent 50%);
+    pointer-events:none;
+    animation:ann-modal-pattern-shift 6s ease-in-out infinite alternate;
+}
+@keyframes ann-modal-pattern-shift{
+    from{opacity:0.7;transform:scale(1)}
+    to{opacity:1;transform:scale(1.08)}
+}
+
+/* Content area */
+.ann-modal-content{
+    padding:1.25rem 1.5rem 1.5rem;
+}
+
+/* Meta row */
+.ann-modal-meta{
+    display:flex;
+    align-items:center;
+    gap:0.5rem;
+    margin-bottom:0.75rem;
+}
+.ann-modal-tag{
+    display:inline-block;
+    font-size:0.58rem;
+    font-weight:800;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    padding:0.2rem 0.55rem;
+    border-radius:5px;
+    color:#000;
+    line-height:1.3;
+}
+.ann-modal-type{
+    font-size:0.55rem;
+    font-weight:600;
+    letter-spacing:0.06em;
+    opacity:0.35;
+    text-transform:uppercase;
+}
+.ann-modal-date{
+    font-size:0.55rem;
+    opacity:0.3;
+    margin-left:auto;
+}
+
+/* Title */
+.ann-modal-title{
+    font-size:1.35rem;
+    font-weight:800;
+    letter-spacing:-0.03em;
+    line-height:1.25;
+    color:#fff;
+    margin:0 0 0.65rem;
+}
+
+/* Body text */
+.ann-modal-body{
+    font-size:0.88rem;
+    line-height:1.65;
+    color:rgba(255,255,255,0.6);
+    margin:0 0 1.1rem;
+    white-space:pre-line;
+}
+
+/* CTA buttons */
+.ann-modal-ctas{
+    display:flex;
+    gap:0.55rem;
+    flex-wrap:wrap;
+    margin-top:0.25rem;
+}
+.ann-modal-cta{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:0.8rem;
+    font-weight:600;
+    padding:0.55rem 1.2rem;
+    border-radius:10px;
+    text-decoration:none;
+    transition:all 0.2s;
+    cursor:pointer;
+    color:rgba(255,255,255,0.7);
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.1);
+}
+.ann-modal-cta.primary{
+    background:linear-gradient(135deg, var(--ann-gs), var(--ann-ge));
+    color:#000;
+    font-weight:700;
+    border:none;
+    box-shadow:0 4px 16px color-mix(in srgb, var(--ann-gs) 30%, transparent);
+}
+.ann-modal-cta:hover{
+    transform:translateY(-2px);
+    filter:brightness(1.12);
+}
+
+/* Bottom accent bar */
+.ann-modal-bottom-bar{
+    height:3px;
+    opacity:0.6;
+}
     `;
     document.head.appendChild(s);
 }
@@ -2430,8 +2789,21 @@ async function _trackEvent(itemType, itemId, eventType) {
     if (_trackedEvents.has(key)) return;
     _trackedEvents.add(key);
 
+    // Import offline sync manager
+    const { offlineSync } = await import('./offlineSync.js');
+    
+    // Check if online
+    const isOnline = await offlineSync.checkOnline();
+    
+    if (!isOnline) {
+        // Queue for offline sync
+        await offlineSync.queueTrackEvent(itemType, itemId, eventType);
+        return;
+    }
+
+    // Try direct send if online
     try {
-        await fetch('/api/track-event', {
+        const res = await fetch('/api/track-event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2441,8 +2813,13 @@ async function _trackEvent(itemType, itemId, eventType) {
                 event_type: eventType
             })
         });
+        if (!res.ok) {
+            // If send fails, queue for retry
+            await offlineSync.queueTrackEvent(itemType, itemId, eventType);
+        }
     } catch (e) {
-        // Silent fail — analytics shouldn't break UX
+        // Network error — queue for offline sync
+        await offlineSync.queueTrackEvent(itemType, itemId, eventType);
     }
 }
 

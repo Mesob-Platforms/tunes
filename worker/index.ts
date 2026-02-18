@@ -179,7 +179,7 @@ async function performArchive(env: Env): Promise<{ success: boolean; rows: numbe
    ADMIN ENDPOINTS — db-stats, telegram/test, archive/*
    ══════════════════════════════════════════════════════════════ */
 
-/** GET /api/admin/db-stats — database statistics */
+/** GET /api/admin/db-stats — database statistics with usage percentages */
 async function handleDbStats(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
   const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_database_stats`, {
@@ -192,7 +192,21 @@ async function handleDbStats(env: Env): Promise<Response> {
     return Response.json({ error: `RPC failed: ${err}` }, { status: 500, headers: CORS_HEADERS });
   }
   const stats = await rpcRes.json();
-  return Response.json(stats, { headers: CORS_HEADERS });
+  
+  // Structure response with usage info
+  const response = {
+    ...stats,
+    // Add Cloudflare usage estimation (placeholder - actual usage requires Analytics API)
+    cloudflare: {
+      estimated_requests_daily: null, // Would need Workers Analytics API
+      estimated_requests_monthly: null,
+      note: 'Check Cloudflare dashboard for actual usage',
+    },
+    // Add shouldArchive flag if critical threshold exceeded
+    shouldArchive: (stats.database_size_percent || 0) > 90 || (stats.listening_events_percent || 0) > 90,
+  };
+  
+  return Response.json(response, { headers: CORS_HEADERS });
 }
 
 /** POST /api/admin/telegram/test — test bot connection */
@@ -836,13 +850,30 @@ async function handleCheckUpdates(request: Request, env: Env): Promise<Response>
 /** GET /api/announcements/active — get currently active announcements (public, new schema) */
 async function handleActiveAnnouncements(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
+  // Try new RPC first
   const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_active_announcements`, {
     method: 'POST',
     headers: hdrs,
     body: '{}',
   });
   if (!rpcRes.ok) {
-    return Response.json([], { headers: CORS_HEADERS });
+    // #region agent log – RPC failed, fall back to direct table query
+    const rpcErr = await rpcRes.text().catch(() => 'unknown');
+    // Fallback: query the table directly (works even if old RPC is broken)
+    const fallbackRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/admin_announcements?is_active=eq.true&or=(ends_at.is.null,ends_at.gt.${new Date().toISOString()})&order=created_at.desc&select=id,title,body,link,image_url,tag,type,gradient_start,gradient_end,cta_buttons,frequency,ends_at,created_at`,
+      { method: 'GET', headers: hdrs }
+    );
+    if (fallbackRes.ok) {
+      const data = await fallbackRes.json();
+      return Response.json(data, {
+        headers: { ...CORS_HEADERS, 'X-Debug-RPC-Error': rpcErr.slice(0, 200), 'X-Debug-Used-Fallback': 'true' }
+      });
+    }
+    return Response.json([], {
+      headers: { ...CORS_HEADERS, 'X-Debug-RPC-Error': rpcErr.slice(0, 200) }
+    });
+    // #endregion
   }
   const data = await rpcRes.json();
   return Response.json(data, { headers: CORS_HEADERS });

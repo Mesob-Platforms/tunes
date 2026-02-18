@@ -5742,7 +5742,7 @@ export class UIRenderer {
         // ── Tab switching ──
         const tabs = document.querySelectorAll('.admin-tab');
         tabs.forEach(tab => {
-            tab.onclick = () => {
+            tab.onclick = async () => {
                 tabs.forEach(t => {
                     const isActive = t === tab;
                     t.classList.toggle('active', isActive);
@@ -5753,6 +5753,11 @@ export class UIRenderer {
                 document.querySelectorAll('.admin-tab-content').forEach(c => {
                     c.style.display = c.id === `admin-tab-${tab.dataset.adminTab}` ? '' : 'none';
                 });
+                
+                // Load database tab content when clicked
+                if (tab.dataset.adminTab === 'database') {
+                    await this._renderAdminDatabaseTab(adminFetch);
+                }
             };
         });
 
@@ -6531,6 +6536,205 @@ export class UIRenderer {
                 </div>`;
         });
         container.appendChild(chart);
+    }
+
+    // ===== Database Control Tab =====
+    async _renderAdminDatabaseTab(adminFetch) {
+        // Load database stats
+        const loadDbStats = async () => {
+            try {
+                const stats = await adminFetch('/api/admin/db-stats');
+                if (stats && !stats.error) {
+                    // Database size
+                    const dbSizeMB = stats.database_size_mb || 0;
+                    const dbSizePercent = Math.min(stats.database_size_percent || 0, 100);
+                    document.getElementById('admin-db-size-text').textContent = `${dbSizeMB.toFixed(1)} MB`;
+                    document.getElementById('admin-db-size-percent').textContent = `${dbSizePercent.toFixed(1)}%`;
+                    
+                    // Update progress bar with color coding
+                    const dbBar = document.getElementById('admin-db-size-bar');
+                    dbBar.style.width = `${dbSizePercent}%`;
+                    if (dbSizePercent >= 90) {
+                        dbBar.style.background = '#ef4444';
+                    } else if (dbSizePercent >= 70) {
+                        dbBar.style.background = '#eab308';
+                    } else {
+                        dbBar.style.background = '#22c55e';
+                    }
+
+                    // Listening events count
+                    const eventsCount = stats.listening_events || 0;
+                    const eventsPercent = Math.min(stats.listening_events_percent || 0, 100);
+                    document.getElementById('admin-events-count-text').textContent = eventsCount.toLocaleString();
+                    document.getElementById('admin-events-percent').textContent = `${eventsPercent.toFixed(1)}%`;
+                    
+                    // Update progress bar with color coding
+                    const eventsBar = document.getElementById('admin-events-bar');
+                    eventsBar.style.width = `${eventsPercent}%`;
+                    if (eventsPercent >= 90) {
+                        eventsBar.style.background = '#ef4444';
+                    } else if (eventsPercent >= 70) {
+                        eventsBar.style.background = '#eab308';
+                    } else {
+                        eventsBar.style.background = '#22c55e';
+                    }
+
+                    // Last archive info
+                    if (stats.last_archive_at) {
+                        const lastArchive = new Date(stats.last_archive_at);
+                        document.getElementById('admin-last-archive-date').textContent = lastArchive.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    } else {
+                        document.getElementById('admin-last-archive-date').textContent = 'Never';
+                    }
+                    document.getElementById('admin-last-archive-rows').textContent = `${(stats.total_archived_rows || 0).toLocaleString()} rows archived`;
+
+                    // Next archive countdown (7 days from last archive or now)
+                    const lastArchiveDate = stats.last_archive_at ? new Date(stats.last_archive_at) : new Date();
+                    const nextArchiveDate = new Date(lastArchiveDate);
+                    nextArchiveDate.setDate(nextArchiveDate.getDate() + 7);
+                    const now = new Date();
+                    const diffMs = nextArchiveDate - now;
+                    if (diffMs > 0) {
+                        const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                        const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        document.getElementById('admin-next-archive-countdown').textContent = `${days}d ${hours}h`;
+                    } else {
+                        document.getElementById('admin-next-archive-countdown').textContent = 'Due now';
+                    }
+
+                    // Show warning if shouldArchive flag is set
+                    if (stats.shouldArchive) {
+                        const warning = document.createElement('div');
+                        warning.style.cssText = 'background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);border-radius:12px;padding:1rem;margin-bottom:1rem;';
+                        warning.innerHTML = `
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
+                                <span style="font-size:1.2rem;">⚠️</span>
+                                <p style="font-size:0.85rem;font-weight:600;margin:0;color:#ef4444;">Critical: Usage exceeds 90%</p>
+                            </div>
+                            <p style="font-size:0.75rem;opacity:0.7;margin:0 0 0.75rem;">Your database is approaching free tier limits. Archive now to free up space.</p>
+                            <button id="admin-archive-critical-btn" style="background:#ef4444;border:none;color:#fff;font-size:0.72rem;font-weight:600;padding:0.5rem 1rem;border-radius:8px;cursor:pointer;font-family:inherit;">Archive Now</button>
+                        `;
+                        const dbControlTab = document.getElementById('admin-tab-database');
+                        const firstChild = dbControlTab.firstElementChild;
+                        if (firstChild && !dbControlTab.querySelector('#admin-critical-warning')) {
+                            warning.id = 'admin-critical-warning';
+                            dbControlTab.insertBefore(warning, firstChild);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[db-stats]', e);
+            }
+        };
+
+        // Load Telegram status
+        const loadTelegramStatus = async () => {
+            const statusEl = document.getElementById('admin-tg-status-indicator');
+            const statusText = document.getElementById('admin-tg-status-text');
+            statusEl.style.background = 'rgba(255,255,255,0.2)';
+            statusText.textContent = 'Checking...';
+            statusText.style.opacity = '0.6';
+
+            try {
+                const result = await adminFetch('/api/admin/telegram/test', { method: 'POST' });
+                if (result && result.ok) {
+                    statusEl.style.background = '#22c55e';
+                    statusText.textContent = `Connected (${result.bot_name || 'Bot'})`;
+                    statusText.style.opacity = '1';
+                } else {
+                    statusEl.style.background = '#ef4444';
+                    statusText.textContent = result?.error || 'Connection failed';
+                    statusText.style.opacity = '0.8';
+                }
+            } catch (e) {
+                statusEl.style.background = '#ef4444';
+                statusText.textContent = 'Error checking status';
+                statusText.style.opacity = '0.8';
+            }
+        };
+
+        // Load archive history
+        const loadArchiveHistory = async () => {
+            try {
+                const history = await adminFetch('/api/admin/archive/history');
+                const container = document.getElementById('admin-archive-history');
+                if (!Array.isArray(history) || history.length === 0) {
+                    container.innerHTML = '<p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">No archives yet</p>';
+                    return;
+                }
+
+                container.innerHTML = history.map(arch => {
+                    const date = new Date(arch.created_at);
+                    const statusColor = arch.status === 'completed' ? '#22c55e' : arch.status === 'failed' ? '#ef4444' : '#eab308';
+                    return `
+                        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:0.75rem;border-left:3px solid ${statusColor};">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+                                <span style="font-size:0.7rem;font-weight:600;opacity:0.8;">${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                <span style="font-size:0.65rem;padding:0.2rem 0.5rem;border-radius:4px;background:rgba(255,255,255,0.1);text-transform:uppercase;font-weight:600;opacity:0.7;">${arch.status}</span>
+                            </div>
+                            <div style="display:flex;gap:1rem;font-size:0.7rem;opacity:0.6;">
+                                <span>${arch.row_count?.toLocaleString() || 0} rows</span>
+                                <span>${arch.file_size_kb || 0} KB</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.warn('[archive-history]', e);
+            }
+        };
+
+        // Wire up buttons
+        document.getElementById('admin-tg-test-btn').onclick = () => loadTelegramStatus();
+        
+        const triggerArchive = async () => {
+            const btn = document.getElementById('admin-archive-trigger-btn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Archiving...';
+            btn.style.opacity = '0.6';
+
+            try {
+                const result = await adminFetch('/api/admin/archive/trigger', { method: 'POST' });
+                if (result && result.success) {
+                    btn.textContent = `Archived ${result.rows} rows!`;
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        loadDbStats();
+                        loadArchiveHistory();
+                    }, 2000);
+                } else {
+                    btn.textContent = result?.error || 'Archive failed';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                    }, 3000);
+                }
+            } catch (e) {
+                btn.textContent = 'Error';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }, 2000);
+            }
+        };
+
+        document.getElementById('admin-archive-trigger-btn').onclick = triggerArchive;
+        
+        // Wire up critical warning button if it exists
+        setTimeout(() => {
+            const criticalBtn = document.getElementById('admin-archive-critical-btn');
+            if (criticalBtn) {
+                criticalBtn.onclick = triggerArchive;
+            }
+        }, 100);
+
+        // Load all data
+        await Promise.all([loadDbStats(), loadTelegramStatus(), loadArchiveHistory()]);
     }
 }
 

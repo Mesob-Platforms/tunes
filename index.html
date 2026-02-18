@@ -1673,6 +1673,7 @@
                         <div id="admin-tabs" style="display:flex;gap:0.25rem;margin-bottom:1.25rem;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:0;">
                             <button class="admin-tab active" data-admin-tab="overview" style="background:none;border:none;color:var(--foreground);font-size:0.8rem;font-weight:600;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:1;font-family:inherit;letter-spacing:-0.01em;">Overview</button>
                             <button class="admin-tab" data-admin-tab="messaging" style="background:none;border:none;color:var(--muted-foreground);font-size:0.8rem;font-weight:500;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:0.6;font-family:inherit;letter-spacing:-0.01em;">Messaging</button>
+                            <button class="admin-tab" data-admin-tab="database" style="background:none;border:none;color:var(--muted-foreground);font-size:0.8rem;font-weight:500;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:0.6;font-family:inherit;letter-spacing:-0.01em;">Database Control</button>
                         </div>
 
                         <!-- TAB: Overview -->
@@ -1824,7 +1825,7 @@
                                         <input id="admin-update-link" type="url" placeholder="Link (optional)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
                                         <div style="display:flex;gap:0.5rem;align-items:center;">
                                             <label style="font-size:0.68rem;opacity:0.4;white-space:nowrap;">Category</label>
-                                            <select id="admin-update-category" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;">
+                                            <select id="admin-update-category" class="admin-select" style="flex:1;">
                                                 <option value="feature">New Feature</option>
                                                 <option value="bugfix">Bug Fix</option>
                                                 <option value="improvement">Improvement</option>
@@ -1869,7 +1870,7 @@
                                         <!-- Tag -->
                                         <div style="display:flex;gap:0.5rem;align-items:center;">
                                             <label style="font-size:0.68rem;opacity:0.4;white-space:nowrap;">Tag</label>
-                                            <select id="admin-ann-tag" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;">
+                                            <select id="admin-ann-tag" class="admin-select" style="flex:1;">
                                                 <option value="NEW">NEW</option>
                                                 <option value="AD">AD</option>
                                                 <option value="PROMO">PROMO</option>
@@ -1914,7 +1915,7 @@
                                         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                                             <div style="flex:1;min-width:120px;">
                                                 <label style="font-size:0.68rem;opacity:0.4;display:block;margin-bottom:0.3rem;">Frequency</label>
-                                                <select id="admin-ann-frequency" style="width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;">
+                                                <select id="admin-ann-frequency" class="admin-select" style="width:100%;">
                                                     <option value="always">Always</option>
                                                     <option value="once_per_day">1x / day</option>
                                                     <option value="once_per_session">1x / session</option>
@@ -1946,6 +1947,78 @@
                                     <div id="admin-announcements-list" style="display:flex;flex-direction:column;gap:0.5rem;">
                                         <p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">Loading...</p>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB: Database Control -->
+                        <div id="admin-tab-database" class="admin-tab-content" style="display:none;">
+                            <!-- Telegram Status Card -->
+                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                                    <p style="font-size:0.85rem;font-weight:600;margin:0;">Telegram Bot Status</p>
+                                    <button id="admin-tg-test-btn" style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);color:#60a5fa;font-size:0.72rem;font-weight:600;padding:0.4rem 0.9rem;border-radius:8px;cursor:pointer;font-family:inherit;transition:all 0.2s;">Test Connection</button>
+                                </div>
+                                <div id="admin-tg-status" style="display:flex;align-items:center;gap:0.5rem;">
+                                    <div id="admin-tg-status-indicator" style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.2);"></div>
+                                    <span id="admin-tg-status-text" style="font-size:0.75rem;opacity:0.6;">Checking...</span>
+                                </div>
+                            </div>
+
+                            <!-- Usage Monitoring Cards -->
+                            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.25rem;">
+                                <!-- Supabase Database Size -->
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+                                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0;">Database Size</p>
+                                        <span id="admin-db-size-percent" style="font-size:0.7rem;font-weight:600;opacity:0.7;">--%</span>
+                                    </div>
+                                    <p id="admin-db-size-text" style="font-size:1.3rem;font-weight:800;margin:0 0 0.5rem;line-height:1;">-- MB</p>
+                                    <div style="background:rgba(255,255,255,0.05);border-radius:8px;height:6px;overflow:hidden;">
+                                        <div id="admin-db-size-bar" style="height:100%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);width:0%;transition:width 0.3s ease;border-radius:8px;"></div>
+                                    </div>
+                                    <p style="font-size:0.6rem;opacity:0.4;margin:0.35rem 0 0;">of 500 MB (Supabase Free)</p>
+                                </div>
+
+                                <!-- Listening Events Row Count -->
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+                                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0;">Row Count</p>
+                                        <span id="admin-events-percent" style="font-size:0.7rem;font-weight:600;opacity:0.7;">--%</span>
+                                    </div>
+                                    <p id="admin-events-count-text" style="font-size:1.3rem;font-weight:800;margin:0 0 0.5rem;line-height:1;">--</p>
+                                    <div style="background:rgba(255,255,255,0.05);border-radius:8px;height:6px;overflow:hidden;">
+                                        <div id="admin-events-bar" style="height:100%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);width:0%;transition:width 0.3s ease;border-radius:8px;"></div>
+                                    </div>
+                                    <p style="font-size:0.6rem;opacity:0.4;margin:0.35rem 0 0;">listening_events rows</p>
+                                </div>
+                            </div>
+
+                            <!-- Archive Controls -->
+                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                                    <p style="font-size:0.85rem;font-weight:600;margin:0;">Archive Controls</p>
+                                    <button id="admin-archive-trigger-btn" style="background:linear-gradient(135deg,#a855f7,#ec4899);border:none;color:#fff;font-size:0.72rem;font-weight:600;padding:0.5rem 1rem;border-radius:8px;cursor:pointer;font-family:inherit;transition:opacity 0.2s;">Force Archive Now</button>
+                                </div>
+                                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;">
+                                    <div>
+                                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.4rem;">Last Archive</p>
+                                        <p id="admin-last-archive-date" style="font-size:0.8rem;font-weight:600;margin:0;opacity:0.7;">--</p>
+                                        <p id="admin-last-archive-rows" style="font-size:0.7rem;opacity:0.5;margin:0.25rem 0 0;">-- rows</p>
+                                    </div>
+                                    <div>
+                                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.4rem;">Next Archive</p>
+                                        <p id="admin-next-archive-countdown" style="font-size:0.8rem;font-weight:600;margin:0;opacity:0.7;">--</p>
+                                        <p style="font-size:0.7rem;opacity:0.5;margin:0.25rem 0 0;">Scheduled: Every 7 days</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Archive History -->
+                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">Archive History</p>
+                                <div id="admin-archive-history" style="display:flex;flex-direction:column;gap:0.5rem;max-height:400px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent;">
+                                    <p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">Loading...</p>
                                 </div>
                             </div>
                         </div>
