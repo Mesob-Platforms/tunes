@@ -1,7 +1,7 @@
 export class MusicDatabase {
     constructor() {
         this.dbName = 'MonochromeDB';
-        this.version = 10;
+        this.version = 11;
         this.db = null;
     }
 
@@ -67,6 +67,10 @@ export class MusicDatabase {
                 // Cached audio blobs for offline / in-app downloads
                 if (!db.objectStoreNames.contains('cached_audio')) {
                     db.createObjectStore('cached_audio', { keyPath: 'id' });
+                }
+                // Cached lyrics for offline access
+                if (!db.objectStoreNames.contains('cached_lyrics')) {
+                    db.createObjectStore('cached_lyrics', { keyPath: 'id' });
                 }
             };
         });
@@ -885,6 +889,49 @@ export class MusicDatabase {
             store.get(String(trackId))
         );
         return !!entry;
+    }
+
+    /* ── Cached-lyrics helpers (offline lyrics) ──── */
+
+    /**
+     * Store lyrics data in IndexedDB for offline access.
+     * @param {string} trackId
+     * @param {object} lyricsData – { subtitles, lyricsProvider, ... }
+     */
+    async cacheLyrics(trackId, lyricsData) {
+        await this.performTransaction('cached_lyrics', 'readwrite', (store) =>
+            store.put({ id: String(trackId), ...lyricsData, cachedAt: Date.now() })
+        );
+    }
+
+    /**
+     * Retrieve cached lyrics for a track.
+     * Returns the lyrics data object, or null if not cached.
+     */
+    async getCachedLyrics(trackId) {
+        const entry = await this.performTransaction('cached_lyrics', 'readonly', (store) =>
+            store.get(String(trackId))
+        );
+        return entry || null;
+    }
+
+    /**
+     * Check whether lyrics are cached for a track.
+     */
+    async hasLyrics(trackId) {
+        const entry = await this.performTransaction('cached_lyrics', 'readonly', (store) =>
+            store.get(String(trackId))
+        );
+        return !!entry;
+    }
+
+    /**
+     * Remove cached lyrics for a track.
+     */
+    async removeCachedLyrics(trackId) {
+        await this.performTransaction('cached_lyrics', 'readwrite', (store) =>
+            store.delete(String(trackId))
+        );
     }
 }
 

@@ -2247,6 +2247,7 @@ export class UIRenderer {
                         </div>
                     </div>
                     <div class="dl-track-item-actions">
+                        <span class="dl-lyrics-badge" data-lyrics-badge="${t.id}" style="display:none;font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.05em;background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);padding:2px 5px;border-radius:4px;margin-right:6px;text-transform:uppercase;">lrc</span>
                         <span class="dl-track-item-duration">${dur}</span>
                         <button class="dl-remove-btn" data-remove-id="${t.id}" title="Remove">
                             <span class="material-symbols-rounded" style="font-size:16px;">close</span>
@@ -2254,6 +2255,20 @@ export class UIRenderer {
                     </div>
                 </div>`;
         }).join('');
+
+        // Asynchronously show lyrics badges for tracks that have cached lyrics
+        (async () => {
+            try {
+                await db.open();
+                for (const t of sorted) {
+                    const has = await db.hasLyrics(t.id);
+                    if (has) {
+                        const badge = container.querySelector(`[data-lyrics-badge="${t.id}"]`);
+                        if (badge) badge.style.display = '';
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        })();
 
         // Wire remove buttons
         container.querySelectorAll('.dl-remove-btn').forEach((btn) => {

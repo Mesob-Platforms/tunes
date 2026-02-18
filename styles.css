@@ -6007,9 +6007,9 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
     border-left: 1px solid rgb(255, 255, 255, 0.1);
 }
 
-/* Lyrics panel uses Lumina display font */
+/* Lyrics panel uses Outfit display font */
 .side-panel[data-view='lyrics'] .panel-content {
-    font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
+    font-family: 'Outfit', sans-serif;
     /* Hide scrollbar but keep scrolling */
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -6039,11 +6039,11 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
         radial-gradient(circle at 30% 20%, var(--lyrics-color-1), transparent 50%),
         radial-gradient(circle at 70% 60%, var(--lyrics-color-2), transparent 50%),
         radial-gradient(circle at 50% 80%, var(--lyrics-color-3), transparent 50%);
-    opacity: 0.15;
-    animation: lyrics-color-flow 12s ease-in-out infinite alternate;
+    opacity: 0.35;
+    animation: lyrics-color-flow 10s ease-in-out infinite alternate;
     z-index: 0;
     pointer-events: none;
-    filter: blur(60px);
+    filter: blur(50px);
 }
 
 @keyframes lyrics-color-flow {

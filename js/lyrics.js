@@ -2,6 +2,7 @@
 import { getTrackTitle, getTrackArtists, buildTrackFilename, SVG_CLOSE } from './utils.js';
 import { sidePanelManager } from './side-panel.js';
 import { getVibrantColorFromImage } from './vibrant-color.js';
+import { db as musicDB } from './db.js';
 
 const SVG_GENIUS_ACTIVE = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 24c6.627 0 12-5.373 12-12S18.627 0 12 0 0 5.373 0 12s5.373 12 12 12z" fill="#ffff64"/><path d="M6.3 6.3h11.4v11.4H6.3z" fill="#000"/></svg>`;
 
@@ -414,36 +415,65 @@ export class LyricsManager {
             return;
         }
 
-        return new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.type = 'module';
-            script.src = 'https://cdn.jsdelivr.net/npm/@uimaxbai/am-lyrics@0.6.5/dist/src/am-lyrics.min.js';
+        // Try local bundle first, then CDN fallback
+        const sources = [
+            '/js/vendor/am-lyrics.min.js',
+            'https://cdn.jsdelivr.net/npm/@uimaxbai/am-lyrics@0.6.5/dist/src/am-lyrics.min.js',
+        ];
 
-            script.onload = () => {
-                if (typeof customElements !== 'undefined') {
-                    customElements
-                        .whenDefined('am-lyrics')
-                        .then(() => {
-                            this.componentLoaded = true;
+        for (const src of sources) {
+            try {
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.type = 'module';
+                    script.src = src;
+
+                    script.onload = () => {
+                        if (typeof customElements !== 'undefined') {
+                            customElements
+                                .whenDefined('am-lyrics')
+                                .then(() => {
+                                    this.componentLoaded = true;
+                                    resolve();
+                                })
+                                .catch(reject);
+                        } else {
                             resolve();
-                        })
-                        .catch(reject);
-                } else {
-                    resolve();
-                }
-            };
+                        }
+                    };
 
-            script.onerror = () => reject(new Error('Failed to load lyrics component'));
-            document.head.appendChild(script);
-        });
+                    script.onerror = () => reject(new Error(`Failed to load from ${src}`));
+                    document.head.appendChild(script);
+                });
+                return; // loaded successfully
+            } catch (e) {
+                console.warn('Lyrics component load attempt failed:', e.message);
+            }
+        }
+
+        throw new Error('Failed to load lyrics component from all sources');
     }
 
     async fetchLyrics(trackId, track = null) {
         if (track) {
+            // 1. Check in-memory cache
             if (this.lyricsCache.has(trackId)) {
                 return this.lyricsCache.get(trackId);
             }
 
+            // 2. Check IndexedDB cache
+            try {
+                await musicDB.open();
+                const cached = await musicDB.getCachedLyrics(trackId);
+                if (cached) {
+                    this.lyricsCache.set(trackId, cached);
+                    return cached;
+                }
+            } catch (e) {
+                console.warn('IndexedDB lyrics read failed:', e);
+            }
+
+            // 3. Fetch from LRCLIB
             try {
                 const artist = Array.isArray(track.artists)
                     ? track.artists.map((a) => a.name || a).join(', ')
@@ -477,6 +507,14 @@ export class LyricsManager {
                         };
 
                         this.lyricsCache.set(trackId, lyricsData);
+
+                        // Persist to IndexedDB for offline access
+                        try {
+                            await musicDB.cacheLyrics(trackId, lyricsData);
+                        } catch (e) {
+                            console.warn('IndexedDB lyrics write failed:', e);
+                        }
+
                         return lyricsData;
                     }
                 }
@@ -955,9 +993,9 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                 .bottom, .info-bar, .meta, .about {
                     display: none !important;
                 }
-                /* Apply Lumina font */
+                /* Apply Outfit font */
                 :host, *, .line, .synced-line, p, span, div {
-                    font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif !important;
+                    font-family: 'Outfit', sans-serif !important;
                 }
 
                 /* === KILL transitions ONLY on sung/past lines === */
@@ -969,19 +1007,28 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                     -webkit-transition: none !important;
                 }
 
-                /* Lyrics text: bold with comfortable spacing */
+                /* Lyrics text: bigger, bolder, roomier */
                 .line, .synced-line, [class*="line"] {
-                    font-size: 1.2rem !important;
-                    line-height: 1.6 !important;
+                    font-size: 1.55rem !important;
+                    line-height: 1.75 !important;
                     font-weight: 700 !important;
-                    letter-spacing: -0.02em !important;
-                    padding: 0.5rem 0 !important;
+                    letter-spacing: -0.01em !important;
+                    padding: 0.65rem 0 !important;
                     margin: 0 !important;
+                    opacity: 0.45 !important;
+                    transition: opacity 0.4s ease, font-size 0.35s ease, text-shadow 0.4s ease !important;
                 }
                 .line.active, .synced-line.active, [class*="line"].active {
-                    font-size: 1.35rem !important;
-                    line-height: 1.6 !important;
+                    font-size: 1.8rem !important;
+                    line-height: 1.75 !important;
                     font-weight: 800 !important;
+                    opacity: 1 !important;
+                    text-shadow: 0 0 32px rgba(255,255,255,0.45), 0 0 8px rgba(255,255,255,0.2) !important;
+                }
+
+                /* Slow down karaoke word-fill transition */
+                .line.active *, .synced-line.active *, [class*="line"].active * {
+                    transition: background-position 0.6s linear, color 0.5s ease, -webkit-text-fill-color 0.5s ease !important;
                 }
 
                 /* === SUNG LINES: data-sung attribute forces white === */
@@ -1232,10 +1279,128 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
 
         return amLyrics;
     } catch (error) {
-        console.error('Failed to load lyrics:', error);
-        container.innerHTML = '<div class="lyrics-error">Failed to load lyrics</div>';
+        console.error('am-lyrics component failed, trying fallback renderer:', error);
+        // Fallback: render lyrics from IndexedDB cache with custom karaoke renderer
+        return renderFallbackLyrics(container, track, audioPlayer, lyricsManager);
+    }
+}
+
+/**
+ * Custom offline-capable lyrics renderer with karaoke word-fill effect.
+ * Used when am-lyrics web component can't load (offline / network error).
+ */
+async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager) {
+    // Try to get lyrics from IndexedDB
+    let lyricsData = null;
+    try {
+        await musicDB.open();
+        lyricsData = await musicDB.getCachedLyrics(track.id);
+    } catch (e) {
+        console.warn('IndexedDB lyrics read failed in fallback:', e);
+    }
+
+    // Also check in-memory cache
+    if (!lyricsData && lyricsManager.lyricsCache.has(track.id)) {
+        lyricsData = lyricsManager.lyricsCache.get(track.id);
+    }
+
+    if (!lyricsData || !lyricsData.subtitles) {
+        container.innerHTML = '<div class="lyrics-error" style="font-family:Outfit,sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No cached lyrics available offline</div>';
         return null;
     }
+
+    const parsed = lyricsManager.parseSyncedLyrics(lyricsData.subtitles);
+    if (parsed.length === 0) {
+        container.innerHTML = '<div class="lyrics-error" style="font-family:Outfit,sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No synced lyrics found</div>';
+        return null;
+    }
+
+    // Build DOM
+    container.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'fallback-lyrics-wrapper';
+    wrapper.style.cssText = `
+        font-family: 'Outfit', sans-serif;
+        padding: 2rem 1.5rem 6rem;
+        overflow-y: auto;
+        height: 100%;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    `;
+
+    const lineEls = parsed.map((line, idx) => {
+        const el = document.createElement('p');
+        el.className = 'fb-lyric-line';
+        el.textContent = line.text;
+        el.dataset.time = line.time;
+        el.dataset.idx = idx;
+        el.style.cssText = `
+            font-size: 1.55rem;
+            line-height: 1.75;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            padding: 0.65rem 0;
+            margin: 0;
+            color: #fff;
+            opacity: 0.4;
+            cursor: pointer;
+            transition: opacity 0.4s ease, font-size 0.35s ease, text-shadow 0.4s ease;
+            -webkit-user-select: none;
+            user-select: none;
+        `;
+        el.addEventListener('click', () => {
+            audioPlayer.currentTime = line.time;
+            audioPlayer.play();
+        });
+        wrapper.appendChild(el);
+        return el;
+    });
+
+    container.appendChild(wrapper);
+
+    // --- Karaoke sync loop ---
+    let activeIdx = -1;
+    let animId = null;
+
+    const updateActive = () => {
+        const t = audioPlayer.currentTime;
+        let newIdx = -1;
+        for (let i = 0; i < parsed.length; i++) {
+            if (t >= parsed[i].time) newIdx = i;
+            else break;
+        }
+        if (newIdx !== activeIdx) {
+            // Dim old line
+            if (activeIdx >= 0 && activeIdx < lineEls.length) {
+                lineEls[activeIdx].style.opacity = '0.4';
+                lineEls[activeIdx].style.fontSize = '1.55rem';
+                lineEls[activeIdx].style.fontWeight = '700';
+                lineEls[activeIdx].style.textShadow = 'none';
+            }
+            activeIdx = newIdx;
+            // Highlight new line
+            if (activeIdx >= 0 && activeIdx < lineEls.length) {
+                lineEls[activeIdx].style.opacity = '1';
+                lineEls[activeIdx].style.fontSize = '1.8rem';
+                lineEls[activeIdx].style.fontWeight = '800';
+                lineEls[activeIdx].style.textShadow = '0 0 32px rgba(255,255,255,0.45), 0 0 8px rgba(255,255,255,0.2)';
+                // Auto-scroll
+                lineEls[activeIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+        animId = requestAnimationFrame(updateActive);
+    };
+
+    // Start loop
+    animId = requestAnimationFrame(updateActive);
+
+    const cleanup = () => {
+        if (animId) cancelAnimationFrame(animId);
+    };
+
+    container.lyricsCleanup = cleanup;
+    container.lyricsManager = lyricsManager;
+    return wrapper;
 }
 
 function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
