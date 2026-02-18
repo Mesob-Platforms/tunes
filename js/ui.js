@@ -2206,10 +2206,14 @@ export class UIRenderer {
 
         // Clear all button
         if (clearBtn) {
-            clearBtn.onclick = () => {
+            clearBtn.onclick = async () => {
                 if (!confirm('Remove all downloads from your catalog?')) return;
                 const ids = catalog.map((t) => t.id);
-                ids.forEach((id) => removeFromDownloadedCatalog(id));
+                for (const id of ids) {
+                    removeFromDownloadedCatalog(id);
+                    try { await db.removeCachedTrack(id); } catch (_) { /* skip */ }
+                    try { await db.removeCachedLyrics(id); } catch (_) { /* skip */ }
+                }
                 showNotification('All downloads cleared');
                 this._populateDownloads();
             };
@@ -2272,10 +2276,12 @@ export class UIRenderer {
 
         // Wire remove buttons
         container.querySelectorAll('.dl-remove-btn').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const id = btn.dataset.removeId;
                 removeFromDownloadedCatalog(id);
+                try { await db.removeCachedTrack(id); } catch (_) { /* skip */ }
+                try { await db.removeCachedLyrics(id); } catch (_) { /* skip */ }
                 showNotification('Track removed from downloads');
                 this._populateDownloads();
             });
@@ -2435,6 +2441,7 @@ export class UIRenderer {
                 if (removed && removed.length) {
                     for (const t of removed) {
                         try { await db.removeCachedTrack(t.id); } catch (_) { /* skip */ }
+                        try { await db.removeCachedLyrics(t.id); } catch (_) { /* skip */ }
                     }
                 }
                 showNotification('Album deleted from downloads');
