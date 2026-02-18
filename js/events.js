@@ -91,6 +91,8 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     });
 
     audioPlayer.addEventListener('ended', () => {
+        // If AI DJ crossfade already handled the transition, skip
+        if (window.__aiDjManager?.skipPlayNext) return;
         player.playNext();
     });
 

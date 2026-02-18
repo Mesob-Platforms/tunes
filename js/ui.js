@@ -1215,6 +1215,11 @@ export class UIRenderer {
         // Hide mobile tab bar on admin page (slide-down)
         document.body.classList.toggle('hide-tab-bar', pageId === 'admin');
 
+        // Hide header for AI DJ page (fullscreen experience)
+        if (mainHeader) {
+            mainHeader.style.display = pageId === 'ai-dj' ? 'none' : '';
+        }
+
         // Clear background and color if not on album, artist, playlist, or mix page
         if (!['album', 'artist', 'playlist', 'mix'].includes(pageId)) {
             this.setPageBackground(null);

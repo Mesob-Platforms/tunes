@@ -8903,17 +8903,25 @@ textarea:focus {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   AI DJ PAGE — Futuristic Glassmorphism
+   AI DJ PAGE — Green/Orange Futuristic Glassmorphism
    ═══════════════════════════════════════════════════════════ */
 
-/* Override main-content padding when AI DJ page is active */
+/* Kill parent padding & header when AI DJ is active */
+.main-content:has(#page-ai-dj.active) {
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Hide the header entirely so AI DJ gets full height */
+.app-container:has(#page-ai-dj.active) > .main-header {
+    display: none !important;
+}
+
 #page-ai-dj.active {
     display: flex !important;
     flex-direction: column;
-    margin: calc(-1 * var(--spacing-xl));
-    margin-bottom: calc(-1 * var(--spacing-xl));
-    min-height: calc(100vh - 56px);
-    min-height: calc(100dvh - 56px);
+    width: 100%;
+    height: 100%; /* Fill parent, not viewport — parent IS the viewport now */
 }
 
 .ai-dj-container {
@@ -8922,27 +8930,29 @@ textarea:focus {
     flex-direction: column;
     align-items: center;
     flex: 1;
-    padding: 0.75rem 1rem 1rem;
+    min-height: 0;
+    padding: 0.5rem 0.5rem;
     overflow: hidden;
+    box-sizing: border-box;
 }
 
-/* Animated background gradient */
+/* Animated background gradient — green/orange */
 .ai-dj-bg {
     position: absolute;
     inset: 0;
     z-index: 0;
     background:
-        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99, 102, 241, 0.12) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(168, 85, 247, 0.1) 0%, transparent 55%),
-        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(59, 130, 246, 0.06) 0%, transparent 50%);
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(34, 197, 94, 0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(249, 115, 22, 0.10) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(16, 185, 129, 0.06) 0%, transparent 50%);
     animation: ai-dj-bg-shift 12s ease-in-out infinite alternate;
     pointer-events: none;
 }
 
 @keyframes ai-dj-bg-shift {
     0%   { opacity: 0.7; filter: hue-rotate(0deg); }
-    50%  { opacity: 1;   filter: hue-rotate(15deg); }
-    100% { opacity: 0.8; filter: hue-rotate(-10deg); }
+    50%  { opacity: 1;   filter: hue-rotate(10deg); }
+    100% { opacity: 0.8; filter: hue-rotate(-8deg); }
 }
 
 /* Header */
@@ -8963,10 +8973,10 @@ textarea:focus {
     gap: 0.3rem;
     padding: 0.25rem 0.75rem;
     border-radius: 100px;
-    background: rgba(99, 102, 241, 0.15);
-    border: 1px solid rgba(99, 102, 241, 0.25);
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.25);
     backdrop-filter: blur(12px);
-    color: rgba(165, 180, 252, 0.9);
+    color: rgba(134, 239, 172, 0.9);
     font-size: 0.65rem;
     font-weight: 600;
     letter-spacing: 0.1em;
@@ -9041,7 +9051,7 @@ textarea:focus {
     gap: 0.35rem;
     padding: 0 0.5rem;
     margin-bottom: 0.5rem;
-    max-width: 400px;
+    max-width: 420px;
     flex-shrink: 0;
 }
 
@@ -9064,8 +9074,8 @@ textarea:focus {
 }
 
 .ai-dj-chip:hover {
-    background: rgba(99, 102, 241, 0.15);
-    border-color: rgba(99, 102, 241, 0.3);
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.3);
     color: rgba(255, 255, 255, 0.85);
     transform: translateY(-1px);
 }
@@ -9079,13 +9089,14 @@ textarea:focus {
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 400px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
+    padding: 0 0.75rem;
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
 }
 
 .ai-dj-input-row {
@@ -9093,6 +9104,7 @@ textarea:focus {
     width: 100%;
     gap: 0.5rem;
     align-items: center;
+    box-sizing: border-box;
 }
 
 .ai-dj-text-input {
@@ -9115,9 +9127,9 @@ textarea:focus {
 }
 
 .ai-dj-text-input:focus {
-    border-color: rgba(99, 102, 241, 0.4);
+    border-color: rgba(34, 197, 94, 0.4);
     background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.08);
 }
 
 .ai-dj-text-input:disabled {
@@ -9131,7 +9143,7 @@ textarea:focus {
     min-width: 44px;
     border-radius: 50%;
     border: none;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(168, 85, 247, 0.5));
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.55), rgba(249, 115, 22, 0.55));
     color: #fff;
     cursor: pointer;
     display: flex;
@@ -9146,7 +9158,7 @@ textarea:focus {
 }
 
 .ai-dj-send-btn:hover {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.7), rgba(168, 85, 247, 0.7));
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.75), rgba(249, 115, 22, 0.75));
     transform: scale(1.05);
 }
 
@@ -9160,55 +9172,71 @@ textarea:focus {
     transform: none;
 }
 
-/* Mic Button */
+/* Mic Button — prominent, full-width, tactile button */
 .ai-dj-mic-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    padding: 0.5rem 1.2rem;
+    gap: 0.6rem;
+    width: 100%;
+    max-width: 280px;
+    padding: 0.8rem 1.5rem;
     border-radius: 100px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(255, 255, 255, 0.03);
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 0.72rem;
-    font-weight: 500;
+    border: 1.5px solid rgba(34, 197, 94, 0.35);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(16, 185, 129, 0.10));
+    color: rgba(134, 239, 172, 0.95);
+    font-size: 0.82rem;
+    font-weight: 600;
     font-family: inherit;
+    letter-spacing: 0.03em;
     cursor: pointer;
     transition: all 0.25s ease;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px);
     user-select: none;
     -webkit-user-select: none;
     touch-action: none;
+    box-shadow:
+        0 2px 16px rgba(34, 197, 94, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .ai-dj-mic-btn .material-symbols-rounded {
-    font-size: 18px;
+    font-size: 20px;
 }
 
 .ai-dj-mic-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.6);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(16, 185, 129, 0.18));
+    border-color: rgba(34, 197, 94, 0.5);
+    color: #fff;
+    box-shadow:
+        0 4px 24px rgba(34, 197, 94, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transform: translateY(-1px);
 }
 
-/* Listening state — pulsing glow */
+.ai-dj-mic-btn:active {
+    transform: scale(0.97);
+    box-shadow: 0 1px 8px rgba(34, 197, 94, 0.1);
+}
+
+/* Listening state — green pulsing glow */
 .ai-dj-mic-btn.listening {
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.4);
-    color: rgba(147, 197, 253, 0.9);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(16, 185, 129, 0.22));
+    border-color: rgba(34, 197, 94, 0.6);
+    color: #fff;
     animation: ai-dj-mic-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes ai-dj-mic-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.2); }
-    50%      { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.3); }
+    50%      { box-shadow: 0 0 0 14px rgba(34, 197, 94, 0); }
 }
 
-/* Processing state — spinner */
+/* Processing state — orange spinner */
 .ai-dj-mic-btn.processing {
-    background: rgba(168, 85, 247, 0.1);
-    border-color: rgba(168, 85, 247, 0.3);
-    color: rgba(196, 167, 255, 0.8);
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(234, 88, 12, 0.12));
+    border-color: rgba(249, 115, 22, 0.45);
+    color: rgba(253, 186, 116, 0.95);
     pointer-events: none;
 }
 
@@ -9223,37 +9251,43 @@ textarea:focus {
 /* ── Responsive tweaks for AI DJ ── */
 @media (min-width: 769px) {
     .ai-dj-container {
-        padding-top: 2rem;
+        padding: 1.5rem 1rem 1rem;
     }
     .ai-dj-persona-wrap {
         max-width: 380px;
         max-height: 380px;
     }
-    #page-ai-dj.active {
-        min-height: calc(100vh - 90px);
+    .ai-dj-input-area {
+        max-width: 420px;
     }
 }
 
 @media (max-width: 768px) {
-    #page-ai-dj.active {
-        margin-bottom: 0;
+    .ai-dj-container {
+        padding: 0.4rem 0 0;
+        padding-bottom: calc(56px + 0.5rem); /* Space for mobile tab bar */
     }
     .ai-dj-persona-wrap {
-        max-height: 38vh;
+        max-height: 35vh;
     }
     .ai-dj-chips {
         gap: 0.3rem;
+        padding: 0 0.75rem;
+        max-width: 100%;
     }
     .ai-dj-chip {
         font-size: 0.68rem;
         padding: 0.3rem 0.65rem;
+    }
+    .ai-dj-mic-btn {
+        max-width: 100%;
     }
 }
 
 @media (max-width: 380px) {
     .ai-dj-persona-wrap {
         max-width: 260px;
-        max-height: 32vh;
+        max-height: 28vh;
     }
     .ai-dj-chip {
         font-size: 0.62rem;
