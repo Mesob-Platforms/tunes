@@ -16,6 +16,7 @@ import { authManager } from './accounts/auth.js';
 import { getAvatarUrl } from './accounts/profile.js';
 import { registerSW } from 'virtual:pwa-register';
 import './smooth-scrolling.js';
+import { aiDjManager } from './aiDj.js';
 
 // Lazy-loaded modules
 let settingsModule = null;
@@ -224,6 +225,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Expose refs for cross-module access (e.g. admin panel auth)
     window.__tunesRefs = { authManager, ui, api, player };
+
+    // Initialize AI DJ manager
+    aiDjManager.init(player, api);
+    window.__aiDjManager = aiDjManager;
 
     // Initialize auth — check for existing session & wire up auth gate forms
     authManager.init();

@@ -1270,6 +1270,164 @@ ${top5Genres.length ? `<div class="section"><h2>Top Genres</h2>${genresHTML}</di
 
 function esc(s: string): string { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+/* ══════════════════════════════════════════════════════════════
+   AI DJ ENDPOINTS
+   ══════════════════════════════════════════════════════════════ */
+
+/** POST /api/ai-dj/curate — AI curates tracks based on user request + history */
+async function handleAIDJCurate(request: Request, env: Env): Promise<Response> {
+  const user = await verifyUser(request, env);
+  if (!user.valid) return Response.json({ error: user.error }, { status: 401, headers: CORS_HEADERS });
+
+  const body: any = await request.json();
+  const { prompt, context } = body; // prompt = user's text request, context = { timeOfDay, recentTracks, mood }
+
+  if (!prompt || typeof prompt !== 'string') {
+    return Response.json({ error: 'Missing prompt' }, { status: 400, headers: CORS_HEADERS });
+  }
+
+  const hdrs = adminHeaders(env);
+
+  // Fetch user's recent listening history (last 100 events)
+  const histRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/listening_events?user_id=eq.${user.userId}&select=track_name,artist_name,album_name&order=listened_at.desc&limit=100`,
+    { headers: hdrs }
+  );
+  const history: any[] = histRes.ok ? await histRes.json() : [];
+
+  // Build a condensed listening profile
+  const artistCounts: Record<string, number> = {};
+  const trackSet = new Set<string>();
+  for (const e of history) {
+    if (e.artist_name) artistCounts[e.artist_name] = (artistCounts[e.artist_name] || 0) + 1;
+    if (e.track_name && e.artist_name) trackSet.add(`${e.track_name} by ${e.artist_name}`);
+  }
+  const topArtists = Object.entries(artistCounts).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([name, count]) => `${name} (${count})`).join(', ');
+  const recentTracks = [...trackSet].slice(0, 10).join('; ');
+
+  const timeOfDay = context?.timeOfDay || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+  const systemPrompt = `You are NOVA, an AI DJ with deep music knowledge. You curate perfect playlists based on user requests.
+Your personality: energetic, witty, deeply knowledgeable about all music genres. You speak in short, punchy sentences.
+
+When the user makes a request, respond with a JSON object containing:
+1. "tracks" - an array of 15-20 track objects, each with "title" and "artist" fields. Choose tracks that match the vibe/mood/genre requested.
+2. "commentary" - a short, hype DJ intro message (1-2 sentences, casual and energetic)
+3. "mood" - the detected mood/vibe (one word like "energetic", "chill", "melancholic", etc.)
+
+IMPORTANT: Return ONLY valid JSON, no markdown, no code fences. Just the raw JSON object.
+Pick diverse tracks from different artists. Mix well-known hits with deeper cuts.
+Consider the user's listening history but also introduce new artists they might like.`;
+
+  const userPrompt = `User request: "${prompt}"
+Time of day: ${timeOfDay}
+User's top artists: ${topArtists || 'no history yet'}
+Recent tracks: ${recentTracks || 'none'}
+${context?.currentTrack ? `Currently playing: ${context.currentTrack}` : ''}
+
+Generate a curated playlist that matches this request. Return ONLY valid JSON.`;
+
+  try {
+    const aiResponse: any = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 1500,
+      temperature: 0.7,
+    });
+
+    const text = (aiResponse.response || '').trim();
+    
+    // Try to parse JSON from response
+    let parsed: any;
+    try {
+      // Try direct parse first
+      parsed = JSON.parse(text);
+    } catch {
+      // Try to extract JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('AI response was not valid JSON');
+      }
+    }
+
+    return Response.json({
+      tracks: parsed.tracks || [],
+      commentary: parsed.commentary || "Let's get this mix started!",
+      mood: parsed.mood || 'vibing',
+    }, { headers: CORS_HEADERS });
+  } catch (err: any) {
+    // Fallback: return a generic suggestion based on the prompt
+    return Response.json({
+      tracks: [],
+      commentary: "I'm having trouble thinking right now, but I've got some suggestions for you!",
+      mood: 'mixed',
+      error: err.message,
+    }, { headers: CORS_HEADERS });
+  }
+}
+
+/** POST /api/ai-dj/commentary — Generate DJ commentary between tracks */
+async function handleAIDJCommentary(request: Request, env: Env): Promise<Response> {
+  const user = await verifyUser(request, env);
+  if (!user.valid) return Response.json({ error: user.error }, { status: 401, headers: CORS_HEADERS });
+
+  const body: any = await request.json();
+  const { currentTrack, nextTrack, mood, sessionVibe } = body;
+
+  const prompt = `You are NOVA, a hype AI DJ. Generate a brief, energetic transition comment between songs.
+Current track: ${currentTrack || 'unknown'}
+Next track: ${nextTrack || 'unknown'}
+Session vibe: ${sessionVibe || mood || 'vibing'}
+
+Write 1-2 short sentences. Be punchy, casual, use DJ-style language. No quotes, no labels. Just the comment.`;
+
+  try {
+    const aiResponse: any = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 100,
+      temperature: 0.85,
+    });
+    const text = (aiResponse.response || '').trim();
+    return Response.json({ text }, { headers: CORS_HEADERS });
+  } catch {
+    return Response.json({ text: "And we keep it rolling..." }, { headers: CORS_HEADERS });
+  }
+}
+
+/** POST /api/ai-dj/learn — Record user feedback for learning */
+async function handleAIDJLearn(request: Request, env: Env): Promise<Response> {
+  const user = await verifyUser(request, env);
+  if (!user.valid) return Response.json({ error: user.error }, { status: 401, headers: CORS_HEADERS });
+
+  const body: any = await request.json();
+  const { action, trackTitle, artistName, mood, sessionId } = body;
+  // action: 'skip', 'like', 'dislike', 'played_full'
+
+  if (!action) return Response.json({ error: 'Missing action' }, { status: 400, headers: CORS_HEADERS });
+
+  // Store feedback in Supabase (using listening_events metadata or a simple approach)
+  // For now, we'll store it as a special listening event with metadata
+  const hdrs = adminHeaders(env);
+  await fetch(`${SUPABASE_URL}/rest/v1/listening_events`, {
+    method: 'POST',
+    headers: { ...hdrs, 'Prefer': 'return=minimal' },
+    body: JSON.stringify({
+      user_id: user.userId,
+      track_name: trackTitle || 'unknown',
+      artist_name: artistName || 'unknown',
+      album_name: `ai_dj_${action}`,
+      listened_at: new Date().toISOString(),
+      duration_ms: action === 'skip' ? 0 : action === 'played_full' ? 999999 : 1,
+    }),
+  });
+
+  return Response.json({ ok: true }, { headers: CORS_HEADERS });
+}
+
 export default {
   /** Cron trigger — archive listening data to Telegram every 6h */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -1345,6 +1503,20 @@ export default {
         return Response.json({ error: err.message || 'Internal error' }, { status: 500, headers: CORS_HEADERS });
       }
       return Response.json({ error: 'Unknown endpoint' }, { status: 404, headers: CORS_HEADERS });
+    }
+
+    // ── AI DJ routes (require user auth token) ──
+    if (url.pathname.startsWith('/api/ai-dj/')) {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      if (request.method !== 'POST') return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
+      try {
+        if (url.pathname === '/api/ai-dj/curate') return await handleAIDJCurate(request, env);
+        if (url.pathname === '/api/ai-dj/commentary') return await handleAIDJCommentary(request, env);
+        if (url.pathname === '/api/ai-dj/learn') return await handleAIDJLearn(request, env);
+      } catch (err: any) {
+        return Response.json({ error: err.message || 'AI DJ error' }, { status: 500, headers: CORS_HEADERS });
+      }
+      return Response.json({ error: 'Unknown AI DJ endpoint' }, { status: 404, headers: CORS_HEADERS });
     }
 
     // ── Public API routes (no auth required) ──

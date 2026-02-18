@@ -190,7 +190,13 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     });
 
     playPauseBtn.addEventListener('click', () => player.handlePlayPause());
-    nextBtn.addEventListener('click', () => player.playNext());
+    nextBtn.addEventListener('click', () => {
+        // Record skip feedback for AI DJ if active
+        if (window.__aiDjManager?.isDJActive() && player.currentTrack) {
+            window.__aiDjManager.recordFeedback('skip', player.currentTrack);
+        }
+        player.playNext();
+    });
     prevBtn.addEventListener('click', () => player.playPrev());
 
     shuffleBtn.addEventListener('click', () => {

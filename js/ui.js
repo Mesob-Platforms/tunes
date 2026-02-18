@@ -35,6 +35,7 @@ import { getVibrantColorFromImage } from './vibrant-color.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { Visualizer } from './visualizer.js';
 import { navigate } from './router.js';
+import { aiDjManager, DJPersona } from './aiDj.js';
 import {
     renderUnreleasedPage as renderUnreleasedTrackerPage,
     renderTrackerArtistPage as renderTrackerArtistContent,
@@ -6735,6 +6736,147 @@ export class UIRenderer {
 
         // Load all data
         await Promise.all([loadDbStats(), loadTelegramStatus(), loadArchiveHistory()]);
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       AI DJ PAGE
+       ══════════════════════════════════════════════════════════ */
+
+    renderAIDJPage() {
+        this.showPage('ai-dj');
+
+        // Init manager if not already
+        if (!aiDjManager.player) {
+            aiDjManager.init(this.player, this.api);
+        }
+
+        // ── Persona canvas ──
+        const canvas = document.getElementById('ai-dj-persona-canvas');
+        if (canvas && !this._djPersona) {
+            this._djPersona = new DJPersona(canvas);
+            aiDjManager.setPersona(this._djPersona);
+            this._djPersona.start();
+        } else if (canvas && this._djPersona) {
+            this._djPersona._resize();
+            this._djPersona.start();
+        }
+
+        // ── State change listener ──
+        aiDjManager.onStateChange((state, data) => {
+            const statusEl = document.getElementById('ai-dj-status');
+            const commentaryEl = document.getElementById('ai-dj-commentary');
+            const micBtn = document.getElementById('ai-dj-mic-btn');
+            const inputEl = document.getElementById('ai-dj-text-input');
+            const sendBtn = document.getElementById('ai-dj-send-btn');
+
+            switch (state) {
+                case 'idle':
+                    if (statusEl) statusEl.textContent = 'Ready to vibe';
+                    if (commentaryEl) commentaryEl.textContent = '';
+                    if (micBtn) micBtn.classList.remove('listening', 'processing');
+                    if (inputEl) { inputEl.disabled = false; inputEl.value = ''; }
+                    if (sendBtn) sendBtn.disabled = false;
+                    break;
+                case 'listening':
+                    if (statusEl) statusEl.textContent = data.transcript || 'Listening...';
+                    if (micBtn) { micBtn.classList.add('listening'); micBtn.classList.remove('processing'); }
+                    break;
+                case 'processing':
+                    if (statusEl) statusEl.textContent = 'Cooking something fire...';
+                    if (micBtn) { micBtn.classList.remove('listening'); micBtn.classList.add('processing'); }
+                    if (inputEl) inputEl.disabled = true;
+                    if (sendBtn) sendBtn.disabled = true;
+                    break;
+                case 'playing':
+                    if (statusEl) statusEl.textContent = `Vibing · ${data.mood || ''}`;
+                    if (commentaryEl && data.commentary) {
+                        commentaryEl.textContent = data.commentary;
+                        commentaryEl.classList.add('visible');
+                        setTimeout(() => commentaryEl.classList.remove('visible'), 8000);
+                    }
+                    if (micBtn) micBtn.classList.remove('listening', 'processing');
+                    if (inputEl) { inputEl.disabled = false; inputEl.value = ''; }
+                    if (sendBtn) sendBtn.disabled = false;
+                    break;
+                case 'error':
+                    if (statusEl) statusEl.textContent = data.error || 'Something went wrong';
+                    if (micBtn) micBtn.classList.remove('listening', 'processing');
+                    if (inputEl) { inputEl.disabled = false; }
+                    if (sendBtn) sendBtn.disabled = false;
+                    setTimeout(() => {
+                        if (statusEl && statusEl.textContent === (data.error || 'Something went wrong')) {
+                            statusEl.textContent = aiDjManager.isDJActive() ? `Vibing · ${aiDjManager.getMood() || ''}` : 'Ready to vibe';
+                        }
+                    }, 4000);
+                    break;
+            }
+        });
+
+        // ── Suggestion chips ──
+        const chipsContainer = document.getElementById('ai-dj-chips');
+        if (chipsContainer && !chipsContainer.dataset.init) {
+            chipsContainer.dataset.init = '1';
+            const chips = aiDjManager.getSuggestionChips();
+            chipsContainer.innerHTML = chips.map(c =>
+                `<button class="ai-dj-chip" data-prompt="${c.prompt.replace(/"/g, '&quot;')}">${c.icon} ${c.label}</button>`
+            ).join('');
+
+            chipsContainer.addEventListener('click', (e) => {
+                const chip = e.target.closest('.ai-dj-chip');
+                if (!chip) return;
+                const prompt = chip.dataset.prompt;
+                aiDjManager.processRequest(prompt);
+            });
+        }
+
+        // ── Text input ──
+        const textInput = document.getElementById('ai-dj-text-input');
+        const sendBtn = document.getElementById('ai-dj-send-btn');
+        if (textInput && !textInput.dataset.init) {
+            textInput.dataset.init = '1';
+
+            const submitText = () => {
+                const text = textInput.value.trim();
+                if (!text) return;
+                aiDjManager.processRequest(text);
+            };
+
+            textInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); submitText(); }
+            });
+
+            if (sendBtn) {
+                sendBtn.addEventListener('click', submitText);
+            }
+        }
+
+        // ── Mic button (hold to talk) ──
+        const micBtn = document.getElementById('ai-dj-mic-btn');
+        if (micBtn && !micBtn.dataset.init) {
+            micBtn.dataset.init = '1';
+
+            if (!aiDjManager.isVoiceAvailable()) {
+                micBtn.style.display = 'none';
+            } else {
+                let holdTimer = null;
+
+                micBtn.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    holdTimer = setTimeout(() => {
+                        aiDjManager.startListening();
+                    }, 150); // Small delay to distinguish tap from hold
+                });
+
+                const stopHandler = () => {
+                    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+                    aiDjManager.stopListening();
+                };
+
+                micBtn.addEventListener('pointerup', stopHandler);
+                micBtn.addEventListener('pointerleave', stopHandler);
+                micBtn.addEventListener('pointercancel', stopHandler);
+            }
+        }
     }
 }
 

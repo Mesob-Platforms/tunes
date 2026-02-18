@@ -1664,6 +1664,43 @@
                     <div id="wrapped-container"></div>
                 </div>
 
+                <!-- AI DJ -->
+                <div id="page-ai-dj" class="page">
+                    <div class="ai-dj-container">
+                        <!-- Glassmorphism background layer -->
+                        <div class="ai-dj-bg"></div>
+
+                        <!-- Top status area -->
+                        <div class="ai-dj-header">
+                            <span class="ai-dj-badge">AI DJ</span>
+                            <span class="ai-dj-status" id="ai-dj-status">Ready to vibe</span>
+                        </div>
+
+                        <!-- Persona visualization canvas -->
+                        <div class="ai-dj-persona-wrap">
+                            <canvas id="ai-dj-persona-canvas"></canvas>
+                            <div class="ai-dj-commentary" id="ai-dj-commentary"></div>
+                        </div>
+
+                        <!-- Suggestion chips -->
+                        <div class="ai-dj-chips" id="ai-dj-chips"></div>
+
+                        <!-- Input area -->
+                        <div class="ai-dj-input-area">
+                            <div class="ai-dj-input-row">
+                                <input type="text" id="ai-dj-text-input" class="ai-dj-text-input" placeholder="Tell me what you wanna hear..." autocomplete="off" />
+                                <button id="ai-dj-send-btn" class="ai-dj-send-btn" aria-label="Send">
+                                    <span class="material-symbols-rounded">send</span>
+                                </button>
+                            </div>
+                            <button id="ai-dj-mic-btn" class="ai-dj-mic-btn" aria-label="Hold to talk">
+                                <span class="material-symbols-rounded">mic</span>
+                                <span class="ai-dj-mic-label">Hold to talk</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Admin Dashboard (admin only) -->
                 <div id="page-admin" class="page">
                     <div style="max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem;">
@@ -2516,6 +2553,10 @@
                 <a href="/library" class="tab-item" data-tab="library">
                     <span class="material-symbols-rounded tab-icon">library_music</span>
                     <span class="tab-label">Library</span>
+                </a>
+                <a href="/ai-dj" class="tab-item" data-tab="ai-dj">
+                    <span class="material-symbols-rounded tab-icon">radio</span>
+                    <span class="tab-label">AI DJ</span>
                 </a>
                 <a href="/account" class="tab-item" data-tab="account">
                     <span class="material-symbols-rounded tab-icon">person</span>
