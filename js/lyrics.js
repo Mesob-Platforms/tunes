@@ -961,6 +961,57 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
 
         container.appendChild(amLyrics);
 
+        // Override the built-in scrollToActiveLine to position active line at 20% from top (30% above center)
+        const overrideScroll = () => {
+            if (typeof amLyrics.scrollToActiveLine === 'function') {
+                amLyrics.scrollToActiveLine = function () {
+                    if (!this.lyricsContainer || this.activeLineIndices.length === 0) return;
+                    const idx = Math.min(...this.activeLineIndices);
+                    const el = this.lyricsContainer.querySelector(`.lyrics-line:nth-child(${idx + 1})`);
+                    if (el) {
+                        const ch = this.lyricsContainer.clientHeight;
+                        const top = el.offsetTop;
+                        const h = el.clientHeight;
+                        const bg = el.querySelector('.background-text.before');
+                        let bgOff = 0;
+                        if (bg) bgOff = bg.clientHeight / 2;
+                        // 0.2 = 20% from top (30% above center)
+                        const target = top - ch * 0.2 + h / 2 - bgOff;
+                        requestAnimationFrame(() => {
+                            this.isProgrammaticScroll = true;
+                            this.lyricsContainer?.scrollTo({ top: target, behavior: 'smooth' });
+                            setTimeout(() => { this.isProgrammaticScroll = false; }, 100);
+                        });
+                    }
+                };
+            }
+            if (typeof amLyrics.scrollToInstrumental === 'function') {
+                amLyrics.scrollToInstrumental = function (insertIdx) {
+                    if (!this.lyricsContainer) return;
+                    const el = this.lyricsContainer.querySelector(`.lyrics-line:nth-child(${insertIdx + 1})`);
+                    if (el) {
+                        const ch = this.lyricsContainer.clientHeight;
+                        const top = el.offsetTop;
+                        const h = el.clientHeight;
+                        const bg = el.querySelector('.background-text.before');
+                        let bgOff = 0;
+                        if (bg) bgOff = bg.clientHeight / 2;
+                        const target = top - ch * 0.2 + h / 2 - bgOff;
+                        requestAnimationFrame(() => {
+                            this.isProgrammaticScroll = true;
+                            this.lyricsContainer?.scrollTo({ top: target, behavior: 'smooth' });
+                            setTimeout(() => { this.isProgrammaticScroll = false; }, 100);
+                        });
+                    }
+                };
+            }
+        };
+        // Override immediately if available, and also after shadow DOM renders
+        overrideScroll();
+        setTimeout(overrideScroll, 100);
+        setTimeout(overrideScroll, 500);
+        setTimeout(overrideScroll, 1500);
+
         // Inject custom styles into am-lyrics shadow DOM once it renders
         const injectLyricsStyles = () => {
             const root = amLyrics.shadowRoot;
@@ -993,69 +1044,100 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                 .bottom, .info-bar, .meta, .about {
                     display: none !important;
                 }
-                /* Apply Outfit font */
-                :host, *, .line, .synced-line, p, span, div {
-                    font-family: 'Outfit', sans-serif !important;
+                /* Apply Bricolage Grotesque font */
+                :host, *, .line, .synced-line, .lyrics-line, p, span, div {
+                    font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif !important;
+                }
+
+                /* Pad so first line starts at ~20% from top and last line can reach 20% */
+                .lyrics-container {
+                    padding-top: 20vh !important;
+                    padding-bottom: 80vh !important;
                 }
 
                 /* === KILL transitions ONLY on sung/past lines === */
-                /* Keep transitions on active + future lines for the karaoke effect */
                 [data-sung], [data-sung] *,
-                .line.past, .synced-line.past,
-                .line.past *, .synced-line.past * {
+                .line.past, .synced-line.past, .lyrics-line.past,
+                .line.past *, .synced-line.past *, .lyrics-line.past * {
                     transition: none !important;
                     -webkit-transition: none !important;
                 }
 
-                /* Lyrics text: bigger, bolder, roomier */
-                .line, .synced-line, [class*="line"] {
-                    font-size: 1.55rem !important;
-                    line-height: 1.75 !important;
+                /* Lyrics text: default dim state */
+                .line, .synced-line, .lyrics-line, [class*="line"] {
+                    font-size: 2rem !important;
+                    line-height: 1.6 !important;
                     font-weight: 700 !important;
                     letter-spacing: -0.01em !important;
-                    padding: 0.65rem 0 !important;
+                    padding: 0.5rem 0 !important;
                     margin: 0 !important;
-                    opacity: 0.45 !important;
-                    transition: opacity 0.4s ease, font-size 0.35s ease, text-shadow 0.4s ease !important;
-                }
-                .line.active, .synced-line.active, [class*="line"].active {
-                    font-size: 1.8rem !important;
-                    line-height: 1.75 !important;
-                    font-weight: 800 !important;
-                    opacity: 1 !important;
-                    text-shadow: 0 0 32px rgba(255,255,255,0.45), 0 0 8px rgba(255,255,255,0.2) !important;
+                    opacity: 0.35 !important;
+                    color: rgba(255,255,255,0.4) !important;
+                    transition: opacity 0.4s ease, text-shadow 0.4s ease !important;
                 }
 
-                /* Slow down karaoke word-fill transition */
-                .line.active *, .synced-line.active *, [class*="line"].active * {
+                /* Active line: bright white, NO glare */
+                /* .active-line is the class am-lyrics component uses */
+                .line.active, .synced-line.active,
+                .active-line, .lyrics-line.active-line,
+                [class*="line"].active, [class*="line"][class*="active"] {
+                    font-size: 2rem !important;
+                    line-height: 1.6 !important;
+                    font-weight: 800 !important;
+                    opacity: 1 !important;
+                    color: #ffffff !important;
+                    text-shadow: none !important;
+                    filter: none !important;
+                }
+
+                /* Active line children (karaoke fill spans) */
+                .active-line *, .lyrics-line.active-line *,
+                .line.active *, .synced-line.active *, [class*="line"].active *,
+                [class*="line"][class*="active"] * {
                     transition: background-position 0.6s linear, color 0.5s ease, -webkit-text-fill-color 0.5s ease !important;
                 }
 
-                /* === SUNG LINES: data-sung attribute forces white === */
-                [data-sung],
-                [data-sung] *,
-                .line[data-sung],
-                .line[data-sung] *,
-                .synced-line[data-sung],
-                .synced-line[data-sung] *,
-                [class*="line"][data-sung],
-                [class*="line"][data-sung] *,
-                p[data-sung],
-                p[data-sung] * {
+                /* Active line progress-text should also be white */
+                .active-line .progress-text,
+                .lyrics-line.active-line .progress-text {
                     color: #ffffff !important;
-                    opacity: 1 !important;
-                    filter: none !important;
-                    transform: none !important;
-                    -webkit-text-fill-color: #ffffff !important;
+                    -webkit-text-fill-color: transparent !important;
                 }
 
-                /* Past lines also forced white via class */
-                .line.past, .synced-line.past, [class*="line"].past,
-                .line.past *, .synced-line.past *, [class*="line"].past * {
-                    color: #ffffff !important;
-                    opacity: 1 !important;
+                /* === SUNG LINES: data-sung dims back to default === */
+                [data-sung],
+                .line[data-sung],
+                .synced-line[data-sung],
+                .lyrics-line[data-sung],
+                [class*="line"][data-sung],
+                p[data-sung] {
+                    opacity: 0.35 !important;
+                    color: rgba(255,255,255,0.4) !important;
                     filter: none !important;
-                    -webkit-text-fill-color: #ffffff !important;
+                    text-shadow: none !important;
+                }
+                [data-sung] *,
+                .line[data-sung] *,
+                .synced-line[data-sung] *,
+                .lyrics-line[data-sung] *,
+                [class*="line"][data-sung] *,
+                p[data-sung] * {
+                    color: rgba(255,255,255,0.4) !important;
+                    -webkit-text-fill-color: rgba(255,255,255,0.4) !important;
+                    background: none !important;
+                }
+
+                /* Past lines also dimmed via class */
+                .line.past, .synced-line.past, .lyrics-line.past, [class*="line"].past {
+                    opacity: 0.35 !important;
+                    color: rgba(255,255,255,0.4) !important;
+                    filter: none !important;
+                    text-shadow: none !important;
+                }
+                .line.past *, .synced-line.past *, .lyrics-line.past *, [class*="line"].past * {
+                    color: rgba(255,255,255,0.4) !important;
+                    -webkit-text-fill-color: rgba(255,255,255,0.4) !important;
+                    background: none !important;
                 }
 
                 /* Hide scrollbar inside component */
@@ -1106,13 +1188,10 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             }
         };
 
-        // Use data-sung attribute to permanently mark lines that have been sung.
-        // The CSS in the shadow DOM handles the actual white coloring via [data-sung].
-        // We track the highest index ever marked as active so even if the component
-        // re-renders or changes classes, we re-apply the attribute.
-        let highestSungIndex = -1;
+        // Use data-sung attribute to mark lines that have been sung and passed.
+        // The CSS in the shadow DOM dims them back to default appearance.
 
-        const forceLyricsWhite = () => {
+        const forceLyricsDim = () => {
             const root = amLyrics.shadowRoot;
             if (!root) return;
 
@@ -1144,32 +1223,45 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                 }
             }
 
-            // Update high-water mark (one BEFORE active = last fully sung line)
-            const lastSungIndex = activeIndex > 0 ? activeIndex - 1 : -1;
-            if (lastSungIndex > highestSungIndex) {
-                highestSungIndex = lastSungIndex;
-            }
-
-            // Apply data-sung to all lines BEFORE the active line (not the active line itself!)
-            // The active line needs its transitions intact for the karaoke word-fill effect.
+            // Apply data-sung to all lines BEFORE the active line.
+            // data-sung CSS now dims them back to default (gray, low opacity).
             for (let i = 0; i < lines.length; i++) {
-                if (i <= highestSungIndex) {
+                if (i < activeIndex) {
                     if (!lines[i].hasAttribute('data-sung')) {
                         lines[i].setAttribute('data-sung', '');
                         // Strip any inline color/opacity the component set
                         lines[i].style.removeProperty('color');
                         lines[i].style.removeProperty('opacity');
                         lines[i].style.removeProperty('-webkit-text-fill-color');
+                        lines[i].style.removeProperty('text-shadow');
                         lines[i].querySelectorAll('*').forEach(child => {
                             child.style.removeProperty('color');
                             child.style.removeProperty('opacity');
                             child.style.removeProperty('-webkit-text-fill-color');
                         });
                     }
-                }
-                // Make sure the active line does NOT have data-sung
-                if (i === activeIndex && lines[i].hasAttribute('data-sung')) {
-                    lines[i].removeAttribute('data-sung');
+                } else if (i === activeIndex) {
+                    // Force bright white on the active line via inline styles (NO glare)
+                    if (lines[i].hasAttribute('data-sung')) {
+                        lines[i].removeAttribute('data-sung');
+                    }
+                    lines[i].style.setProperty('opacity', '1', 'important');
+                    lines[i].style.setProperty('color', '#ffffff', 'important');
+                    lines[i].style.setProperty('font-weight', '800', 'important');
+                    lines[i].style.setProperty('text-shadow', 'none', 'important');
+                    lines[i].style.setProperty('filter', 'none', 'important');
+                    // Scrolling is handled by the overridden scrollToActiveLine on the am-lyrics component
+                } else {
+                    // Future lines: remove data-sung, clear forced active styles
+                    if (lines[i].hasAttribute('data-sung')) {
+                        lines[i].removeAttribute('data-sung');
+                    }
+                    // Clear any leftover forced active styles from when this was the active line
+                    lines[i].style.removeProperty('opacity');
+                    lines[i].style.removeProperty('color');
+                    lines[i].style.removeProperty('font-weight');
+                    lines[i].style.removeProperty('text-shadow');
+                    lines[i].style.removeProperty('filter');
                 }
             }
         };
@@ -1180,7 +1272,7 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         const observer = new MutationObserver(() => {
             injectLyricsStyles();
             removeUnwantedElements();
-            forceLyricsWhite();
+            forceLyricsDim();
         });
         observer.observe(amLyrics, { childList: true, subtree: true });
         // Also observe shadow root directly
@@ -1188,18 +1280,18 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             const root = amLyrics.shadowRoot;
             if (!root) return;
             const shadowObserver = new MutationObserver(() => {
-                forceLyricsWhite();
+                forceLyricsDim();
             });
             shadowObserver.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
         };
         observeShadow();
-        setTimeout(() => { injectLyricsStyles(); removeUnwantedElements(); forceLyricsWhite(); observeShadow(); }, 500);
-        setTimeout(() => { injectLyricsStyles(); removeUnwantedElements(); forceLyricsWhite(); }, 1500);
-        setTimeout(() => { removeUnwantedElements(); forceLyricsWhite(); }, 3000);
+        setTimeout(() => { injectLyricsStyles(); removeUnwantedElements(); forceLyricsDim(); observeShadow(); }, 500);
+        setTimeout(() => { injectLyricsStyles(); removeUnwantedElements(); forceLyricsDim(); }, 1500);
+        setTimeout(() => { removeUnwantedElements(); forceLyricsDim(); }, 3000);
         // Continuous polling - run every 80ms to beat the component's own updates
         const pollInterval = setInterval(() => {
             if (!document.contains(amLyrics)) { clearInterval(pollInterval); return; }
-            forceLyricsWhite();
+            forceLyricsDim();
         }, 80);
 
         // Setup observer IMMEDIATELY to catch lyrics as they load (not after waiting)
@@ -1305,13 +1397,13 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
     }
 
     if (!lyricsData || !lyricsData.subtitles) {
-        container.innerHTML = '<div class="lyrics-error" style="font-family:Outfit,sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No cached lyrics available offline</div>';
+        container.innerHTML = `<div class="lyrics-error" style="font-family:'Bricolage Grotesque','DM Sans',sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No cached lyrics available offline</div>`;
         return null;
     }
 
     const parsed = lyricsManager.parseSyncedLyrics(lyricsData.subtitles);
     if (parsed.length === 0) {
-        container.innerHTML = '<div class="lyrics-error" style="font-family:Outfit,sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No synced lyrics found</div>';
+        container.innerHTML = `<div class="lyrics-error" style="font-family:'Bricolage Grotesque','DM Sans',sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No synced lyrics found</div>`;
         return null;
     }
 
@@ -1320,8 +1412,8 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
     const wrapper = document.createElement('div');
     wrapper.className = 'fallback-lyrics-wrapper';
     wrapper.style.cssText = `
-        font-family: 'Outfit', sans-serif;
-        padding: 2rem 1.5rem 6rem;
+        font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
+        padding: 20vh 1.5rem 80vh;
         overflow-y: auto;
         height: 100%;
         scrollbar-width: none;
@@ -1335,16 +1427,16 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
         el.dataset.time = line.time;
         el.dataset.idx = idx;
         el.style.cssText = `
-            font-size: 1.55rem;
-            line-height: 1.75;
+            font-size: 2rem;
+            line-height: 1.6;
             font-weight: 700;
             letter-spacing: -0.01em;
-            padding: 0.65rem 0;
+            padding: 0.5rem 0;
             margin: 0;
-            color: #fff;
-            opacity: 0.4;
+            color: rgba(255,255,255,0.4);
+            opacity: 0.35;
             cursor: pointer;
-            transition: opacity 0.4s ease, font-size 0.35s ease, text-shadow 0.4s ease;
+            transition: opacity 0.4s ease, text-shadow 0.4s ease;
             -webkit-user-select: none;
             user-select: none;
         `;
@@ -1370,22 +1462,33 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
             else break;
         }
         if (newIdx !== activeIdx) {
-            // Dim old line
+            // Dim old line back to default
             if (activeIdx >= 0 && activeIdx < lineEls.length) {
-                lineEls[activeIdx].style.opacity = '0.4';
-                lineEls[activeIdx].style.fontSize = '1.55rem';
+                lineEls[activeIdx].style.opacity = '0.35';
+                lineEls[activeIdx].style.fontSize = '2rem';
                 lineEls[activeIdx].style.fontWeight = '700';
+                lineEls[activeIdx].style.color = 'rgba(255,255,255,0.4)';
                 lineEls[activeIdx].style.textShadow = 'none';
             }
             activeIdx = newIdx;
             // Highlight new line
             if (activeIdx >= 0 && activeIdx < lineEls.length) {
                 lineEls[activeIdx].style.opacity = '1';
-                lineEls[activeIdx].style.fontSize = '1.8rem';
+                lineEls[activeIdx].style.fontSize = '2rem';
                 lineEls[activeIdx].style.fontWeight = '800';
-                lineEls[activeIdx].style.textShadow = '0 0 32px rgba(255,255,255,0.45), 0 0 8px rgba(255,255,255,0.2)';
-                // Auto-scroll
-                lineEls[activeIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                lineEls[activeIdx].style.color = '#ffffff';
+                lineEls[activeIdx].style.textShadow = 'none';
+                // Auto-scroll to ~20% from top (30% above center)
+                const sc = wrapper;
+                if (sc && sc.scrollTo) {
+                    const cRect = sc.getBoundingClientRect();
+                    const lRect = lineEls[activeIdx].getBoundingClientRect();
+                    const relTop = lRect.top - cRect.top + sc.scrollTop;
+                    const tgt = relTop - (sc.clientHeight * 0.2);
+                    sc.scrollTo({ top: Math.max(0, tgt), behavior: 'smooth' });
+                } else {
+                    lineEls[activeIdx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             }
         }
         animId = requestAnimationFrame(updateActive);

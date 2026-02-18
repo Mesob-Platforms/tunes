@@ -3794,7 +3794,11 @@ export class UIRenderer {
                 else if (t === 'album') navigate(`/album/${id}`);
                 else if (t === 'track') {
                     const track = tracks.find(tr => String(tr.id) === String(id));
-                    if (track) this.player.playTrack(track, tracks);
+                    if (track) {
+                        const startIndex = tracks.findIndex(tr => String(tr.id) === String(id));
+                        this.player.setQueue(tracks, startIndex >= 0 ? startIndex : 0);
+                        this.player.playTrackFromQueue();
+                    }
                 }
             });
         }
@@ -3807,7 +3811,11 @@ export class UIRenderer {
                 else if (t === 'playlist') navigate(`/playlist/${id}`);
                 else if (t === 'track') {
                     const track = tracks.find(tr => String(tr.id) === String(id));
-                    if (track) this.player.playTrack(track, tracks);
+                    if (track) {
+                        const startIndex = tracks.findIndex(tr => String(tr.id) === String(id));
+                        this.player.setQueue(tracks, startIndex >= 0 ? startIndex : 0);
+                        this.player.playTrackFromQueue();
+                    }
                 }
             });
         });

@@ -6007,9 +6007,9 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
     border-left: 1px solid rgb(255, 255, 255, 0.1);
 }
 
-/* Lyrics panel uses Outfit display font */
+/* Lyrics panel uses Bricolage Grotesque display font */
 .side-panel[data-view='lyrics'] .panel-content {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
     /* Hide scrollbar but keep scrolling */
     scrollbar-width: none;
     -ms-overflow-style: none;
