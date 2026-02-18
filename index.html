@@ -1754,14 +1754,14 @@
                                 <div id="admin-user-detail-content"></div>
                             </div>
 
-                            <!-- Trending Now - 2 columns -->
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem;">
-                                <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;">
+                            <!-- Trending Now - horizontal scroll -->
+                            <div style="display:flex;gap:1rem;margin-bottom:1.25rem;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:4px;">
+                                <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;min-width:85%;flex-shrink:0;scroll-snap-align:start;">
                                     <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🔥 Trending Artists <span style="opacity:0.5;">(48h)</span></p>
                                     <canvas id="admin-chart-artists" height="250" style="display:none;"></canvas>
                                     <div id="admin-trending-artists-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
                                 </div>
-                                <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;">
+                                <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;min-width:85%;flex-shrink:0;scroll-snap-align:start;">
                                     <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🎵 Trending Tracks <span style="opacity:0.5;">(48h)</span></p>
                                     <canvas id="admin-chart-tracks" height="250" style="display:none;"></canvas>
                                     <div id="admin-trending-tracks-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
