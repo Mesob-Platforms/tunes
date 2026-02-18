@@ -1887,32 +1887,56 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   UPDATE NOTIFICATION BAR — thin bar above mobile tab bar
+   UPDATE NOTIFICATION BAR — gradient bar BELOW mobile tab bar
    ══════════════════════════════════════════════════════════════ */
-const APP_VERSION = '1.0.0';
 
 async function _initUpdateNotificationBar() {
     const bar = document.getElementById('update-notification-bar');
     if (!bar) return;
     try {
-        const res = await fetch(`/api/updates/check?version=${APP_VERSION}`);
+        const res = await fetch('/api/updates/check');
         const updates = await res.json();
         if (!Array.isArray(updates) || updates.length === 0) { bar.style.display = 'none'; return; }
-        const latest = updates[0]; // most recent relevant update
+
         _injectUpdateBarStyles();
+        const latest = updates[0];
+        const count = updates.length;
+
         bar.style.display = '';
+        bar.className = 'tunes-update-bar';
+        bar.setAttribute('data-update-id', latest.id);
+        bar.setAttribute('data-update-link', latest.link || '');
+
+        const categoryIcons = { feature: '✦', bugfix: '🛠', improvement: '⚡', security: '🔒' };
+        const icon = categoryIcons[latest.category] || '✦';
+
         bar.innerHTML = `
-            <div class="tunes-update-bar">
-                <a href="${_esc(latest.link || '#')}" target="_blank" class="tunes-update-link" rel="noopener">
-                    <span class="tunes-update-icon">✦</span>
-                    <span class="tunes-update-text">${_esc(latest.title)}</span>
-                    <span class="tunes-update-arrow">→</span>
-                </a>
+            <div class="tunes-update-inner">
+                <span class="tunes-update-icon">${icon}</span>
+                <span class="tunes-update-text">${_esc(latest.title)}</span>
+                ${count > 1 ? `<span class="tunes-update-badge">${count}</span>` : ''}
+                <span class="tunes-update-arrow">→</span>
             </div>
         `;
+
+        // Click opens the link + track click
+        bar.addEventListener('click', () => {
+            const link = bar.getAttribute('data-update-link');
+            const uid = bar.getAttribute('data-update-id');
+            _trackEvent('update', uid, 'click');
+            if (link) window.open(link, '_blank', 'noopener');
+        });
+
+        // Fade-in + push tab bar up + track impression
+        requestAnimationFrame(() => {
+            bar.classList.add('tunes-update-visible');
+            document.body.classList.add('has-update-bar');
+            _trackEvent('update', latest.id, 'impression');
+        });
+
     } catch (e) {
         console.warn('[Updates] Could not check for updates:', e);
-        bar.style.display = 'none';
+        if (bar) bar.style.display = 'none';
     }
 }
 
@@ -1922,84 +1946,239 @@ function _injectUpdateBarStyles() {
     s.id = 'tunes-update-bar-styles';
     s.textContent = `
 .tunes-update-bar{
-    padding:0.35rem 1rem;
-    background:rgba(10,10,10,0.85);
-    backdrop-filter:blur(12px);
-    -webkit-backdrop-filter:blur(12px);
-    border-top:1px solid rgba(168,85,247,0.12);
+    position:fixed;
+    bottom:0;
+    left:0;
+    right:0;
+    z-index:10001;
+    cursor:pointer;
+    opacity:0;
+    transform:translateY(100%);
+    transition:opacity 0.5s cubic-bezier(.22,1,.36,1),transform 0.5s cubic-bezier(.22,1,.36,1);
+    -webkit-tap-highlight-color:transparent;
 }
-.tunes-update-link{
+.tunes-update-bar.tunes-update-visible{
+    opacity:1;
+    transform:translateY(0);
+}
+.tunes-update-inner{
     display:flex;
     align-items:center;
-    gap:0.35rem;
-    text-decoration:none;
-    font-size:0.7rem;
-    font-weight:500;
-    letter-spacing:-0.01em;
-    background:linear-gradient(135deg,#c084fc,#ec4899,#f43f5e);
-    -webkit-background-clip:text;
-    -webkit-text-fill-color:transparent;
-    background-clip:text;
-    text-fill-color:transparent;
-    filter:drop-shadow(0 0 6px rgba(192,132,252,0.35));
-    transition:filter 0.2s;
-    width:fit-content;
+    justify-content:center;
+    gap:0.45rem;
+    padding:0.55rem 1rem;
+    background:linear-gradient(135deg,#c084fc,#a855f7,#ec4899,#f43f5e);
+    background-size:200% 200%;
+    animation:tunes-update-gradient-shift 4s ease infinite;
+    box-shadow:0 -4px 20px rgba(168,85,247,0.3),0 -1px 8px rgba(236,72,153,0.2);
 }
-.tunes-update-link:hover{
-    filter:drop-shadow(0 0 10px rgba(192,132,252,0.5));
+.tunes-update-text{
+    font-size:0.72rem;
+    font-weight:700;
+    color:#000;
+    letter-spacing:-0.01em;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:70vw;
 }
 .tunes-update-icon{
-    font-size:0.6rem;
+    font-size:0.7rem;
+    color:#000;
     animation:tunes-update-pulse 2s ease-in-out infinite;
 }
 .tunes-update-arrow{
-    font-size:0.65rem;
-    opacity:0.7;
+    font-size:0.7rem;
+    color:rgba(0,0,0,0.6);
+    transition:transform 0.2s;
+}
+.tunes-update-bar:hover .tunes-update-arrow{
+    transform:translateX(2px);
+}
+.tunes-update-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:1.1rem;
+    height:1.1rem;
+    padding:0 0.3rem;
+    border-radius:999px;
+    background:rgba(88,28,135,0.85);
+    color:#e9d5ff;
+    font-size:0.6rem;
+    font-weight:800;
+    letter-spacing:0;
+    line-height:1;
+    backdrop-filter:blur(4px);
+    box-shadow:0 0 6px rgba(88,28,135,0.4);
 }
 @keyframes tunes-update-pulse{
-    0%,100%{opacity:0.5;transform:scale(0.85)}
-    50%{opacity:1;transform:scale(1.1)}
+    0%,100%{opacity:0.6;transform:scale(0.9)}
+    50%{opacity:1;transform:scale(1.15)}
 }
+@keyframes tunes-update-gradient-shift{
+    0%{background-position:0% 50%}
+    50%{background-position:100% 50%}
+    100%{background-position:0% 50%}
+}
+/* Desktop: show as thin bar at bottom of sidebar area */
 @media(min-width:769px){
-    .tunes-update-bar{display:none !important}
+    .tunes-update-bar{
+        position:fixed;
+        bottom:0;
+        left:0;
+        right:0;
+        z-index:10001;
+    }
 }
+/* Ensure no overlap — push above safe area on iOS */
+@supports(padding-bottom: env(safe-area-inset-bottom)){
+    .tunes-update-inner{
+        padding-bottom:calc(0.55rem + env(safe-area-inset-bottom));
+    }
+}
+/* Light theme */
+[data-theme="light"] .tunes-update-inner{
+    background:linear-gradient(135deg,#c084fc,#a855f7,#ec4899,#f43f5e);
+    box-shadow:0 -4px 16px rgba(168,85,247,0.2),0 -1px 6px rgba(236,72,153,0.15);
+}
+[data-theme="light"] .tunes-update-text{color:#000;}
     `;
     document.head.appendChild(s);
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ANNOUNCEMENT BANNERS — Wrapped-style ads on home/explore/sidebar
+   ANNOUNCEMENT BANNERS — stacked, glassmorphism, custom gradients
    ══════════════════════════════════════════════════════════════ */
+
+function _shouldShowAnnouncement(ann) {
+    const freq = ann.frequency || 'always';
+    if (freq === 'always') return true;
+    const key = `tunes_ann_seen_${ann.id}`;
+    const stored = localStorage.getItem(key);
+    if (!stored) return true;
+
+    try {
+        const data = JSON.parse(stored);
+        if (freq === 'once_ever') return false;
+        if (freq === 'once_per_session') {
+            // Session = per page load, tracked by sessionStorage
+            return !sessionStorage.getItem(key);
+        }
+        if (freq === 'once_per_day') {
+            const lastSeen = new Date(data.ts);
+            const now = new Date();
+            return lastSeen.toDateString() !== now.toDateString();
+        }
+    } catch { return true; }
+    return true;
+}
+
+function _markAnnouncementSeen(ann) {
+    const freq = ann.frequency || 'always';
+    if (freq === 'always') return;
+    const key = `tunes_ann_seen_${ann.id}`;
+    localStorage.setItem(key, JSON.stringify({ ts: Date.now() }));
+    if (freq === 'once_per_session') sessionStorage.setItem(key, '1');
+}
 
 async function _initAnnouncementBanners() {
     try {
         const res = await fetch('/api/announcements/active');
         const announcements = await res.json();
         if (!Array.isArray(announcements) || announcements.length === 0) return;
+
+        // Filter by frequency cap
+        const visible = announcements.filter(a => _shouldShowAnnouncement(a));
+        if (visible.length === 0) return;
+
         _injectAnnouncementStyles();
-        const ann = announcements[0]; // show the most recent active announcement
-        const bannerHTML = _buildAnnouncementBanner(ann);
-        // Inject into home, explore, and sidebar
-        _setAnnouncementSlot('home-announcement-banner', bannerHTML);
-        _setAnnouncementSlot('explore-announcement-banner', bannerHTML);
-        _setAnnouncementSlot('sidebar-announcement-banner', bannerHTML);
+
+        // Mark them seen
+        visible.forEach(a => _markAnnouncementSeen(a));
+
+        // Build stacked banners HTML for home/explore (full)
+        const fullHTML = visible.map(a => _buildAnnouncementBanner(a, false)).join('');
+        _setAnnouncementSlot('home-announcement-banner', fullHTML);
+        _setAnnouncementSlot('explore-announcement-banner', fullHTML);
+
+        // Build compact version for sidebar
+        const compactHTML = visible.map(a => _buildAnnouncementBanner(a, true)).join('');
+        _setAnnouncementSlot('sidebar-announcement-banner', compactHTML);
+
+        // Track impressions for each visible announcement
+        visible.forEach(a => _trackEvent('announcement', a.id, 'impression'));
+
+        // Wire CTA click tracking
+        document.querySelectorAll('[data-ann-id]').forEach(el => {
+            if (el.tagName === 'A' || el.classList.contains('tunes-ann-cta-btn') || el.classList.contains('tunes-ann-compact-link')) {
+                el.addEventListener('click', () => {
+                    _trackEvent('announcement', el.getAttribute('data-ann-id'), 'click');
+                });
+            }
+        });
+
     } catch (e) {
         console.warn('[Announcements] Could not load announcements:', e);
     }
 }
 
-function _buildAnnouncementBanner(ann) {
+function _buildAnnouncementBanner(ann, compact = false) {
+    const gs = ann.gradient_start || '#a855f7';
+    const ge = ann.gradient_end || '#ec4899';
     const hasImage = ann.image_url;
-    return `
-        <a href="${_esc(ann.link || '#')}" target="_blank" rel="noopener" class="tunes-ann-banner">
-            ${hasImage ? `<img src="${_esc(ann.image_url)}" alt="" class="tunes-ann-img" />` : ''}
-            <div class="tunes-ann-content">
-                <div class="tunes-ann-tag">AD</div>
-                <div class="tunes-ann-title">${_esc(ann.title)}</div>
-                <div class="tunes-ann-cta">Learn more →</div>
+    const tag = _esc(ann.tag || 'NEW');
+    const typeLabel = (ann.type || 'announcement').toUpperCase();
+    const body = ann.body ? `<p class="tunes-ann-body">${_esc(ann.body)}</p>` : '';
+
+    // CTA buttons (up to 3)
+    let ctaHTML = '';
+    const buttons = Array.isArray(ann.cta_buttons) ? ann.cta_buttons.slice(0, 3) : [];
+    if (buttons.length > 0) {
+        ctaHTML = `<div class="tunes-ann-ctas">${buttons.map((b, i) =>
+            `<a href="${_esc(b.url || '#')}" target="_blank" rel="noopener" class="tunes-ann-cta-btn${i === 0 ? ' primary' : ''}" data-ann-id="${ann.id}">${_esc(b.text || 'Learn more')}</a>`
+        ).join('')}</div>`;
+    } else if (ann.link) {
+        ctaHTML = `<div class="tunes-ann-ctas"><a href="${_esc(ann.link)}" target="_blank" rel="noopener" class="tunes-ann-cta-btn primary" data-ann-id="${ann.id}">Learn more →</a></div>`;
+    }
+
+    if (compact) {
+        // Sidebar compact variant
+        return `
+            <div class="tunes-ann-card compact" data-ann-id="${ann.id}"
+                 style="--ann-gs:${gs};--ann-ge:${ge};">
+                <div class="tunes-ann-card-glow"></div>
+                <div class="tunes-ann-card-inner">
+                    <span class="tunes-ann-tag-pill">${tag}</span>
+                    <span class="tunes-ann-card-title">${_esc(ann.title)}</span>
+                    ${buttons.length > 0 ?
+                        `<a href="${_esc(buttons[0].url || ann.link || '#')}" target="_blank" rel="noopener" class="tunes-ann-compact-link" data-ann-id="${ann.id}">${_esc(buttons[0].text || 'Go')} →</a>`
+                    : ann.link ?
+                        `<a href="${_esc(ann.link)}" target="_blank" rel="noopener" class="tunes-ann-compact-link" data-ann-id="${ann.id}">Go →</a>`
+                    : ''}
+                </div>
             </div>
-            <div class="tunes-ann-glow"></div>
-        </a>
+        `;
+    }
+
+    // Full banner
+    return `
+        <div class="tunes-ann-card" data-ann-id="${ann.id}"
+             style="--ann-gs:${gs};--ann-ge:${ge};">
+            <div class="tunes-ann-card-glow"></div>
+            <div class="tunes-ann-card-body">
+                ${hasImage ? `<img src="${_esc(ann.image_url)}" alt="" class="tunes-ann-card-img" />` : ''}
+                <div class="tunes-ann-card-content">
+                    <div class="tunes-ann-card-header">
+                        <span class="tunes-ann-tag-pill">${tag}</span>
+                        <span class="tunes-ann-type-label">${typeLabel}</span>
+                    </div>
+                    <h3 class="tunes-ann-card-title">${_esc(ann.title)}</h3>
+                    ${body}
+                    ${ctaHTML}
+                </div>
+            </div>
+        </div>
     `;
 }
 
@@ -2007,7 +2186,7 @@ function _setAnnouncementSlot(elementId, html) {
     const el = document.getElementById(elementId);
     if (!el) return;
     el.innerHTML = html;
-    el.style.display = '';
+    el.style.display = html ? '' : 'none';
 }
 
 function _injectAnnouncementStyles() {
@@ -2015,70 +2194,223 @@ function _injectAnnouncementStyles() {
     const s = document.createElement('style');
     s.id = 'tunes-ann-styles';
     s.textContent = `
-.tunes-ann-banner{
+/* ─── Full announcement card ─────────────────────── */
+.tunes-ann-card{
     position:relative;
+    border-radius:1.1rem;
+    overflow:hidden;
+    margin-bottom:0.65rem;
+    background:rgba(9,9,11,0.55);
+    backdrop-filter:blur(28px) saturate(1.4);
+    -webkit-backdrop-filter:blur(28px) saturate(1.4);
+    border:1px solid rgba(255,255,255,0.08);
+    box-shadow:
+        0 0 0 1px rgba(255,255,255,0.04),
+        0 0 24px color-mix(in srgb, var(--ann-gs) 15%, transparent),
+        0 8px 32px rgba(0,0,0,0.45);
+    transition:transform 0.25s cubic-bezier(.22,1,.36,1),box-shadow 0.3s;
+}
+.tunes-ann-card:hover{
+    transform:translateY(-1px);
+    box-shadow:
+        0 0 0 1px rgba(255,255,255,0.06),
+        0 0 32px color-mix(in srgb, var(--ann-gs) 22%, transparent),
+        0 12px 40px rgba(0,0,0,0.5);
+}
+.tunes-ann-card:active{transform:scale(0.99)}
+
+/* Glow accent */
+.tunes-ann-card-glow{
+    position:absolute;
+    top:-40%;left:-20%;
+    width:80%;height:180%;
+    background:radial-gradient(ellipse at 30% 50%, color-mix(in srgb, var(--ann-gs) 12%, transparent), transparent 70%);
+    pointer-events:none;
+    z-index:0;
+}
+.tunes-ann-card::after{
+    content:'';
+    position:absolute;
+    bottom:0;left:0;right:0;
+    height:3px;
+    background:linear-gradient(90deg, var(--ann-gs), var(--ann-ge));
+    opacity:0.7;
+}
+
+/* Body layout */
+.tunes-ann-card-body{
+    position:relative;
+    z-index:1;
+    display:flex;
+    align-items:flex-start;
+    gap:0.85rem;
+    padding:1rem 1.15rem;
+}
+.tunes-ann-card-img{
+    width:52px;height:52px;border-radius:10px;object-fit:cover;flex-shrink:0;
+    border:1px solid rgba(255,255,255,0.06);
+}
+.tunes-ann-card-content{
+    display:flex;flex-direction:column;gap:0.25rem;min-width:0;flex:1;
+}
+
+/* Header row */
+.tunes-ann-card-header{
+    display:flex;align-items:center;gap:0.4rem;
+}
+.tunes-ann-tag-pill{
+    display:inline-block;
+    font-size:0.52rem;
+    font-weight:800;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    padding:0.15rem 0.45rem;
+    border-radius:4px;
+    background:linear-gradient(135deg, var(--ann-gs), var(--ann-ge));
+    color:#000;
+    line-height:1.3;
+}
+.tunes-ann-type-label{
+    font-size:0.52rem;
+    font-weight:600;
+    letter-spacing:0.06em;
+    opacity:0.35;
+    text-transform:uppercase;
+}
+
+/* Title & body */
+.tunes-ann-card-title{
+    font-size:0.95rem;
+    font-weight:700;
+    letter-spacing:-0.02em;
+    color:#fff;
+    line-height:1.3;
+    margin:0.1rem 0 0;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+.tunes-ann-body{
+    font-size:0.78rem;
+    line-height:1.5;
+    color:rgba(255,255,255,0.55);
+    margin:0.15rem 0 0;
+    display:-webkit-box;
+    -webkit-line-clamp:3;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+
+/* CTA buttons */
+.tunes-ann-ctas{
+    display:flex;
+    gap:0.4rem;
+    margin-top:0.45rem;
+    flex-wrap:wrap;
+}
+.tunes-ann-cta-btn{
+    display:inline-block;
+    font-size:0.68rem;
+    font-weight:600;
+    letter-spacing:0.01em;
+    padding:0.3rem 0.7rem;
+    border-radius:6px;
+    text-decoration:none;
+    transition:all 0.2s;
+    cursor:pointer;
+    color:rgba(255,255,255,0.7);
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.08);
+}
+.tunes-ann-cta-btn.primary{
+    background:linear-gradient(135deg, var(--ann-gs), var(--ann-ge));
+    color:#000;
+    font-weight:700;
+    border:none;
+    box-shadow:0 2px 8px color-mix(in srgb, var(--ann-gs) 25%, transparent);
+}
+.tunes-ann-cta-btn:hover{
+    transform:translateY(-1px);
+    filter:brightness(1.1);
+}
+
+/* ─── Compact sidebar variant ──────────────────── */
+.tunes-ann-card.compact{
+    margin-bottom:0.45rem;
+    border-radius:0.75rem;
+    background:rgba(9,9,11,0.45);
+}
+.tunes-ann-card.compact .tunes-ann-card-glow{
+    width:60%;height:140%;
+}
+.tunes-ann-card.compact::after{
+    height:2px;
+}
+.tunes-ann-card-inner{
+    position:relative;
+    z-index:1;
     display:flex;
     align-items:center;
-    gap:0.85rem;
-    width:100%;
-    border-radius:1.25rem;
+    gap:0.4rem;
+    padding:0.55rem 0.7rem;
+    flex-wrap:wrap;
+}
+.tunes-ann-card.compact .tunes-ann-tag-pill{
+    font-size:0.45rem;
+    padding:0.1rem 0.35rem;
+}
+.tunes-ann-card.compact .tunes-ann-card-title{
+    font-size:0.75rem;
+    font-weight:600;
+    white-space:nowrap;
     overflow:hidden;
-    cursor:pointer;
-    margin-bottom:0.75rem;
-    background-color:rgba(9,9,11,0.65);
-    backdrop-filter:blur(24px);
-    -webkit-backdrop-filter:blur(24px);
-    border:1px solid rgba(6,182,212,0.25);
-    box-shadow:0 0 18px rgba(6,182,212,0.12),0 12px 36px rgba(0,0,0,0.4);
-    padding:1rem 1.2rem;
-    box-sizing:border-box;
-    transition:transform 0.25s cubic-bezier(.22,1,.36,1),box-shadow 0.25s;
+    text-overflow:ellipsis;
+    flex:1;
+    min-width:0;
+    margin:0;
+}
+.tunes-ann-compact-link{
+    font-size:0.65rem;
+    font-weight:600;
+    color:rgba(255,255,255,0.5);
     text-decoration:none;
-    color:inherit;
+    white-space:nowrap;
+    transition:color 0.2s;
 }
-.tunes-ann-banner:hover{
-    transform:translateY(-2px) scale(1.01);
-    box-shadow:0 0 28px rgba(6,182,212,0.22),0 16px 40px rgba(0,0,0,0.5);
+.tunes-ann-compact-link:hover{
+    color:#fff;
 }
-.tunes-ann-banner:active{transform:scale(0.98)}
-.tunes-ann-img{
-    width:52px;height:52px;border-radius:10px;object-fit:cover;flex-shrink:0;
-    border:1px solid rgba(6,182,212,0.15);
-}
-.tunes-ann-content{
-    position:relative;z-index:1;display:flex;flex-direction:column;gap:0.1rem;min-width:0;
-}
-.tunes-ann-tag{
-    font-size:0.6rem;font-weight:800;letter-spacing:0.08em;color:rgba(6,182,212,0.7);text-transform:uppercase;
-}
-.tunes-ann-title{
-    font-size:1rem;font-weight:700;letter-spacing:-0.03em;color:#fff;line-height:1.3;margin-top:0.15rem;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.tunes-ann-cta{
-    font-size:0.75rem;font-weight:400;color:rgba(255,255,255,0.4);margin-top:0.1rem;
-}
-.tunes-ann-glow{
-    position:absolute;top:0;right:0;width:120px;height:100%;
-    background:radial-gradient(circle at 80% 50%, rgba(6,182,212,0.08), transparent 70%);
-    pointer-events:none;
-}
-/* Sidebar variant — smaller */
-#sidebar-announcement-banner .tunes-ann-banner{
-    padding:0.75rem 0.85rem;border-radius:1rem;margin-bottom:0;
-}
-#sidebar-announcement-banner .tunes-ann-title{font-size:0.82rem;}
-#sidebar-announcement-banner .tunes-ann-img{width:40px;height:40px;border-radius:8px;}
-#sidebar-announcement-banner .tunes-ann-cta{font-size:0.7rem;}
 
-/* Light theme overrides */
-[data-theme="light"] .tunes-ann-banner{
-    background-color:rgba(255,255,255,0.75);
-    border-color:rgba(6,182,212,0.2);
-    box-shadow:0 0 12px rgba(6,182,212,0.08),0 8px 24px rgba(0,0,0,0.06);
+/* ─── Light theme ──────────────────────────────── */
+[data-theme="light"] .tunes-ann-card{
+    background:rgba(255,255,255,0.7);
+    border-color:rgba(0,0,0,0.06);
+    box-shadow:
+        0 0 0 1px rgba(0,0,0,0.03),
+        0 0 16px color-mix(in srgb, var(--ann-gs) 8%, transparent),
+        0 6px 20px rgba(0,0,0,0.06);
 }
-[data-theme="light"] .tunes-ann-title{color:var(--foreground);}
-[data-theme="light"] .tunes-ann-cta{color:var(--muted-foreground);}
+[data-theme="light"] .tunes-ann-card-title{color:var(--foreground);}
+[data-theme="light"] .tunes-ann-body{color:var(--muted-foreground);}
+[data-theme="light"] .tunes-ann-cta-btn{
+    color:var(--muted-foreground);
+    background:rgba(0,0,0,0.04);
+    border-color:rgba(0,0,0,0.08);
+}
+[data-theme="light"] .tunes-ann-cta-btn.primary{color:#000;}
+[data-theme="light"] .tunes-ann-compact-link{color:var(--muted-foreground);}
+
+/* ─── Stacking animation ──────────────────────── */
+.tunes-ann-card{
+    animation:tunes-ann-fade-up 0.5s cubic-bezier(.22,1,.36,1) both;
+}
+.tunes-ann-card:nth-child(2){animation-delay:0.08s}
+.tunes-ann-card:nth-child(3){animation-delay:0.16s}
+@keyframes tunes-ann-fade-up{
+    from{opacity:0;transform:translateY(10px)}
+    to{opacity:1;transform:translateY(0)}
+}
     `;
     document.head.appendChild(s);
 }
@@ -2086,6 +2418,32 @@ function _injectAnnouncementStyles() {
 function _esc(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ── Tracking helper — fires impression / click events ── */
+const _trackedEvents = new Set(); // prevent duplicate fires per session
+
+async function _trackEvent(itemType, itemId, eventType) {
+    const user = authManager?.user;
+    if (!user) return;
+    const key = `${itemType}_${itemId}_${eventType}`;
+    if (_trackedEvents.has(key)) return;
+    _trackedEvents.add(key);
+
+    try {
+        await fetch('/api/track-event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                item_type: itemType,
+                item_id: Number(itemId),
+                user_id: user.uid,
+                event_type: eventType
+            })
+        });
+    } catch (e) {
+        // Silent fail — analytics shouldn't break UX
+    }
 }
 
 // === Pull-to-Refresh on Homepage ===

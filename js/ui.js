@@ -6136,31 +6136,88 @@ export class UIRenderer {
             document.getElementById('admin-total-users').textContent = '!';
         }
 
-        // ── Updates Tab ──
+        // ── Messaging Tab ──
+        const categoryLabels = { feature: 'New Feature', bugfix: 'Bug Fix', improvement: 'Improvement', security: 'Security' };
+        const categoryColors = { feature: '#a855f7', bugfix: '#ef4444', improvement: '#22c55e', security: '#f97316' };
+
+        // Load messaging stats
+        const loadMsgStats = async () => {
+            try {
+                const s = await adminFetch('/api/admin/messaging-stats');
+                if (s && !s.error) {
+                    document.getElementById('msg-stat-updates').textContent = s.active_updates + '/' + s.total_updates;
+                    document.getElementById('msg-stat-anns').textContent = s.active_announcements + '/' + s.total_announcements;
+                    document.getElementById('msg-stat-impressions').textContent = s.total_impressions;
+                    document.getElementById('msg-stat-ctr').textContent = s.overall_ctr + '%';
+                }
+            } catch (e) { console.warn('[msg-stats]', e); }
+        };
+
+        // Sub-tab switching within Messaging
+        document.querySelectorAll('.msg-sub-tab').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.msg-sub-tab').forEach(b => {
+                    const active = b === btn;
+                    b.classList.toggle('active', active);
+                    b.style.background = active ? (b.dataset.msgTab === 'updates' ? 'rgba(168,85,247,0.15)' : 'rgba(59,130,246,0.15)') : 'rgba(255,255,255,0.04)';
+                    b.style.borderColor = active ? (b.dataset.msgTab === 'updates' ? 'rgba(168,85,247,0.25)' : 'rgba(59,130,246,0.25)') : 'rgba(255,255,255,0.08)';
+                    b.style.color = active ? (b.dataset.msgTab === 'updates' ? '#c084fc' : '#60a5fa') : 'var(--muted-foreground)';
+                    b.style.fontWeight = active ? '600' : '500';
+                });
+                document.getElementById('msg-panel-updates').style.display = btn.dataset.msgTab === 'updates' ? '' : 'none';
+                document.getElementById('msg-panel-announcements').style.display = btn.dataset.msgTab === 'announcements' ? '' : 'none';
+            };
+        });
+
+        // ── Updates CRUD ──
         const loadUpdates = async () => {
             const list = document.getElementById('admin-updates-list');
             try {
                 const updates = await adminFetch('/api/admin/updates');
                 if (!Array.isArray(updates) || !updates.length) {
-                    list.innerHTML = '<p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">No updates posted yet.</p>';
+                    list.innerHTML = '<p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">No updates yet.</p>';
                     return;
                 }
                 list.innerHTML = updates.map(u => `
-                    <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem;background:rgba(255,255,255,0.03);border-radius:10px;">
+                    <div style="display:flex;align-items:flex-start;gap:0.65rem;padding:0.7rem;background:rgba(255,255,255,0.03);border-radius:10px;border-left:3px solid ${categoryColors[u.category] || '#a855f7'};">
                         <div style="flex:1;min-width:0;">
-                            <p style="margin:0;font-size:0.85rem;font-weight:600;">${escapeHtml(u.title)}</p>
-                            ${u.message ? `<p style="margin:0.3rem 0 0;font-size:0.78rem;opacity:0.55;line-height:1.4;">${escapeHtml(u.message)}</p>` : ''}
-                            ${u.link ? `<a href="${escapeHtml(u.link)}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#a78bfa;text-decoration:none;display:inline-block;margin-top:0.25rem;">${escapeHtml(u.link)}</a>` : ''}
-                            <p style="margin:0.3rem 0 0;font-size:0.65rem;opacity:0.25;">${new Date(u.created_at).toLocaleString()}${u.target_versions?.length ? ` · v${u.target_versions.join(', ')}` : ''}</p>
+                            <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.15rem;">
+                                <p style="margin:0;font-size:0.82rem;font-weight:600;">${escapeHtml(u.title)}</p>
+                                <span style="font-size:0.55rem;padding:0.1rem 0.35rem;border-radius:4px;background:${u.is_active ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'};color:${u.is_active ? '#22c55e' : '#ef4444'};font-weight:600;">${u.is_active ? 'LIVE' : 'OFF'}</span>
+                                <span style="font-size:0.55rem;padding:0.1rem 0.35rem;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--muted-foreground);font-weight:500;">${categoryLabels[u.category] || u.category}</span>
+                            </div>
+                            ${u.message ? `<p style="margin:0.2rem 0 0;font-size:0.75rem;opacity:0.5;line-height:1.35;">${escapeHtml(u.message)}</p>` : ''}
+                            <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.3rem;">
+                                <span style="font-size:0.6rem;opacity:0.2;">${new Date(u.created_at).toLocaleDateString()}</span>
+                                <span style="font-size:0.6rem;opacity:0.35;color:#a78bfa;">👁 ${u.impressions || 0}</span>
+                                <span style="font-size:0.6rem;opacity:0.35;color:#60a5fa;">🖱 ${u.clicks || 0}</span>
+                                <span style="font-size:0.6rem;opacity:0.35;color:#22c55e;">${u.ctr || 0}% CTR</span>
+                            </div>
                         </div>
-                        <button class="admin-delete-update-btn" data-id="${u.id}" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0.3rem 0.6rem;border-radius:6px;white-space:nowrap;">Delete</button>
+                        <div style="display:flex;gap:0.25rem;flex-shrink:0;">
+                            <button class="admin-edit-update-btn" data-id="${u.id}" data-json='${JSON.stringify(u).replace(/'/g, '&#39;')}' style="background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);color:#c084fc;cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">Edit</button>
+                            <button class="admin-delete-update-btn" data-id="${u.id}" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">Del</button>
+                        </div>
                     </div>`).join('');
                 list.querySelectorAll('.admin-delete-update-btn').forEach(btn => {
                     btn.onclick = async () => {
                         if (!confirm('Delete this update?')) return;
                         await adminFetch('/api/admin/updates/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.id }) });
                         showNotification('Update deleted');
-                        loadUpdates();
+                        loadUpdates(); loadMsgStats();
+                    };
+                });
+                list.querySelectorAll('.admin-edit-update-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        const u = JSON.parse(btn.dataset.json);
+                        document.getElementById('admin-update-edit-id').value = u.id;
+                        document.getElementById('admin-update-title').value = u.title || '';
+                        document.getElementById('admin-update-message').value = u.message || '';
+                        document.getElementById('admin-update-link').value = u.link || '';
+                        document.getElementById('admin-update-category').value = u.category || 'feature';
+                        document.getElementById('admin-update-form-title').textContent = 'Edit Update';
+                        document.getElementById('admin-update-cancel-edit').style.display = '';
+                        document.getElementById('admin-update-submit').textContent = 'Save Changes';
                     };
                 });
             } catch (e) {
@@ -6168,31 +6225,121 @@ export class UIRenderer {
             }
         };
 
+        // Cancel edit mode for updates
+        document.getElementById('admin-update-cancel-edit').onclick = () => {
+            document.getElementById('admin-update-edit-id').value = '';
+            document.getElementById('admin-update-title').value = '';
+            document.getElementById('admin-update-message').value = '';
+            document.getElementById('admin-update-link').value = '';
+            document.getElementById('admin-update-category').value = 'feature';
+            document.getElementById('admin-update-form-title').textContent = 'New Update';
+            document.getElementById('admin-update-cancel-edit').style.display = 'none';
+            document.getElementById('admin-update-submit').textContent = 'Publish';
+        };
+
+        // Update preview
+        document.getElementById('admin-update-preview-btn').onclick = () => {
+            const prev = document.getElementById('admin-update-preview');
+            const title = document.getElementById('admin-update-title').value.trim();
+            const msg = document.getElementById('admin-update-message').value.trim();
+            if (!title) { showNotification('Enter a title first'); return; }
+            document.getElementById('admin-update-preview-text').textContent = title + (msg ? ' — ' + msg : '');
+            prev.style.display = prev.style.display === 'none' ? '' : 'none';
+        };
+
+        // Submit update (create or edit)
         document.getElementById('admin-update-submit').onclick = async () => {
+            const editId = document.getElementById('admin-update-edit-id').value;
             const title = document.getElementById('admin-update-title').value.trim();
             const message = document.getElementById('admin-update-message').value.trim();
             const link = document.getElementById('admin-update-link').value.trim();
-            const versionsRaw = document.getElementById('admin-update-versions').value.trim();
+            const category = document.getElementById('admin-update-category').value;
             if (!title) { showNotification('Title is required'); return; }
-            const target_versions = versionsRaw ? versionsRaw.split(',').map(v => v.trim()).filter(Boolean) : [];
             try {
-                const res = await adminFetch('/api/admin/updates', {
-                    method: 'POST',
-                    body: JSON.stringify({ title, message, link, target_versions }),
-                });
+                const endpoint = editId ? '/api/admin/updates/edit' : '/api/admin/updates';
+                const payload = editId ? { id: editId, title, message, link, category } : { title, message, link, category };
+                const res = await adminFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
                 if (res.error) throw new Error(res.error);
-                showNotification('Update posted!');
-                document.getElementById('admin-update-title').value = '';
-                document.getElementById('admin-update-message').value = '';
-                document.getElementById('admin-update-link').value = '';
-                document.getElementById('admin-update-versions').value = '';
-                loadUpdates();
+                showNotification(editId ? 'Update saved!' : 'Update posted!');
+                document.getElementById('admin-update-cancel-edit').click();
+                loadUpdates(); loadMsgStats();
             } catch (e) { showNotification('Failed: ' + e.message); }
         };
 
         await loadUpdates();
 
-        // ── Announcements Tab ──
+        // ── Announcements CRUD ──
+        // Type selector
+        document.querySelectorAll('.ann-type-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.ann-type-btn').forEach(b => {
+                    const active = b === btn;
+                    b.classList.toggle('active', active);
+                    b.style.background = active ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)';
+                    b.style.borderColor = active ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.08)';
+                    b.style.color = active ? '#60a5fa' : 'var(--muted-foreground)';
+                    b.style.fontWeight = active ? '600' : '500';
+                });
+                document.getElementById('admin-ann-type-val').value = btn.dataset.type;
+            };
+        });
+
+        // Gradient preset selector
+        document.querySelectorAll('.grad-preset').forEach(p => {
+            p.onclick = () => {
+                document.querySelectorAll('.grad-preset').forEach(g => { g.style.borderColor = 'transparent'; g.classList.remove('active'); });
+                p.style.borderColor = '#c084fc';
+                p.classList.add('active');
+                document.getElementById('admin-ann-grad-start').value = p.dataset.start;
+                document.getElementById('admin-ann-grad-end').value = p.dataset.end;
+                document.getElementById('admin-ann-grad-preview').style.background = `linear-gradient(135deg,${p.dataset.start},${p.dataset.end})`;
+            };
+        });
+        // Custom gradient hex inputs
+        ['admin-ann-grad-start', 'admin-ann-grad-end'].forEach(id => {
+            document.getElementById(id).oninput = () => {
+                const s = document.getElementById('admin-ann-grad-start').value;
+                const e = document.getElementById('admin-ann-grad-end').value;
+                document.getElementById('admin-ann-grad-preview').style.background = `linear-gradient(135deg,${s},${e})`;
+                document.querySelectorAll('.grad-preset').forEach(g => { g.style.borderColor = 'transparent'; g.classList.remove('active'); });
+            };
+        });
+
+        // Add CTA row
+        document.getElementById('admin-ann-add-cta').onclick = () => {
+            const container = document.getElementById('admin-ann-ctas');
+            if (container.querySelectorAll('.cta-row').length >= 3) { showNotification('Max 3 CTA buttons'); return; }
+            const row = document.createElement('div');
+            row.className = 'cta-row';
+            row.style.cssText = 'display:flex;gap:0.35rem;';
+            row.innerHTML = `<input type="text" placeholder="Button text" class="cta-text" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" /><input type="url" placeholder="URL" class="cta-url" style="flex:1.5;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" /><button style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0.25rem 0.4rem;border-radius:6px;" onclick="this.parentElement.remove()">×</button>`;
+            container.appendChild(row);
+        };
+
+        // Announcement preview
+        document.getElementById('admin-ann-preview-btn').onclick = () => {
+            const prev = document.getElementById('admin-ann-preview');
+            const title = document.getElementById('admin-ann-title').value.trim();
+            if (!title) { showNotification('Enter a title first'); return; }
+            const gs = document.getElementById('admin-ann-grad-start').value;
+            const ge = document.getElementById('admin-ann-grad-end').value;
+            prev.style.background = `linear-gradient(135deg,${gs},${ge})`;
+            prev.style.boxShadow = `0 0 30px ${gs}33`;
+            document.getElementById('admin-ann-preview-tag').textContent = document.getElementById('admin-ann-tag').value;
+            document.getElementById('admin-ann-preview-title').textContent = title;
+            document.getElementById('admin-ann-preview-body').textContent = document.getElementById('admin-ann-body').value.trim();
+            // CTA buttons
+            const ctaContainer = document.getElementById('admin-ann-preview-ctas');
+            ctaContainer.innerHTML = '';
+            document.querySelectorAll('#admin-ann-ctas .cta-row').forEach(row => {
+                const text = row.querySelector('.cta-text').value.trim();
+                if (text) {
+                    ctaContainer.innerHTML += `<span style="font-size:0.68rem;font-weight:600;padding:0.3rem 0.65rem;border-radius:6px;background:rgba(0,0,0,0.2);color:#fff;cursor:pointer;">${escapeHtml(text)}</span>`;
+                }
+            });
+            prev.style.display = prev.style.display === 'none' ? '' : 'none';
+        };
+
         const loadAnnouncements = async () => {
             const list = document.getElementById('admin-announcements-list');
             try {
@@ -6203,18 +6350,31 @@ export class UIRenderer {
                 }
                 list.innerHTML = anns.map(a => {
                     const isActive = a.is_active && (!a.ends_at || new Date(a.ends_at) > new Date());
+                    const gs = a.gradient_start || '#a855f7';
+                    const ge = a.gradient_end || '#ec4899';
                     return `
-                    <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem;background:rgba(255,255,255,0.03);border-radius:10px;">
-                        ${a.image_url ? `<img src="${escapeHtml(a.image_url)}" alt="" style="width:48px;height:48px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'" />` : ''}
+                    <div style="display:flex;align-items:flex-start;gap:0.65rem;padding:0.7rem;background:rgba(255,255,255,0.03);border-radius:10px;border-left:3px solid ${gs};">
+                        <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,${gs},${ge});flex-shrink:0;"></div>
                         <div style="flex:1;min-width:0;">
-                            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem;">
-                                <p style="margin:0;font-size:0.85rem;font-weight:600;">${escapeHtml(a.title)}</p>
-                                <span style="font-size:0.6rem;padding:0.15rem 0.4rem;border-radius:4px;background:${isActive ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'};color:${isActive ? '#22c55e' : '#ef4444'};font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">${isActive ? 'Active' : 'Ended'}</span>
+                            <div style="display:flex;align-items:center;gap:0.35rem;margin-bottom:0.1rem;flex-wrap:wrap;">
+                                <span style="font-size:0.5rem;padding:0.1rem 0.3rem;border-radius:3px;background:rgba(255,255,255,0.08);color:var(--muted-foreground);font-weight:600;letter-spacing:0.04em;">${escapeHtml(a.tag || 'NEW')}</span>
+                                <span style="font-size:0.5rem;padding:0.1rem 0.3rem;border-radius:3px;background:rgba(255,255,255,0.05);color:var(--muted-foreground);font-weight:500;text-transform:capitalize;">${escapeHtml(a.type || 'announcement')}</span>
+                                <span style="font-size:0.55rem;padding:0.1rem 0.3rem;border-radius:4px;background:${isActive ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'};color:${isActive ? '#22c55e' : '#ef4444'};font-weight:600;">${isActive ? 'LIVE' : 'ENDED'}</span>
                             </div>
-                            ${a.link ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#67e8f9;text-decoration:none;">${escapeHtml(a.link)}</a>` : ''}
-                            <p style="margin:0.2rem 0 0;font-size:0.65rem;opacity:0.25;">${a.starts_at ? new Date(a.starts_at).toLocaleString() : ''} ${a.ends_at ? '→ ' + new Date(a.ends_at).toLocaleString() : '(no end)'}</p>
+                            <p style="margin:0;font-size:0.82rem;font-weight:600;">${escapeHtml(a.title)}</p>
+                            ${a.body ? `<p style="margin:0.15rem 0 0;font-size:0.72rem;opacity:0.45;line-height:1.3;">${escapeHtml(a.body).slice(0, 80)}${a.body.length > 80 ? '...' : ''}</p>` : ''}
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;flex-wrap:wrap;">
+                                <span style="font-size:0.58rem;opacity:0.2;">${new Date(a.created_at).toLocaleDateString()}</span>
+                                <span style="font-size:0.58rem;opacity:0.2;">${a.frequency === 'always' ? '∞' : a.frequency?.replace('once_per_', '1/')}</span>
+                                <span style="font-size:0.58rem;opacity:0.35;color:#a78bfa;">👁 ${a.impressions || 0}</span>
+                                <span style="font-size:0.58rem;opacity:0.35;color:#60a5fa;">🖱 ${a.clicks || 0}</span>
+                                <span style="font-size:0.58rem;opacity:0.35;color:#22c55e;">${a.ctr || 0}%</span>
+                            </div>
                         </div>
-                        <button class="admin-delete-ann-btn" data-id="${a.id}" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0.3rem 0.6rem;border-radius:6px;white-space:nowrap;">Delete</button>
+                        <div style="display:flex;gap:0.25rem;flex-shrink:0;">
+                            <button class="admin-edit-ann-btn" data-id="${a.id}" data-json='${JSON.stringify(a).replace(/'/g, '&#39;')}' style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">Edit</button>
+                            <button class="admin-delete-ann-btn" data-id="${a.id}" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">Del</button>
+                        </div>
                     </div>`;
                 }).join('');
                 list.querySelectorAll('.admin-delete-ann-btn').forEach(btn => {
@@ -6222,7 +6382,43 @@ export class UIRenderer {
                         if (!confirm('Delete this announcement?')) return;
                         await adminFetch('/api/admin/announcements/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.id }) });
                         showNotification('Announcement deleted');
-                        loadAnnouncements();
+                        loadAnnouncements(); loadMsgStats();
+                    };
+                });
+                list.querySelectorAll('.admin-edit-ann-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        const a = JSON.parse(btn.dataset.json);
+                        document.getElementById('admin-ann-edit-id').value = a.id;
+                        document.getElementById('admin-ann-title').value = a.title || '';
+                        document.getElementById('admin-ann-body').value = a.body || '';
+                        document.getElementById('admin-ann-link').value = a.link || '';
+                        document.getElementById('admin-ann-image').value = a.image_url || '';
+                        document.getElementById('admin-ann-tag').value = a.tag || 'NEW';
+                        document.getElementById('admin-ann-grad-start').value = a.gradient_start || '#a855f7';
+                        document.getElementById('admin-ann-grad-end').value = a.gradient_end || '#ec4899';
+                        document.getElementById('admin-ann-grad-preview').style.background = `linear-gradient(135deg,${a.gradient_start || '#a855f7'},${a.gradient_end || '#ec4899'})`;
+                        document.getElementById('admin-ann-frequency').value = a.frequency || 'always';
+                        if (a.ends_at) document.getElementById('admin-ann-end').value = new Date(a.ends_at).toISOString().slice(0, 16);
+                        document.getElementById('admin-ann-type-val').value = a.type || 'announcement';
+                        // Set type buttons
+                        document.querySelectorAll('.ann-type-btn').forEach(b => {
+                            const active = b.dataset.type === (a.type || 'announcement');
+                            b.classList.toggle('active', active);
+                            b.style.background = active ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)';
+                            b.style.borderColor = active ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.08)';
+                            b.style.color = active ? '#60a5fa' : 'var(--muted-foreground)';
+                        });
+                        // Set CTAs
+                        const ctaContainer = document.getElementById('admin-ann-ctas');
+                        ctaContainer.innerHTML = '';
+                        const ctas = Array.isArray(a.cta_buttons) ? a.cta_buttons : [];
+                        if (!ctas.length) ctas.push({ text: '', url: '' });
+                        ctas.forEach((c, i) => {
+                            ctaContainer.innerHTML += `<div style="display:flex;gap:0.35rem;" class="cta-row"><input type="text" placeholder="Button text" class="cta-text" value="${escapeHtml(c.text || '')}" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" /><input type="url" placeholder="URL" class="cta-url" value="${escapeHtml(c.url || '')}" style="flex:1.5;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" />${i > 0 ? '<button style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0.25rem 0.4rem;border-radius:6px;" onclick="this.parentElement.remove()">×</button>' : ''}</div>`;
+                        });
+                        document.getElementById('admin-ann-form-title').textContent = 'Edit Announcement';
+                        document.getElementById('admin-ann-cancel-edit').style.display = '';
+                        document.getElementById('admin-ann-submit').textContent = 'Save Changes';
                     };
                 });
             } catch (e) {
@@ -6230,34 +6426,70 @@ export class UIRenderer {
             }
         };
 
+        // Cancel edit mode for announcements
+        document.getElementById('admin-ann-cancel-edit').onclick = () => {
+            document.getElementById('admin-ann-edit-id').value = '';
+            document.getElementById('admin-ann-title').value = '';
+            document.getElementById('admin-ann-body').value = '';
+            document.getElementById('admin-ann-link').value = '';
+            document.getElementById('admin-ann-image').value = '';
+            document.getElementById('admin-ann-tag').value = 'NEW';
+            document.getElementById('admin-ann-grad-start').value = '#a855f7';
+            document.getElementById('admin-ann-grad-end').value = '#ec4899';
+            document.getElementById('admin-ann-grad-preview').style.background = 'linear-gradient(135deg,#a855f7,#ec4899)';
+            document.getElementById('admin-ann-frequency').value = 'always';
+            document.getElementById('admin-ann-end').value = '';
+            document.getElementById('admin-ann-type-val').value = 'announcement';
+            document.querySelectorAll('.ann-type-btn').forEach((b, i) => {
+                b.classList.toggle('active', i === 0);
+                b.style.background = i === 0 ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)';
+                b.style.borderColor = i === 0 ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.08)';
+                b.style.color = i === 0 ? '#60a5fa' : 'var(--muted-foreground)';
+            });
+            // Reset CTAs
+            document.getElementById('admin-ann-ctas').innerHTML = '<div style="display:flex;gap:0.35rem;" class="cta-row"><input type="text" placeholder="Button text" class="cta-text" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" /><input type="url" placeholder="URL" class="cta-url" style="flex:1.5;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" /></div>';
+            document.getElementById('admin-ann-form-title').textContent = 'New Announcement';
+            document.getElementById('admin-ann-cancel-edit').style.display = 'none';
+            document.getElementById('admin-ann-submit').textContent = 'Publish';
+            document.querySelectorAll('.grad-preset').forEach((g, i) => { g.style.borderColor = i === 0 ? '#c084fc' : 'transparent'; g.classList.toggle('active', i === 0); });
+        };
+
+        // Submit announcement (create or edit)
         document.getElementById('admin-ann-submit').onclick = async () => {
+            const editId = document.getElementById('admin-ann-edit-id').value;
             const title = document.getElementById('admin-ann-title').value.trim();
+            const body = document.getElementById('admin-ann-body').value.trim();
             const link = document.getElementById('admin-ann-link').value.trim();
             const image_url = document.getElementById('admin-ann-image').value.trim();
-            const starts_at = document.getElementById('admin-ann-start').value;
-            const ends_at = document.getElementById('admin-ann-end').value;
-            if (!title) { showNotification('Headline is required'); return; }
+            const type = document.getElementById('admin-ann-type-val').value;
+            const tag = document.getElementById('admin-ann-tag').value;
+            const gradient_start = document.getElementById('admin-ann-grad-start').value.trim();
+            const gradient_end = document.getElementById('admin-ann-grad-end').value.trim();
+            const frequency = document.getElementById('admin-ann-frequency').value;
+            const ends_at_val = document.getElementById('admin-ann-end').value;
+            const ends_at = ends_at_val ? new Date(ends_at_val).toISOString() : null;
+            // Collect CTAs
+            const cta_buttons = [];
+            document.querySelectorAll('#admin-ann-ctas .cta-row').forEach(row => {
+                const text = row.querySelector('.cta-text').value.trim();
+                const url = row.querySelector('.cta-url').value.trim();
+                if (text) cta_buttons.push({ text, url });
+            });
+            if (!title) { showNotification('Title is required'); return; }
             try {
-                const res = await adminFetch('/api/admin/announcements', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        title, link, image_url,
-                        starts_at: starts_at ? new Date(starts_at).toISOString() : new Date().toISOString(),
-                        ends_at: ends_at ? new Date(ends_at).toISOString() : null,
-                    }),
-                });
+                const endpoint = editId ? '/api/admin/announcements/edit' : '/api/admin/announcements';
+                const payload = { title, body, link, image_url, type, tag, gradient_start, gradient_end, cta_buttons, frequency, ends_at };
+                if (editId) payload.id = editId;
+                const res = await adminFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
                 if (res.error) throw new Error(res.error);
-                showNotification('Announcement posted!');
-                document.getElementById('admin-ann-title').value = '';
-                document.getElementById('admin-ann-link').value = '';
-                document.getElementById('admin-ann-image').value = '';
-                document.getElementById('admin-ann-start').value = '';
-                document.getElementById('admin-ann-end').value = '';
-                loadAnnouncements();
+                showNotification(editId ? 'Announcement saved!' : 'Announcement posted!');
+                document.getElementById('admin-ann-cancel-edit').click();
+                loadAnnouncements(); loadMsgStats();
             } catch (e) { showNotification('Failed: ' + e.message); }
         };
 
         await loadAnnouncements();
+        await loadMsgStats();
     }
 
     /** Render a simple HTML bar chart replacing a canvas element */

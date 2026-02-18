@@ -1672,8 +1672,7 @@
                         <!-- Admin Tabs -->
                         <div id="admin-tabs" style="display:flex;gap:0.25rem;margin-bottom:1.25rem;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:0;">
                             <button class="admin-tab active" data-admin-tab="overview" style="background:none;border:none;color:var(--foreground);font-size:0.8rem;font-weight:600;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:1;font-family:inherit;letter-spacing:-0.01em;">Overview</button>
-                            <button class="admin-tab" data-admin-tab="updates" style="background:none;border:none;color:var(--muted-foreground);font-size:0.8rem;font-weight:500;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:0.6;font-family:inherit;letter-spacing:-0.01em;">Updates</button>
-                            <button class="admin-tab" data-admin-tab="announcements" style="background:none;border:none;color:var(--muted-foreground);font-size:0.8rem;font-weight:500;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:0.6;font-family:inherit;letter-spacing:-0.01em;">Ads &amp; Announcements</button>
+                            <button class="admin-tab" data-admin-tab="messaging" style="background:none;border:none;color:var(--muted-foreground);font-size:0.8rem;font-weight:500;padding:0.6rem 1rem;cursor:pointer;position:relative;opacity:0.6;font-family:inherit;letter-spacing:-0.01em;">Messaging</button>
                         </div>
 
                         <!-- TAB: Overview -->
@@ -1783,51 +1782,170 @@
                             </div>
                         </div>
 
-                        <!-- TAB: Updates -->
-                        <div id="admin-tab-updates" class="admin-tab-content" style="display:none;">
-                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
-                                <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">Post New Update</p>
-                                <div style="display:flex;flex-direction:column;gap:0.75rem;">
-                                    <input id="admin-update-title" type="text" placeholder="Update title (e.g. v1.1.0 — New Features)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
-                                    <textarea id="admin-update-message" placeholder="Update description..." rows="3" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;resize:vertical;"></textarea>
-                                    <input id="admin-update-link" type="url" placeholder="Telegram channel link (e.g. https://t.me/naolmidhub)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
-                                    <input id="admin-update-versions" type="text" placeholder="Target versions (comma-separated, e.g. 1.0.0,1.0.1) — leave empty for all" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
-                                    <button id="admin-update-submit" style="align-self:flex-start;background:linear-gradient(135deg,#a855f7,#ec4899);border:none;color:#fff;font-size:0.8rem;font-weight:600;padding:0.55rem 1.5rem;border-radius:10px;cursor:pointer;font-family:inherit;transition:opacity 0.2s;">Post Update</button>
-                                </div>
-                            </div>
-                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
-                                <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">Posted Updates</p>
-                                <div id="admin-updates-list" style="display:flex;flex-direction:column;gap:0.5rem;">
-                                    <p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">Loading...</p>
-                                </div>
-                            </div>
-                        </div>
+                        <!-- TAB: Messaging (merged Updates + Announcements) -->
+                        <div id="admin-tab-messaging" class="admin-tab-content" style="display:none;">
 
-                        <!-- TAB: Ads & Announcements -->
-                        <div id="admin-tab-announcements" class="admin-tab-content" style="display:none;">
-                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
-                                <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">Create Announcement / Ad</p>
-                                <div style="display:flex;flex-direction:column;gap:0.75rem;">
-                                    <input id="admin-ann-title" type="text" placeholder="Headline (e.g. Check out our sponsor!)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
-                                    <input id="admin-ann-link" type="url" placeholder="Link URL (where the ad takes users)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
-                                    <input id="admin-ann-image" type="url" placeholder="Image URL (optional banner image)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.6rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
-                                    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
-                                        <div style="flex:1;min-width:140px;">
-                                            <label style="font-size:0.7rem;opacity:0.5;display:block;margin-bottom:0.3rem;">Start Date</label>
-                                            <input id="admin-ann-start" type="datetime-local" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.5rem 0.7rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;width:100%;box-sizing:border-box;" />
+                            <!-- Messaging Stats Card -->
+                            <div id="admin-messaging-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.5rem;margin-bottom:1.25rem;">
+                                <div style="background:var(--card);border-radius:12px;padding:0.7rem;text-align:center;">
+                                    <p id="msg-stat-updates" style="font-size:1.3rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.3;font-size:0.55rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.2rem 0 0;">Updates</p>
+                                </div>
+                                <div style="background:var(--card);border-radius:12px;padding:0.7rem;text-align:center;">
+                                    <p id="msg-stat-anns" style="font-size:1.3rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.3;font-size:0.55rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.2rem 0 0;">Announcements</p>
+                                </div>
+                                <div style="background:var(--card);border-radius:12px;padding:0.7rem;text-align:center;">
+                                    <p id="msg-stat-impressions" style="font-size:1.3rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.3;font-size:0.55rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.2rem 0 0;">Impressions</p>
+                                </div>
+                                <div style="background:var(--card);border-radius:12px;padding:0.7rem;text-align:center;">
+                                    <p id="msg-stat-ctr" style="font-size:1.3rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.3;font-size:0.55rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.2rem 0 0;">CTR</p>
+                                </div>
+                            </div>
+
+                            <!-- Sub-tabs within Messaging -->
+                            <div id="msg-sub-tabs" style="display:flex;gap:0.25rem;margin-bottom:1rem;">
+                                <button class="msg-sub-tab active" data-msg-tab="updates" style="background:rgba(168,85,247,0.15);border:1px solid rgba(168,85,247,0.25);color:#c084fc;font-size:0.72rem;font-weight:600;padding:0.4rem 0.9rem;border-radius:8px;cursor:pointer;font-family:inherit;transition:all 0.2s;">Updates</button>
+                                <button class="msg-sub-tab" data-msg-tab="announcements" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:var(--muted-foreground);font-size:0.72rem;font-weight:500;padding:0.4rem 0.9rem;border-radius:8px;cursor:pointer;font-family:inherit;transition:all 0.2s;">Announcements</button>
+                            </div>
+
+                            <!-- ── UPDATES SUB-PANEL ── -->
+                            <div id="msg-panel-updates">
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1rem;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                                        <p style="font-size:0.85rem;font-weight:600;margin:0;" id="admin-update-form-title">New Update</p>
+                                        <button id="admin-update-cancel-edit" style="display:none;background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:0.72rem;font-family:inherit;">Cancel Edit</button>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:0.65rem;">
+                                        <input id="admin-update-title" type="text" placeholder="Title (e.g. Dark Mode is here!)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
+                                        <textarea id="admin-update-message" placeholder="Description..." rows="2" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;resize:vertical;"></textarea>
+                                        <input id="admin-update-link" type="url" placeholder="Link (optional)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
+                                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                                            <label style="font-size:0.68rem;opacity:0.4;white-space:nowrap;">Category</label>
+                                            <select id="admin-update-category" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;">
+                                                <option value="feature">New Feature</option>
+                                                <option value="bugfix">Bug Fix</option>
+                                                <option value="improvement">Improvement</option>
+                                                <option value="security">Security</option>
+                                            </select>
                                         </div>
-                                        <div style="flex:1;min-width:140px;">
-                                            <label style="font-size:0.7rem;opacity:0.5;display:block;margin-bottom:0.3rem;">End Date</label>
-                                            <input id="admin-ann-end" type="datetime-local" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.5rem 0.7rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;width:100%;box-sizing:border-box;" />
+                                        <!-- Live Preview -->
+                                        <div id="admin-update-preview" style="display:none;background:linear-gradient(135deg,#a855f7,#ec4899);border-radius:10px;padding:0.55rem 0.85rem;margin-top:0.25rem;">
+                                            <p style="font-size:0.72rem;font-weight:700;color:#000;margin:0;line-height:1.3;" id="admin-update-preview-text"></p>
+                                        </div>
+                                        <div style="display:flex;gap:0.5rem;">
+                                            <button id="admin-update-submit" style="background:linear-gradient(135deg,#a855f7,#ec4899);border:none;color:#fff;font-size:0.78rem;font-weight:600;padding:0.5rem 1.2rem;border-radius:10px;cursor:pointer;font-family:inherit;transition:opacity 0.2s;">Publish</button>
+                                            <button id="admin-update-preview-btn" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--foreground);font-size:0.78rem;font-weight:500;padding:0.5rem 1rem;border-radius:10px;cursor:pointer;font-family:inherit;">Preview</button>
                                         </div>
                                     </div>
-                                    <button id="admin-ann-submit" style="align-self:flex-start;background:linear-gradient(135deg,#06b6d4,#3b82f6);border:none;color:#fff;font-size:0.8rem;font-weight:600;padding:0.55rem 1.5rem;border-radius:10px;cursor:pointer;font-family:inherit;transition:opacity 0.2s;">Post Announcement</button>
+                                    <input type="hidden" id="admin-update-edit-id" value="" />
+                                </div>
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                    <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">All Updates</p>
+                                    <div id="admin-updates-list" style="display:flex;flex-direction:column;gap:0.5rem;">
+                                        <p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">Loading...</p>
+                                    </div>
                                 </div>
                             </div>
-                            <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
-                                <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">Active & Scheduled Announcements</p>
-                                <div id="admin-announcements-list" style="display:flex;flex-direction:column;gap:0.5rem;">
-                                    <p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">Loading...</p>
+
+                            <!-- ── ANNOUNCEMENTS SUB-PANEL ── -->
+                            <div id="msg-panel-announcements" style="display:none;">
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1rem;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                                        <p style="font-size:0.85rem;font-weight:600;margin:0;" id="admin-ann-form-title">New Announcement</p>
+                                        <button id="admin-ann-cancel-edit" style="display:none;background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:0.72rem;font-family:inherit;">Cancel Edit</button>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:0.65rem;">
+                                        <!-- Type selector -->
+                                        <div style="display:flex;gap:0.4rem;">
+                                            <button class="ann-type-btn active" data-type="announcement" style="flex:1;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);color:#60a5fa;font-size:0.7rem;font-weight:600;padding:0.4rem;border-radius:8px;cursor:pointer;font-family:inherit;">Announcement</button>
+                                            <button class="ann-type-btn" data-type="ad" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:var(--muted-foreground);font-size:0.7rem;font-weight:500;padding:0.4rem;border-radius:8px;cursor:pointer;font-family:inherit;">Ad</button>
+                                            <button class="ann-type-btn" data-type="tip" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:var(--muted-foreground);font-size:0.7rem;font-weight:500;padding:0.4rem;border-radius:8px;cursor:pointer;font-family:inherit;">Tip</button>
+                                        </div>
+                                        <input id="admin-ann-title" type="text" placeholder="Title" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
+                                        <textarea id="admin-ann-body" placeholder="Body paragraph..." rows="3" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;resize:vertical;"></textarea>
+                                        <!-- Tag -->
+                                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                                            <label style="font-size:0.68rem;opacity:0.4;white-space:nowrap;">Tag</label>
+                                            <select id="admin-ann-tag" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;">
+                                                <option value="NEW">NEW</option>
+                                                <option value="AD">AD</option>
+                                                <option value="PROMO">PROMO</option>
+                                                <option value="TIP">TIP</option>
+                                                <option value="ALERT">ALERT</option>
+                                                <option value="UPDATE">UPDATE</option>
+                                                <option value="HOT">HOT</option>
+                                            </select>
+                                        </div>
+                                        <input id="admin-ann-image" type="url" placeholder="Image URL (optional)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
+                                        <input id="admin-ann-link" type="url" placeholder="Link (optional)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.82rem;font-family:inherit;outline:none;" />
+                                        <!-- CTA Buttons (up to 3) -->
+                                        <div>
+                                            <label style="font-size:0.68rem;opacity:0.4;display:block;margin-bottom:0.4rem;">CTA Buttons (up to 3)</label>
+                                            <div id="admin-ann-ctas" style="display:flex;flex-direction:column;gap:0.35rem;">
+                                                <div style="display:flex;gap:0.35rem;" class="cta-row">
+                                                    <input type="text" placeholder="Button text" class="cta-text" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" />
+                                                    <input type="url" placeholder="URL" class="cta-url" style="flex:1.5;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.4rem 0.6rem;color:var(--foreground);font-size:0.75rem;font-family:inherit;outline:none;" />
+                                                </div>
+                                            </div>
+                                            <button id="admin-ann-add-cta" style="margin-top:0.35rem;background:none;border:1px dashed rgba(255,255,255,0.12);color:var(--muted-foreground);font-size:0.68rem;padding:0.3rem 0.6rem;border-radius:6px;cursor:pointer;font-family:inherit;">+ Add CTA</button>
+                                        </div>
+                                        <!-- Gradient Picker -->
+                                        <div>
+                                            <label style="font-size:0.68rem;opacity:0.4;display:block;margin-bottom:0.4rem;">Gradient</label>
+                                            <div id="admin-ann-gradient-presets" style="display:flex;gap:0.3rem;flex-wrap:wrap;margin-bottom:0.4rem;">
+                                                <div class="grad-preset active" data-start="#a855f7" data-end="#ec4899" style="width:28px;height:28px;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#a855f7,#ec4899);border:2px solid #c084fc;"></div>
+                                                <div class="grad-preset" data-start="#06b6d4" data-end="#3b82f6" style="width:28px;height:28px;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#06b6d4,#3b82f6);border:2px solid transparent;"></div>
+                                                <div class="grad-preset" data-start="#f97316" data-end="#ef4444" style="width:28px;height:28px;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#f97316,#ef4444);border:2px solid transparent;"></div>
+                                                <div class="grad-preset" data-start="#22c55e" data-end="#06b6d4" style="width:28px;height:28px;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#22c55e,#06b6d4);border:2px solid transparent;"></div>
+                                                <div class="grad-preset" data-start="#eab308" data-end="#f97316" style="width:28px;height:28px;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#eab308,#f97316);border:2px solid transparent;"></div>
+                                                <div class="grad-preset" data-start="#8b5cf6" data-end="#06b6d4" style="width:28px;height:28px;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#8b5cf6,#06b6d4);border:2px solid transparent;"></div>
+                                            </div>
+                                            <div style="display:flex;gap:0.35rem;align-items:center;">
+                                                <input id="admin-ann-grad-start" type="text" value="#a855f7" placeholder="#hex" style="width:70px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:0.35rem 0.5rem;color:var(--foreground);font-size:0.72rem;font-family:inherit;outline:none;text-align:center;" />
+                                                <span style="opacity:0.25;font-size:0.7rem;">→</span>
+                                                <input id="admin-ann-grad-end" type="text" value="#ec4899" placeholder="#hex" style="width:70px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:0.35rem 0.5rem;color:var(--foreground);font-size:0.72rem;font-family:inherit;outline:none;text-align:center;" />
+                                                <div id="admin-ann-grad-preview" style="flex:1;height:24px;border-radius:6px;background:linear-gradient(135deg,#a855f7,#ec4899);"></div>
+                                            </div>
+                                        </div>
+                                        <!-- Frequency + End Date -->
+                                        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                                            <div style="flex:1;min-width:120px;">
+                                                <label style="font-size:0.68rem;opacity:0.4;display:block;margin-bottom:0.3rem;">Frequency</label>
+                                                <select id="admin-ann-frequency" style="width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;">
+                                                    <option value="always">Always</option>
+                                                    <option value="once_per_day">1x / day</option>
+                                                    <option value="once_per_session">1x / session</option>
+                                                    <option value="once_ever">1x ever</option>
+                                                </select>
+                                            </div>
+                                            <div style="flex:1;min-width:140px;">
+                                                <label style="font-size:0.68rem;opacity:0.4;display:block;margin-bottom:0.3rem;">End Date (optional)</label>
+                                                <input id="admin-ann-end" type="datetime-local" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:0.45rem 0.6rem;color:var(--foreground);font-size:0.78rem;font-family:inherit;outline:none;" />
+                                            </div>
+                                        </div>
+                                        <!-- Live Preview -->
+                                        <div id="admin-ann-preview" style="display:none;border-radius:14px;padding:1rem;margin-top:0.25rem;position:relative;overflow:hidden;">
+                                            <div id="admin-ann-preview-tag" style="position:absolute;top:8px;right:8px;font-size:0.55rem;font-weight:700;padding:0.15rem 0.45rem;border-radius:4px;background:rgba(0,0,0,0.3);color:#fff;letter-spacing:0.06em;"></div>
+                                            <p id="admin-ann-preview-title" style="font-size:0.9rem;font-weight:700;color:#fff;margin:0 0 0.3rem;"></p>
+                                            <p id="admin-ann-preview-body" style="font-size:0.75rem;color:rgba(255,255,255,0.8);margin:0 0 0.5rem;line-height:1.4;"></p>
+                                            <div id="admin-ann-preview-ctas" style="display:flex;gap:0.35rem;flex-wrap:wrap;"></div>
+                                        </div>
+                                        <div style="display:flex;gap:0.5rem;">
+                                            <button id="admin-ann-submit" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);border:none;color:#fff;font-size:0.78rem;font-weight:600;padding:0.5rem 1.2rem;border-radius:10px;cursor:pointer;font-family:inherit;transition:opacity 0.2s;">Publish</button>
+                                            <button id="admin-ann-preview-btn" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--foreground);font-size:0.78rem;font-weight:500;padding:0.5rem 1rem;border-radius:10px;cursor:pointer;font-family:inherit;">Preview</button>
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="admin-ann-edit-id" value="" />
+                                    <input type="hidden" id="admin-ann-type-val" value="announcement" />
+                                </div>
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                    <p style="font-size:0.85rem;font-weight:600;margin:0 0 1rem;">All Announcements</p>
+                                    <div id="admin-announcements-list" style="display:flex;flex-direction:column;gap:0.5rem;">
+                                        <p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">Loading...</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2312,9 +2430,6 @@
                 </div>
             </footer>
 
-            <!-- Update Notification Bar (above tab bar) -->
-            <div id="update-notification-bar" style="display:none;"></div>
-
             <!-- Mobile Bottom Tab Bar (Spotify-style) -->
             <nav id="mobile-tab-bar" class="mobile-tab-bar">
                 <a href="/" class="tab-item" data-tab="home">
@@ -2334,6 +2449,9 @@
                     <span class="tab-label">Account</span>
                 </a>
             </nav>
+
+            <!-- Update Notification Bar (below tab bar, very bottom) -->
+            <div id="update-notification-bar" style="display:none;"></div>
         </div>
         <script type="module" src="/js/app.js"></script>
     </body>

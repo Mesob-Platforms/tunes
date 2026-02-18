@@ -8633,6 +8633,12 @@ textarea:focus {
         color: var(--highlight, #fff);
     }
 
+    /* Push tab bar up when update bar is visible */
+    body.has-update-bar .mobile-tab-bar {
+        bottom: 34px;
+        transition: bottom 0.5s cubic-bezier(.22,1,.36,1);
+    }
+
     /* Slide-down animation for hiding tab bar */
     @keyframes tab-bar-slide-down {
         from { transform: translateY(0); opacity: 1; }
@@ -8644,6 +8650,15 @@ textarea:focus {
     body:has(#side-panel.active) .mobile-tab-bar,
     body.hide-tab-bar .mobile-tab-bar {
         animation: tab-bar-slide-down 0.3s ease forwards;
+        pointer-events: none;
+    }
+
+    /* Also hide update bar when tab bar is hidden */
+    body.fullscreen-open .tunes-update-bar,
+    body:has(#side-panel.active) .tunes-update-bar,
+    body.hide-tab-bar .tunes-update-bar {
+        opacity: 0 !important;
+        transform: translateY(100%) !important;
         pointer-events: none;
     }
 

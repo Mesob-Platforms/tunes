@@ -484,7 +484,7 @@ async function handleDeleteUser(request: Request, env: Env): Promise<Response> {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   UPDATES & ANNOUNCEMENTS ENDPOINTS
+   UPDATES & ANNOUNCEMENTS ENDPOINTS (v2 — Messaging Overhaul)
    ══════════════════════════════════════════════════════════════ */
 
 /** POST /api/admin/updates — create a new update */
@@ -499,7 +499,7 @@ async function handleCreateUpdate(request: Request, env: Env): Promise<Response>
       title: body.title,
       message: body.message || null,
       link: body.link || null,
-      target_versions: body.target_versions || [],
+      category: body.category || 'feature',
       is_active: true,
     }),
   });
@@ -511,15 +511,53 @@ async function handleCreateUpdate(request: Request, env: Env): Promise<Response>
   return Response.json(data, { headers: CORS_HEADERS });
 }
 
-/** GET /api/admin/updates — list all updates (admin) */
+/** POST /api/admin/updates/edit — edit an existing update */
+async function handleEditUpdate(request: Request, env: Env): Promise<Response> {
+  const body: any = await request.json();
+  if (!body.id) return Response.json({ error: 'Missing id' }, { status: 400, headers: CORS_HEADERS });
+  const hdrs = adminHeaders(env);
+  const payload: any = {};
+  if (body.title !== undefined) payload.title = body.title;
+  if (body.message !== undefined) payload.message = body.message;
+  if (body.link !== undefined) payload.link = body.link;
+  if (body.category !== undefined) payload.category = body.category;
+  if (body.is_active !== undefined) payload.is_active = body.is_active;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/admin_updates?id=eq.${body.id}`, {
+    method: 'PATCH',
+    headers: { ...hdrs, 'Prefer': 'return=representation' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'unknown');
+    return Response.json({ error: `Update failed: ${err}` }, { status: 500, headers: CORS_HEADERS });
+  }
+  const data = await res.json();
+  return Response.json(data, { headers: CORS_HEADERS });
+}
+
+/** GET /api/admin/updates — list all updates (admin) with tracking stats */
 async function handleListUpdates(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/admin_updates?select=*&order=created_at.desc`,
-    { headers: hdrs }
-  );
-  const data: any[] = res.ok ? await res.json() : [];
-  return Response.json(data, { headers: CORS_HEADERS });
+  const [updatesRes, trackingRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/admin_updates?select=*&order=created_at.desc`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_id,event_type&item_type=eq.update`, { headers: hdrs }),
+  ]);
+  const updates: any[] = updatesRes.ok ? await updatesRes.json() : [];
+  const tracking: any[] = trackingRes.ok ? await trackingRes.json() : [];
+  // Aggregate stats per update
+  const statsMap: Record<string, { impressions: number; clicks: number }> = {};
+  for (const t of tracking) {
+    if (!statsMap[t.item_id]) statsMap[t.item_id] = { impressions: 0, clicks: 0 };
+    if (t.event_type === 'impression') statsMap[t.item_id].impressions++;
+    if (t.event_type === 'click') statsMap[t.item_id].clicks++;
+  }
+  const enriched = updates.map(u => ({
+    ...u,
+    impressions: statsMap[u.id]?.impressions || 0,
+    clicks: statsMap[u.id]?.clicks || 0,
+    ctr: statsMap[u.id]?.impressions ? Math.round((statsMap[u.id].clicks / statsMap[u.id].impressions) * 100) : 0,
+  }));
+  return Response.json(enriched, { headers: CORS_HEADERS });
 }
 
 /** POST /api/admin/updates/delete — delete an update */
@@ -527,10 +565,8 @@ async function handleDeleteUpdate(request: Request, env: Env): Promise<Response>
   const body: any = await request.json();
   if (!body.id) return Response.json({ error: 'Missing id' }, { status: 400, headers: CORS_HEADERS });
   const hdrs = adminHeaders(env);
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/admin_updates?id=eq.${body.id}`,
-    { method: 'DELETE', headers: hdrs }
-  );
+  await fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?item_type=eq.update&item_id=eq.${body.id}`, { method: 'DELETE', headers: hdrs });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/admin_updates?id=eq.${body.id}`, { method: 'DELETE', headers: hdrs });
   if (!res.ok) return Response.json({ error: 'Delete failed' }, { status: 500, headers: CORS_HEADERS });
   return Response.json({ success: true }, { headers: CORS_HEADERS });
 }
@@ -545,9 +581,15 @@ async function handleCreateAnnouncement(request: Request, env: Env): Promise<Res
     headers: { ...hdrs, 'Prefer': 'return=representation' },
     body: JSON.stringify({
       title: body.title,
+      body: body.body || null,
       link: body.link || null,
       image_url: body.image_url || null,
-      starts_at: body.starts_at || new Date().toISOString(),
+      type: body.type || 'announcement',
+      tag: body.tag || 'NEW',
+      gradient_start: body.gradient_start || '#a855f7',
+      gradient_end: body.gradient_end || '#ec4899',
+      cta_buttons: body.cta_buttons || [],
+      frequency: body.frequency || 'always',
       ends_at: body.ends_at || null,
       is_active: true,
     }),
@@ -560,15 +602,49 @@ async function handleCreateAnnouncement(request: Request, env: Env): Promise<Res
   return Response.json(data, { headers: CORS_HEADERS });
 }
 
-/** GET /api/admin/announcements — list all announcements (admin) */
+/** POST /api/admin/announcements/edit — edit an existing announcement */
+async function handleEditAnnouncement(request: Request, env: Env): Promise<Response> {
+  const body: any = await request.json();
+  if (!body.id) return Response.json({ error: 'Missing id' }, { status: 400, headers: CORS_HEADERS });
+  const hdrs = adminHeaders(env);
+  const payload: any = {};
+  const fields = ['title', 'body', 'link', 'image_url', 'type', 'tag', 'gradient_start', 'gradient_end', 'cta_buttons', 'frequency', 'ends_at', 'is_active'];
+  for (const f of fields) { if (body[f] !== undefined) payload[f] = body[f]; }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?id=eq.${body.id}`, {
+    method: 'PATCH',
+    headers: { ...hdrs, 'Prefer': 'return=representation' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'unknown');
+    return Response.json({ error: `Update failed: ${err}` }, { status: 500, headers: CORS_HEADERS });
+  }
+  const data = await res.json();
+  return Response.json(data, { headers: CORS_HEADERS });
+}
+
+/** GET /api/admin/announcements — list all announcements (admin) with tracking stats */
 async function handleListAnnouncements(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/admin_announcements?select=*&order=created_at.desc`,
-    { headers: hdrs }
-  );
-  const data: any[] = res.ok ? await res.json() : [];
-  return Response.json(data, { headers: CORS_HEADERS });
+  const [annsRes, trackingRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?select=*&order=created_at.desc`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_id,event_type&item_type=eq.announcement`, { headers: hdrs }),
+  ]);
+  const anns: any[] = annsRes.ok ? await annsRes.json() : [];
+  const tracking: any[] = trackingRes.ok ? await trackingRes.json() : [];
+  const statsMap: Record<string, { impressions: number; clicks: number }> = {};
+  for (const t of tracking) {
+    if (!statsMap[t.item_id]) statsMap[t.item_id] = { impressions: 0, clicks: 0 };
+    if (t.event_type === 'impression') statsMap[t.item_id].impressions++;
+    if (t.event_type === 'click') statsMap[t.item_id].clicks++;
+  }
+  const enriched = anns.map(a => ({
+    ...a,
+    impressions: statsMap[a.id]?.impressions || 0,
+    clicks: statsMap[a.id]?.clicks || 0,
+    ctr: statsMap[a.id]?.impressions ? Math.round((statsMap[a.id].clicks / statsMap[a.id].impressions) * 100) : 0,
+  }));
+  return Response.json(enriched, { headers: CORS_HEADERS });
 }
 
 /** POST /api/admin/announcements/delete — delete an announcement */
@@ -576,12 +652,60 @@ async function handleDeleteAnnouncement(request: Request, env: Env): Promise<Res
   const body: any = await request.json();
   if (!body.id) return Response.json({ error: 'Missing id' }, { status: 400, headers: CORS_HEADERS });
   const hdrs = adminHeaders(env);
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/admin_announcements?id=eq.${body.id}`,
-    { method: 'DELETE', headers: hdrs }
-  );
+  await fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?item_type=eq.announcement&item_id=eq.${body.id}`, { method: 'DELETE', headers: hdrs });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?id=eq.${body.id}`, { method: 'DELETE', headers: hdrs });
   if (!res.ok) return Response.json({ error: 'Delete failed' }, { status: 500, headers: CORS_HEADERS });
   return Response.json({ success: true }, { headers: CORS_HEADERS });
+}
+
+/** POST /api/track-event — record impression or click (public, needs auth) */
+async function handleTrackEvent(request: Request, env: Env): Promise<Response> {
+  const auth = await verifyUser(request, env);
+  if (!auth.valid) return Response.json({ error: auth.error }, { status: 403, headers: CORS_HEADERS });
+  const body: any = await request.json();
+  const { item_type, item_id, event_type } = body;
+  if (!item_type || !item_id || !event_type) return Response.json({ error: 'Missing fields' }, { status: 400, headers: CORS_HEADERS });
+  if (!['update', 'announcement'].includes(item_type)) return Response.json({ error: 'Invalid item_type' }, { status: 400, headers: CORS_HEADERS });
+  if (!['impression', 'click'].includes(event_type)) return Response.json({ error: 'Invalid event_type' }, { status: 400, headers: CORS_HEADERS });
+  const hdrs = adminHeaders(env);
+  // Upsert — unique constraint will prevent duplicates
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/admin_tracking`, {
+    method: 'POST',
+    headers: { ...hdrs, 'Prefer': 'return=minimal,resolution=ignore-duplicates' },
+    body: JSON.stringify({ item_type, item_id, user_id: auth.user.id, event_type }),
+  });
+  return Response.json({ ok: true }, { headers: CORS_HEADERS });
+}
+
+/** GET /api/admin/messaging-stats — aggregate stats for overview card */
+async function handleMessagingStats(env: Env): Promise<Response> {
+  const hdrs = adminHeaders(env);
+  const [updatesRes, annsRes, trackingRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/admin_updates?select=id,is_active`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?select=id,is_active,ends_at`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_type,event_type`, { headers: hdrs }),
+  ]);
+  const updates: any[] = updatesRes.ok ? await updatesRes.json() : [];
+  const anns: any[] = annsRes.ok ? await annsRes.json() : [];
+  const tracking: any[] = trackingRes.ok ? await trackingRes.json() : [];
+
+  const activeUpdates = updates.filter(u => u.is_active).length;
+  const activeAnns = anns.filter(a => a.is_active && (!a.ends_at || new Date(a.ends_at) > new Date())).length;
+  let totalImpressions = 0, totalClicks = 0;
+  for (const t of tracking) {
+    if (t.event_type === 'impression') totalImpressions++;
+    if (t.event_type === 'click') totalClicks++;
+  }
+
+  return Response.json({
+    total_updates: updates.length,
+    active_updates: activeUpdates,
+    total_announcements: anns.length,
+    active_announcements: activeAnns,
+    total_impressions: totalImpressions,
+    total_clicks: totalClicks,
+    overall_ctr: totalImpressions ? Math.round((totalClicks / totalImpressions) * 100) : 0,
+  }, { headers: CORS_HEADERS });
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -694,15 +818,13 @@ From these 4 categories, determine which has the MOST POPULAR result and should 
    PUBLIC ENDPOINTS — updates/check, announcements/active
    ══════════════════════════════════════════════════════════════ */
 
-/** GET /api/updates/check?version=X — get active updates for this app version (public) */
+/** GET /api/updates/check — get active updates (public, no version filtering) */
 async function handleCheckUpdates(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  const version = url.searchParams.get('version') || null;
   const hdrs = adminHeaders(env);
   const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_active_updates`, {
     method: 'POST',
     headers: hdrs,
-    body: JSON.stringify({ app_version: version }),
+    body: '{}',
   });
   if (!rpcRes.ok) {
     return Response.json([], { headers: CORS_HEADERS });
@@ -711,7 +833,7 @@ async function handleCheckUpdates(request: Request, env: Env): Promise<Response>
   return Response.json(data, { headers: CORS_HEADERS });
 }
 
-/** GET /api/announcements/active — get currently active announcements (public) */
+/** GET /api/announcements/active — get currently active announcements (public, new schema) */
 async function handleActiveAnnouncements(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
   const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_active_announcements`, {
@@ -1164,11 +1286,15 @@ export default {
         // Updates CRUD
         if (url.pathname === '/api/admin/updates' && request.method === 'POST') return await handleCreateUpdate(request, env);
         if (url.pathname === '/api/admin/updates' && request.method === 'GET') return await handleListUpdates(env);
+        if (url.pathname === '/api/admin/updates/edit') return await handleEditUpdate(request, env);
         if (url.pathname === '/api/admin/updates/delete') return await handleDeleteUpdate(request, env);
         // Announcements CRUD
         if (url.pathname === '/api/admin/announcements' && request.method === 'POST') return await handleCreateAnnouncement(request, env);
         if (url.pathname === '/api/admin/announcements' && request.method === 'GET') return await handleListAnnouncements(env);
+        if (url.pathname === '/api/admin/announcements/edit') return await handleEditAnnouncement(request, env);
         if (url.pathname === '/api/admin/announcements/delete') return await handleDeleteAnnouncement(request, env);
+        // Messaging stats
+        if (url.pathname === '/api/admin/messaging-stats') return await handleMessagingStats(env);
       } catch (err: any) {
         return Response.json({ error: err.message || 'Internal error' }, { status: 500, headers: CORS_HEADERS });
       }
@@ -1203,6 +1329,11 @@ export default {
     if (url.pathname === '/api/announcements/active') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
       return await handleActiveAnnouncements(env);
+    }
+    if (url.pathname === '/api/track-event') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      if (request.method === 'POST') return await handleTrackEvent(request, env);
+      return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
     }
 
     // ── Public Wrapped share page ──
