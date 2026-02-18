@@ -432,9 +432,9 @@
                 <div class="shortcuts-content">
                     <div class="shortcut-item"><kbd>Space</kbd><span>Play / Pause</span></div>
                     <div class="shortcut-item"><kbd>â†’</kbd><span>Seek forward 10s</span></div>
-                    <div class="shortcut-item"><kbd>â†</kbd><span>Seek backward 10s</span></div>
+                    <div class="shortcut-item"><kbd>←</kbd><span>Seek backward 10s</span></div>
                     <div class="shortcut-item"><kbd>Shift</kbd> + <kbd>â†’</kbd><span>Next track</span></div>
-                    <div class="shortcut-item"><kbd>Shift</kbd> + <kbd>â†</kbd><span>Previous track</span></div>
+                    <div class="shortcut-item"><kbd>Shift</kbd> + <kbd>←</kbd><span>Previous track</span></div>
                     <div class="shortcut-item"><kbd>â†‘</kbd><span>Volume up</span></div>
                     <div class="shortcut-item"><kbd>â†“</kbd><span>Volume down</span></div>
                     <div class="shortcut-item"><kbd>M</kbd><span>Mute / Unmute</span></div>
@@ -1678,38 +1678,72 @@
 
                         <!-- TAB: Overview -->
                         <div id="admin-tab-overview" class="admin-tab-content">
-                            <!-- Stat Cards -->
-                            <div id="admin-stat-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem;">
-                                <div id="admin-card-users" style="background: var(--card); border-radius: 14px; padding: 1rem; text-align: center; cursor: pointer; transition: background 0.2s;" title="View all users">
-                                    <p id="admin-total-users" style="font-size: 2rem; font-weight: 800; margin: 0; line-height: 1;">--</p>
-                                    <p style="opacity: 0.4; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.3rem 0 0;">Total Users</p>
+                            <!-- Stat Cards Row 1 -->
+                            <div id="admin-stat-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;margin-bottom:0.6rem;">
+                                <div id="admin-card-users" style="background:var(--card);border-radius:14px;padding:0.85rem 0.7rem;text-align:center;cursor:pointer;transition:background 0.2s;" title="View all users">
+                                    <p id="admin-total-users" style="font-size:1.6rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.35;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.25rem 0 0;">Total Users</p>
                                 </div>
-                                <div style="background: var(--card); border-radius: 14px; padding: 1rem; text-align: center;">
-                                    <p id="admin-active-today" style="font-size: 2rem; font-weight: 800; margin: 0; line-height: 1;">--</p>
-                                    <p style="opacity: 0.4; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.3rem 0 0;">Active Today</p>
+                                <div style="background:var(--card);border-radius:14px;padding:0.85rem 0.7rem;text-align:center;">
+                                    <p id="admin-active-today" style="font-size:1.6rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.35;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.25rem 0 0;">Active Today</p>
                                 </div>
-                                <div style="background: var(--card); border-radius: 14px; padding: 1rem; text-align: center;">
-                                    <p id="admin-events-today" style="font-size: 2rem; font-weight: 800; margin: 0; line-height: 1;">--</p>
-                                    <p style="opacity: 0.4; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.3rem 0 0;">Plays Today</p>
-                                </div>
-                                <div style="background: var(--card); border-radius: 14px; padding: 1rem; text-align: center;">
-                                    <p id="admin-events-total" style="font-size: 2rem; font-weight: 800; margin: 0; line-height: 1;">--</p>
-                                    <p style="opacity: 0.4; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.3rem 0 0;">Total Plays</p>
+                                <div style="background:var(--card);border-radius:14px;padding:0.85rem 0.7rem;text-align:center;">
+                                    <p id="admin-events-today" style="font-size:1.6rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p id="admin-events-today-trend" style="opacity:0.35;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.25rem 0 0;">Plays Today</p>
                                 </div>
                             </div>
+                            <!-- Stat Cards Row 2 -->
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;margin-bottom:1.25rem;">
+                                <div style="background:var(--card);border-radius:14px;padding:0.85rem 0.7rem;text-align:center;">
+                                    <p id="admin-plays-week" style="font-size:1.6rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p id="admin-plays-week-trend" style="opacity:0.35;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.25rem 0 0;">This Week</p>
+                                </div>
+                                <div style="background:var(--card);border-radius:14px;padding:0.85rem 0.7rem;text-align:center;">
+                                    <p id="admin-events-total" style="font-size:1.6rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.35;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.25rem 0 0;">Total Plays</p>
+                                </div>
+                                <div style="background:var(--card);border-radius:14px;padding:0.85rem 0.7rem;text-align:center;">
+                                    <p id="admin-total-hours" style="font-size:1.6rem;font-weight:800;margin:0;line-height:1;">--</p>
+                                    <p style="opacity:0.35;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;margin:0.25rem 0 0;">Total Hours</p>
+                                </div>
+                            </div>
+
+                            <!-- Daily Activity Sparkline -->
+                            <div id="admin-daily-sparkline" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Daily Activity <span style="opacity:0.6;">(30d)</span></p>
+                                <div id="admin-sparkline-bars" style="display:flex;align-items:flex-end;gap:2px;height:60px;"></div>
+                            </div>
+
+                            <!-- Peak Hours Heatmap -->
+                            <div id="admin-peak-hours" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Peak Listening Hours</p>
+                                <div id="admin-heatmap" style="display:grid;grid-template-columns:repeat(12,1fr);gap:3px;"></div>
+                                <div style="display:flex;justify-content:space-between;margin-top:0.35rem;opacity:0.2;font-size:0.55rem;">
+                                    <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>11pm</span>
+                                </div>
+                            </div>
+
+                            <!-- Genre Breakdown -->
+                            <div id="admin-genre-section" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Genre Breakdown</p>
+                                <div id="admin-genre-bars" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
+                            </div>
+
                             <!-- User List Panel (hidden by default) -->
-                            <div id="admin-user-list-panel" style="display:none; background:var(--card); border-radius:16px; padding:1.25rem; margin-bottom:1.25rem;">
-                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                            <div id="admin-user-list-panel" style="display:none;background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
                                     <p style="font-size:0.85rem;font-weight:600;margin:0;">All Users</p>
                                     <button id="admin-user-list-close" style="background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:1.2rem;padding:0.25rem;">
                                         <span class="material-symbols-rounded" style="font-size:1.2rem;">close</span>
                                     </button>
                                 </div>
-                                <div id="admin-user-list" style="display:flex;flex-direction:column;gap:0.5rem;max-height:400px;overflow-y:auto;"></div>
+                                <input id="admin-user-search" type="text" placeholder="Search by name or email..." style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:0.55rem 0.85rem;color:var(--foreground);font-size:0.8rem;font-family:inherit;outline:none;margin-bottom:0.75rem;" />
+                                <div id="admin-user-list" style="display:flex;flex-direction:column;gap:0.4rem;max-height:310px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent;"></div>
                             </div>
 
                             <!-- User Detail Panel (hidden by default) -->
-                            <div id="admin-user-detail-panel" style="display:none; background:var(--card); border-radius:16px; padding:1.25rem; margin-bottom:1.25rem;">
+                            <div id="admin-user-detail-panel" style="display:none;background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
                                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
                                     <button id="admin-user-detail-back" style="background:none;border:none;color:var(--foreground);cursor:pointer;display:flex;align-items:center;gap:0.4rem;padding:0;">
                                         <span class="material-symbols-rounded" style="font-size:1.2rem;">arrow_back</span>
@@ -1720,19 +1754,31 @@
                                 <div id="admin-user-detail-content"></div>
                             </div>
 
+                            <!-- Trending Now - 2 columns -->
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem;">
+                                <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;">
+                                    <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🔥 Trending Artists <span style="opacity:0.5;">(48h)</span></p>
+                                    <canvas id="admin-chart-artists" height="250" style="display:none;"></canvas>
+                                    <div id="admin-trending-artists-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
+                                </div>
+                                <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;">
+                                    <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🎵 Trending Tracks <span style="opacity:0.5;">(48h)</span></p>
+                                    <canvas id="admin-chart-tracks" height="250" style="display:none;"></canvas>
+                                    <div id="admin-trending-tracks-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
+                                </div>
+                            </div>
+
                             <!-- Charts -->
-                            <div style="display: grid; grid-template-columns: 1fr; gap: 1.25rem;">
-                                <div style="background: var(--card); border-radius: 16px; padding: 1.25rem;">
-                                    <p style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.4; margin: 0 0 1rem;">Trending Artists (48h)</p>
-                                    <canvas id="admin-chart-artists" height="250"></canvas>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                    <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Top Users by Plays</p>
+                                    <canvas id="admin-chart-top-users" height="250" style="display:none;"></canvas>
+                                    <div id="admin-top-users-bars"></div>
                                 </div>
-                                <div style="background: var(--card); border-radius: 16px; padding: 1.25rem;">
-                                    <p style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.4; margin: 0 0 1rem;">Trending Tracks (48h)</p>
-                                    <canvas id="admin-chart-tracks" height="250"></canvas>
-                                </div>
-                                <div style="background: var(--card); border-radius: 16px; padding: 1.25rem;">
-                                    <p style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.4; margin: 0 0 1rem;">Signups (Last 30 Days)</p>
-                                    <canvas id="admin-chart-signups" height="200"></canvas>
+                                <div style="background:var(--card);border-radius:16px;padding:1.25rem;">
+                                    <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Signups (Last 30 Days)</p>
+                                    <canvas id="admin-chart-signups" height="200" style="display:none;"></canvas>
+                                    <div id="admin-signups-bars"></div>
                                 </div>
                             </div>
                         </div>

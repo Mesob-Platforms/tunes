@@ -345,6 +345,122 @@ async function handleUserSummary(request: Request, env: Env): Promise<Response> 
   }, { headers: CORS_HEADERS });
 }
 
+/** GET /api/admin/dashboard-stats — rich analytics for admin dashboard */
+async function handleDashboardStats(env: Env): Promise<Response> {
+  const hdrs = adminHeaders(env);
+
+  // Fetch ALL listening events with timestamps (up to 50k)
+  const evtRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/listening_events?select=user_id,track_title,artist_name,genre,listened_at,duration_sec&order=listened_at.desc&limit=50000`,
+    { headers: hdrs }
+  );
+  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const yesterdayStr = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+  const weekAgo = new Date(now.getTime() - 7 * 86400000);
+  const prevWeekStart = new Date(now.getTime() - 14 * 86400000);
+  const fortyEightHoursAgo = new Date(now.getTime() - 48 * 3600000);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+
+  let playsToday = 0;
+  let playsYesterday = 0;
+  let playsThisWeek = 0;
+  let playsPrevWeek = 0;
+  const peakHours = new Array(24).fill(0);
+  const genreCounts: Record<string, number> = {};
+  const trending48hArtists: Record<string, number> = {};
+  const trending48hTracks: Record<string, { title: string; artist: string; count: number }> = {};
+  const dailyPlays: Record<string, number> = {};
+  const weeklyActiveUsers = new Set<string>();
+  const todayActiveUsers = new Set<string>();
+  let totalMinutes = 0;
+
+  for (const e of events) {
+    const listenedAt = new Date(e.listened_at);
+    const dayStr = e.listened_at.slice(0, 10);
+
+    if (dayStr === todayStr) { playsToday++; todayActiveUsers.add(e.user_id); }
+    if (dayStr === yesterdayStr) playsYesterday++;
+    if (listenedAt >= weekAgo) { playsThisWeek++; weeklyActiveUsers.add(e.user_id); }
+    if (listenedAt >= prevWeekStart && listenedAt < weekAgo) playsPrevWeek++;
+
+    peakHours[listenedAt.getHours()]++;
+    if (e.genre) genreCounts[e.genre] = (genreCounts[e.genre] || 0) + 1;
+
+    if (listenedAt >= fortyEightHoursAgo) {
+      if (e.artist_name) trending48hArtists[e.artist_name] = (trending48hArtists[e.artist_name] || 0) + 1;
+      if (e.track_title) {
+        const key = `${e.track_title}|||${e.artist_name}`;
+        if (!trending48hTracks[key]) trending48hTracks[key] = { title: e.track_title, artist: e.artist_name, count: 0 };
+        trending48hTracks[key].count++;
+      }
+    }
+
+    if (listenedAt >= thirtyDaysAgo) dailyPlays[dayStr] = (dailyPlays[dayStr] || 0) + 1;
+    totalMinutes += Math.round((e.duration_sec || 0) / 60);
+  }
+
+  const trendingArtists = Object.entries(trending48hArtists).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, plays]) => ({ name, plays }));
+  const trendingTracks = Object.values(trending48hTracks).sort((a, b) => b.count - a.count).slice(0, 10).map(t => ({ title: t.title, artist: t.artist, plays: t.count }));
+  const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([genre, plays]) => ({ genre, plays }));
+  const dailyPlaysArr = Object.entries(dailyPlays).sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count }));
+
+  return Response.json({
+    plays_today: playsToday,
+    plays_yesterday: playsYesterday,
+    plays_this_week: playsThisWeek,
+    plays_prev_week: playsPrevWeek,
+    active_today: todayActiveUsers.size,
+    active_this_week: weeklyActiveUsers.size,
+    total_events: events.length,
+    total_minutes: totalMinutes,
+    peak_hours: peakHours,
+    genre_breakdown: topGenres,
+    trending_artists_48h: trendingArtists,
+    trending_tracks_48h: trendingTracks,
+    daily_plays_30d: dailyPlaysArr,
+  }, { headers: CORS_HEADERS });
+}
+
+/** POST /api/admin/user-ai-review — AI-generated personality review */
+async function handleUserAiReview(request: Request, env: Env): Promise<Response> {
+  if (!env.AI) return Response.json({ error: 'AI binding not configured' }, { status: 500, headers: CORS_HEADERS });
+
+  const body: any = await request.json();
+  const { display_name, top_artists, top_tracks, top_genres, total_plays, unique_artists, unique_tracks } = body;
+  if (!display_name) return Response.json({ error: 'Missing user data' }, { status: 400, headers: CORS_HEADERS });
+
+  const artistList = (top_artists || []).map((a: any) => `${a.artist_name || a.name} (${a.plays} plays)`).join(', ');
+  const trackList = (top_tracks || []).map((t: any) => `"${t.track_title || t.title}" by ${t.artist_name || t.artist} (${t.plays} plays)`).join(', ');
+  const genreList = (top_genres || []).map((g: any) => `${g.genre} (${g.plays})`).join(', ');
+
+  const prompt = `You are a witty, sharp music critic with a Gen-Z sense of humor. Write a SHORT (3-4 sentences max) personality review of a music listener based on their data. Be creative, funny, slightly roasting but affectionate. Reference specific artists/songs they listen to.
+
+User: ${display_name}
+Total plays: ${total_plays || 0}
+Unique artists: ${unique_artists || 0}
+Unique tracks: ${unique_tracks || 0}
+Top artists: ${artistList || 'none yet'}
+Top tracks: ${trackList || 'none yet'}
+Top genres: ${genreList || 'unknown'}
+
+Write ONLY the review text. No quotes, no labels, no markdown. Just the personality roast/review in 3-4 punchy sentences.`;
+
+  try {
+    const aiResponse: any = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 200,
+      temperature: 0.8,
+    });
+    const review = (aiResponse.response || '').trim();
+    return Response.json({ review }, { headers: CORS_HEADERS });
+  } catch (err: any) {
+    return Response.json({ error: err.message || 'AI failed' }, { status: 500, headers: CORS_HEADERS });
+  }
+}
+
 /** POST /api/admin/delete-user — delete a user and all their data */
 async function handleDeleteUser(request: Request, env: Env): Promise<Response> {
   const body: any = await request.json();
@@ -1037,6 +1153,8 @@ export default {
         if (url.pathname === '/api/admin/users') return await handleListUsers(env);
         if (url.pathname === '/api/admin/user-summary') return await handleUserSummary(request, env);
         if (url.pathname === '/api/admin/delete-user') return await handleDeleteUser(request, env);
+        if (url.pathname === '/api/admin/dashboard-stats') return await handleDashboardStats(env);
+        if (url.pathname === '/api/admin/user-ai-review' && request.method === 'POST') return await handleUserAiReview(request, env);
         // Storage / Archive endpoints
         if (url.pathname === '/api/admin/db-stats') return await handleDbStats(env);
         if (url.pathname === '/api/admin/telegram/test') return await handleTelegramTest(env);

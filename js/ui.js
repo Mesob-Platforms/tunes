@@ -5718,6 +5718,587 @@ export class UIRenderer {
     // ===== Admin Page =====
     async renderAdminPage() {
         this.showPage('admin');
+
+        const { supabase } = await import('./accounts/config.js');
+        const { getAvatarUrl } = await import('./accounts/profile.js');
+        if (!supabase) return;
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+
+        /** Authenticated fetch helper for admin API endpoints */
+        const adminFetch = async (path, opts = {}) => {
+            const res = await fetch(path, {
+                ...opts,
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...(opts.headers || {}),
+                },
+            });
+            return res.json();
+        };
+
+        // ── Tab switching ──
+        const tabs = document.querySelectorAll('.admin-tab');
+        tabs.forEach(tab => {
+            tab.onclick = () => {
+                tabs.forEach(t => {
+                    const isActive = t === tab;
+                    t.classList.toggle('active', isActive);
+                    t.style.opacity = isActive ? '1' : '0.6';
+                    t.style.color = isActive ? 'var(--foreground)' : 'var(--muted-foreground)';
+                    t.style.fontWeight = isActive ? '600' : '500';
+                });
+                document.querySelectorAll('.admin-tab-content').forEach(c => {
+                    c.style.display = c.id === `admin-tab-${tab.dataset.adminTab}` ? '' : 'none';
+                });
+            };
+        });
+
+        // ── Overview Tab ──
+        try {
+            const [users, stats] = await Promise.all([
+                adminFetch('/api/admin/users'),
+                adminFetch('/api/admin/dashboard-stats').catch(() => null),
+            ]);
+            if (!Array.isArray(users)) throw new Error(users.error || 'Failed to load users');
+
+            const totalUsers = users.length;
+            const today = new Date().toISOString().slice(0, 10);
+            const activeToday = stats?.active_today ?? users.filter(u => u.last_sign_in_at?.slice(0, 10) === today).length;
+            const totalPlays = stats?.total_events ?? users.reduce((s, u) => s + (u.total_plays || 0), 0);
+            const playsToday = stats?.plays_today ?? (activeToday > 0 ? '~' : '0');
+            const playsWeek = stats?.plays_this_week ?? '--';
+            const totalHours = stats?.total_minutes ? Math.round(stats.total_minutes / 60) : '--';
+
+            document.getElementById('admin-total-users').textContent = totalUsers;
+            document.getElementById('admin-active-today').textContent = activeToday;
+            document.getElementById('admin-events-today').textContent = playsToday;
+            document.getElementById('admin-events-total').textContent = typeof totalPlays === 'number' ? totalPlays.toLocaleString() : totalPlays;
+            document.getElementById('admin-plays-week').textContent = typeof playsWeek === 'number' ? playsWeek.toLocaleString() : playsWeek;
+            document.getElementById('admin-total-hours').textContent = typeof totalHours === 'number' ? totalHours.toLocaleString() : totalHours;
+
+            // Trend indicators
+            if (stats) {
+                const dayTrend = stats.plays_yesterday > 0 ? Math.round(((stats.plays_today - stats.plays_yesterday) / stats.plays_yesterday) * 100) : 0;
+                const trendEl = document.getElementById('admin-events-today-trend');
+                if (trendEl && dayTrend !== 0) {
+                    const arrow = dayTrend > 0 ? '\u2191' : '\u2193';
+                    const color = dayTrend > 0 ? '#22c55e' : '#ef4444';
+                    trendEl.innerHTML = `Plays Today <span style="color:${color};font-weight:600;">${arrow}${Math.abs(dayTrend)}%</span>`;
+                }
+                const weekTrend = stats.plays_prev_week > 0 ? Math.round(((stats.plays_this_week - stats.plays_prev_week) / stats.plays_prev_week) * 100) : 0;
+                const weekTrendEl = document.getElementById('admin-plays-week-trend');
+                if (weekTrendEl && weekTrend !== 0) {
+                    const arrow = weekTrend > 0 ? '\u2191' : '\u2193';
+                    const color = weekTrend > 0 ? '#22c55e' : '#ef4444';
+                    weekTrendEl.innerHTML = `This Week <span style="color:${color};font-weight:600;">${arrow}${Math.abs(weekTrend)}%</span>`;
+                }
+            }
+
+            // ── Daily Sparkline ──
+            if (stats?.daily_plays_30d?.length) {
+                const sparkContainer = document.getElementById('admin-sparkline-bars');
+                const maxDaily = Math.max(...stats.daily_plays_30d.map(d => d.count), 1);
+                sparkContainer.innerHTML = stats.daily_plays_30d.map(d => {
+                    const pct = Math.max(3, Math.round((d.count / maxDaily) * 100));
+                    return `<div title="${d.date}: ${d.count} plays" style="flex:1;height:${pct}%;background:linear-gradient(180deg,rgba(168,85,247,0.7),rgba(236,72,153,0.4));border-radius:2px;min-width:2px;transition:height 0.3s;"></div>`;
+                }).join('');
+            }
+
+            // ── Peak Hours Heatmap ──
+            if (stats?.peak_hours) {
+                const heatmap = document.getElementById('admin-heatmap');
+                const maxH = Math.max(...stats.peak_hours, 1);
+                const amPm = h => h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
+                heatmap.innerHTML = stats.peak_hours.map((v, h) => {
+                    const intensity = v / maxH;
+                    const bg = intensity > 0.7 ? `rgba(168,85,247,${(0.3 + intensity * 0.6).toFixed(2)})` : intensity > 0.3 ? `rgba(168,85,247,${(0.1 + intensity * 0.4).toFixed(2)})` : `rgba(255,255,255,${(0.02 + intensity * 0.08).toFixed(2)})`;
+                    return `<div title="${amPm(h)}: ${v} plays" style="aspect-ratio:1;border-radius:3px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:0.5rem;opacity:${v > 0 ? 0.7 : 0.2};">${v > 0 ? v : ''}</div>`;
+                }).join('');
+            }
+
+            // ── Genre Breakdown ──
+            if (stats?.genre_breakdown?.length) {
+                const genreBars = document.getElementById('admin-genre-bars');
+                const maxG = stats.genre_breakdown[0]?.plays || 1;
+                const gColors = ['#a855f7', '#ec4899', '#06b6d4', '#22c55e', '#f97316', '#eab308', '#6366f1', '#f43f5e'];
+                genreBars.innerHTML = stats.genre_breakdown.map((g, i) => {
+                    const pct = Math.round((g.plays / maxG) * 100);
+                    return `<div style="display:flex;align-items:center;gap:0.5rem;">
+                        <span style="flex-shrink:0;width:4.5rem;font-size:0.7rem;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;">${escapeHtml(g.genre)}</span>
+                        <div style="flex:1;height:14px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden;">
+                            <div style="height:100%;width:${pct}%;background:${gColors[i % gColors.length]};opacity:0.6;border-radius:3px;transition:width 0.4s;"></div>
+                        </div>
+                        <span style="flex-shrink:0;width:2rem;font-size:0.65rem;font-weight:600;opacity:0.5;">${g.plays}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── Trending Artists (48h) ──
+            if (stats?.trending_artists_48h?.length) {
+                const tArtistList = document.getElementById('admin-trending-artists-list');
+                const maxA = stats.trending_artists_48h[0]?.plays || 1;
+                tArtistList.innerHTML = stats.trending_artists_48h.map((a, i) => {
+                    const pct = Math.round((a.plays / maxA) * 100);
+                    return `<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.78rem;">
+                        <span style="opacity:0.2;font-size:0.65rem;width:1.1rem;text-align:right;flex-shrink:0;">${i + 1}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+                                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(a.name)}</span>
+                                <span style="opacity:0.35;font-size:0.68rem;flex-shrink:0;margin-left:0.4rem;">${a.plays}</span>
+                            </div>
+                            <div style="height:3px;background:rgba(255,255,255,0.04);border-radius:2px;overflow:hidden;">
+                                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#a855f7,#ec4899);border-radius:2px;"></div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── Trending Tracks (48h) ──
+            if (stats?.trending_tracks_48h?.length) {
+                const tTrackList = document.getElementById('admin-trending-tracks-list');
+                const maxT = stats.trending_tracks_48h[0]?.plays || 1;
+                tTrackList.innerHTML = stats.trending_tracks_48h.map((t, i) => {
+                    const pct = Math.round((t.plays / maxT) * 100);
+                    return `<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.78rem;">
+                        <span style="opacity:0.2;font-size:0.65rem;width:1.1rem;text-align:right;flex-shrink:0;">${i + 1}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+                                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t.title)} <span style="opacity:0.3;">\u2014 ${escapeHtml(t.artist)}</span></span>
+                                <span style="opacity:0.35;font-size:0.68rem;flex-shrink:0;margin-left:0.4rem;">${t.plays}</span>
+                            </div>
+                            <div style="height:3px;background:rgba(255,255,255,0.04);border-radius:2px;overflow:hidden;">
+                                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#06b6d4,#22c55e);border-radius:2px;"></div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── User List Panel ──
+            const userListPanel = document.getElementById('admin-user-list-panel');
+            const userList = document.getElementById('admin-user-list');
+            const userDetailPanel = document.getElementById('admin-user-detail-panel');
+            const userDetailContent = document.getElementById('admin-user-detail-content');
+            const userSearch = document.getElementById('admin-user-search');
+
+            document.getElementById('admin-card-users').onclick = () => {
+                userDetailPanel.style.display = 'none';
+                userListPanel.style.display = '';
+                if (userSearch) userSearch.value = '';
+                renderUserList(users);
+            };
+            document.getElementById('admin-user-list-close').onclick = () => { userListPanel.style.display = 'none'; };
+            document.getElementById('admin-user-detail-back').onclick = () => {
+                userDetailPanel.style.display = 'none';
+                userListPanel.style.display = '';
+            };
+
+            if (userSearch) {
+                userSearch.addEventListener('input', () => {
+                    const q = userSearch.value.toLowerCase().trim();
+                    const filtered = q ? users.filter(u =>
+                        (u.display_name || '').toLowerCase().includes(q) ||
+                        (u.email || '').toLowerCase().includes(q)
+                    ) : users;
+                    renderUserList(filtered);
+                });
+            }
+
+            const renderUserList = (arr) => {
+                userList.innerHTML = arr.map(u => `
+                    <div class="admin-user-row" data-user-id="${u.user_id}" style="display:flex;align-items:center;gap:0.75rem;padding:0.55rem 0.5rem;border-radius:10px;cursor:pointer;transition:background 0.15s;">
+                        <img src="${getAvatarUrl(u.avatar_seed)}" alt="" style="width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.06);" />
+                        <div style="flex:1;min-width:0;">
+                            <p style="margin:0;font-size:0.8rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(u.display_name || u.email || 'Unknown')}</p>
+                            <p style="margin:0;font-size:0.65rem;opacity:0.35;">${u.email ? escapeHtml(u.email) : ''}</p>
+                        </div>
+                        <div style="text-align:right;">
+                            <p style="margin:0;font-size:0.75rem;font-weight:600;">${u.total_plays}</p>
+                            <p style="margin:0;font-size:0.55rem;opacity:0.25;">${u.created_at ? new Date(u.created_at).toLocaleDateString() : ''}</p>
+                        </div>
+                    </div>
+                `).join('');
+                wireUserRows();
+            };
+
+            const wireUserRows = () => {
+                userList.querySelectorAll('.admin-user-row').forEach(row => {
+                    row.onmouseenter = () => { row.style.background = 'rgba(255,255,255,0.05)'; };
+                    row.onmouseleave = () => { row.style.background = ''; };
+                    row.onclick = () => showUserDetail(row.dataset.userId);
+                });
+            };
+
+            const showUserDetail = async (userId) => {
+                userListPanel.style.display = 'none';
+                userDetailPanel.style.display = '';
+                userDetailContent.innerHTML = '<p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:2rem 0;">Loading user data...</p>';
+                try {
+                    const d = await adminFetch('/api/admin/user-summary', {
+                        method: 'POST',
+                        body: JSON.stringify({ user_id: userId }),
+                    });
+
+                    // Build genre distribution from user events
+                    const userGenres = {};
+                    if (d.top_genres?.length) {
+                        d.top_genres.forEach(g => { userGenres[g.genre] = g.plays; });
+                    } else if (d.top_tracks?.length) {
+                        d.top_tracks.forEach(t => {
+                            if (t.genre) userGenres[t.genre] = (userGenres[t.genre] || 0) + t.plays;
+                        });
+                    }
+                    const genreArr = Object.entries(userGenres).sort((a, b) => b[1] - a[1]).slice(0, 6);
+                    const genreColors = ['#a855f7', '#ec4899', '#06b6d4', '#22c55e', '#f97316', '#eab308'];
+                    const genreTotal = genreArr.reduce((s, [, v]) => s + v, 0) || 1;
+
+                    userDetailContent.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;">
+                            <img src="${getAvatarUrl(d.avatar_seed)}" alt="" style="width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,0.06);" />
+                            <div>
+                                <p style="margin:0;font-size:1rem;font-weight:600;">${escapeHtml(d.display_name || 'Unknown')}</p>
+                                <p style="margin:0;font-size:0.75rem;opacity:0.4;">${escapeHtml(d.email || '')}</p>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:1.25rem;">
+                            <div style="text-align:center;background:rgba(255,255,255,0.04);border-radius:10px;padding:0.65rem 0.4rem;">
+                                <p style="margin:0;font-size:1.3rem;font-weight:700;">${d.total_plays}</p>
+                                <p style="margin:0;font-size:0.65rem;opacity:0.4;text-transform:uppercase;letter-spacing:0.04em;">Plays</p>
+                            </div>
+                            <div style="text-align:center;background:rgba(255,255,255,0.04);border-radius:10px;padding:0.65rem 0.4rem;">
+                                <p style="margin:0;font-size:1.3rem;font-weight:700;">${d.unique_tracks}</p>
+                                <p style="margin:0;font-size:0.65rem;opacity:0.4;text-transform:uppercase;letter-spacing:0.04em;">Tracks</p>
+                            </div>
+                            <div style="text-align:center;background:rgba(255,255,255,0.04);border-radius:10px;padding:0.65rem 0.4rem;">
+                                <p style="margin:0;font-size:1.3rem;font-weight:700;">${d.unique_artists}</p>
+                                <p style="margin:0;font-size:0.65rem;opacity:0.4;text-transform:uppercase;letter-spacing:0.04em;">Artists</p>
+                            </div>
+                        </div>
+
+                        <!-- AI Personality Review -->
+                        <div id="admin-user-ai-review" style="background:linear-gradient(135deg,rgba(168,85,247,0.08),rgba(236,72,153,0.06));border:1px solid rgba(168,85,247,0.15);border-radius:12px;padding:1rem;margin-bottom:1.25rem;">
+                            <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.6rem;">
+                                <span style="font-size:0.95rem;">\u2728</span>
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.5;margin:0;font-weight:600;">AI Listener Profile</p>
+                            </div>
+                            <p id="admin-ai-review-text" style="font-size:0.82rem;line-height:1.55;opacity:0.75;margin:0;font-style:italic;">Generating personality review...</p>
+                        </div>
+
+                        <!-- Genre DNA Bar -->
+                        ${genreArr.length ? `
+                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.5rem;font-weight:600;">\uD83C\uDFA8 Genre DNA</p>
+                        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:0.5rem;gap:1px;">
+                            ${genreArr.map(([, v], i) => `<div style="flex:${v};background:${genreColors[i]};opacity:0.7;"></div>`).join('')}
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:0.4rem 0.8rem;margin-bottom:1.25rem;">
+                            ${genreArr.map(([genre, plays], i) => `
+                                <span style="font-size:0.68rem;display:flex;align-items:center;gap:0.25rem;">
+                                    <span style="width:8px;height:8px;border-radius:2px;background:${genreColors[i]};opacity:0.7;display:inline-block;"></span>
+                                    ${escapeHtml(genre)} <span style="opacity:0.3;">${Math.round((plays / genreTotal) * 100)}%</span>
+                                </span>
+                            `).join('')}
+                        </div>` : ''}
+
+                        <!-- Top Artists Visual -->
+                        ${d.top_artists?.length ? `
+                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.5rem;font-weight:600;">\uD83C\uDFA4 Most Played Artists</p>
+                        <div style="display:flex;flex-direction:column;gap:0.35rem;margin-bottom:1.25rem;">
+                            ${(() => {
+                                const maxAP = d.top_artists[0]?.plays || 1;
+                                return d.top_artists.slice(0, 5).map((a, i) => {
+                                    const pct = Math.round((a.plays / maxAP) * 100);
+                                    return `<div style="display:flex;align-items:center;gap:0.4rem;">
+                                        <span style="opacity:0.2;font-size:0.6rem;width:0.8rem;text-align:right;">${i + 1}</span>
+                                        <div style="flex:1;position:relative;height:22px;background:rgba(255,255,255,0.03);border-radius:4px;overflow:hidden;">
+                                            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(168,85,247,0.4),rgba(236,72,153,0.25));border-radius:4px;"></div>
+                                            <span style="position:absolute;left:0.5rem;top:50%;transform:translateY(-50%);font-size:0.72rem;font-weight:500;white-space:nowrap;">${escapeHtml(a.artist_name)}</span>
+                                            <span style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);font-size:0.65rem;opacity:0.4;">${a.plays}</span>
+                                        </div>
+                                    </div>`;
+                                }).join('');
+                            })()}
+                        </div>` : ''}
+
+                        <!-- Top Tracks Visual -->
+                        ${d.top_tracks?.length ? `
+                        <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.5rem;font-weight:600;">\uD83C\uDFB5 Most Played Tracks</p>
+                        <div style="display:flex;flex-direction:column;gap:0.35rem;margin-bottom:1.25rem;">
+                            ${(() => {
+                                const maxTP = d.top_tracks[0]?.plays || 1;
+                                return d.top_tracks.slice(0, 5).map((t, i) => {
+                                    const pct = Math.round((t.plays / maxTP) * 100);
+                                    return `<div style="display:flex;align-items:center;gap:0.4rem;">
+                                        <span style="opacity:0.2;font-size:0.6rem;width:0.8rem;text-align:right;">${i + 1}</span>
+                                        <div style="flex:1;position:relative;height:22px;background:rgba(255,255,255,0.03);border-radius:4px;overflow:hidden;">
+                                            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(6,182,212,0.4),rgba(34,197,94,0.25));border-radius:4px;"></div>
+                                            <span style="position:absolute;left:0.5rem;top:50%;transform:translateY(-50%);font-size:0.72rem;font-weight:500;white-space:nowrap;max-width:65%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t.track_title)}</span>
+                                            <span style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);font-size:0.65rem;opacity:0.4;">${t.plays}</span>
+                                        </div>
+                                    </div>`;
+                                }).join('');
+                            })()}
+                        </div>` : ''}
+
+                        <div style="display:flex;gap:1rem;font-size:0.7rem;opacity:0.3;flex-wrap:wrap;">
+                            <span>Joined ${d.created_at ? new Date(d.created_at).toLocaleDateString() : '\u2014'}</span>
+                            <span>Last seen ${d.last_sign_in_at ? new Date(d.last_sign_in_at).toLocaleDateString() : '\u2014'}</span>
+                            ${d.first_listen ? `<span>First listen ${new Date(d.first_listen).toLocaleDateString()}</span>` : ''}
+                        </div>`;
+
+                    // Fire off AI review (async, non-blocking)
+                    adminFetch('/api/admin/user-ai-review', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            display_name: d.display_name || 'Unknown',
+                            top_artists: d.top_artists,
+                            top_tracks: d.top_tracks,
+                            top_genres: genreArr.map(([genre, plays]) => ({ genre, plays })),
+                            total_plays: d.total_plays,
+                            unique_artists: d.unique_artists,
+                            unique_tracks: d.unique_tracks,
+                        }),
+                    }).then(r => {
+                        const el = document.getElementById('admin-ai-review-text');
+                        if (el) el.textContent = r.review || r.error || 'Could not generate review.';
+                    }).catch(() => {
+                        const el = document.getElementById('admin-ai-review-text');
+                        if (el) el.textContent = 'AI review unavailable.';
+                    });
+
+                    // Wire delete
+                    document.getElementById('admin-user-delete-btn').onclick = async () => {
+                        if (!confirm(`Delete user "${d.display_name || d.email}"? This cannot be undone.`)) return;
+                        try {
+                            const res = await adminFetch('/api/admin/delete-user', { method: 'POST', body: JSON.stringify({ user_id: userId }) });
+                            if (res.success) {
+                                showNotification('User deleted');
+                                userDetailPanel.style.display = 'none';
+                                this.renderAdminPage();
+                            } else {
+                                showNotification(res.error || 'Delete failed');
+                            }
+                        } catch (e) { showNotification('Error: ' + e.message); }
+                    };
+                } catch (err) {
+                    userDetailContent.innerHTML = `<p style="color:#ef4444;font-size:0.8rem;text-align:center;padding:1rem 0;">Failed to load user: ${escapeHtml(err.message)}</p>`;
+                }
+            };
+
+            // ── Top Users Bar Chart ──
+            const topUsersBars = document.getElementById('admin-top-users-bars');
+            if (topUsersBars) {
+                const sorted = [...users].sort((a, b) => (b.total_plays || 0) - (a.total_plays || 0)).slice(0, 8);
+                const maxU = sorted[0]?.total_plays || 1;
+                topUsersBars.innerHTML = sorted.map(u => {
+                    const pct = Math.round(((u.total_plays || 0) / maxU) * 100);
+                    return `<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
+                        <span style="flex-shrink:0;width:5rem;font-size:0.7rem;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;">${escapeHtml(u.display_name || u.email?.split('@')[0] || 'User')}</span>
+                        <div style="flex:1;height:16px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden;">
+                            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(168,85,247,0.5),rgba(236,72,153,0.4));border-radius:3px;transition:width 0.5s;"></div>
+                        </div>
+                        <span style="flex-shrink:0;width:2rem;font-size:0.68rem;font-weight:600;opacity:0.6;">${u.total_plays || 0}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── Signups Bar Chart ──
+            const signupsBars = document.getElementById('admin-signups-bars');
+            if (signupsBars) {
+                const months = {};
+                users.forEach(u => {
+                    if (!u.created_at) return;
+                    const m = u.created_at.slice(0, 7);
+                    months[m] = (months[m] || 0) + 1;
+                });
+                const signupsData = Object.entries(months).sort().slice(-8).map(([m, c]) => ({
+                    label: new Date(m + '-01').toLocaleDateString('en', { month: 'short', year: '2-digit' }),
+                    value: c,
+                }));
+                const maxS = Math.max(...signupsData.map(d => d.value), 1);
+                signupsBars.innerHTML = signupsData.map(d => {
+                    const pct = Math.round((d.value / maxS) * 100);
+                    return `<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
+                        <span style="flex-shrink:0;width:4rem;font-size:0.7rem;opacity:0.5;text-align:right;">${escapeHtml(d.label)}</span>
+                        <div style="flex:1;height:16px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden;">
+                            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(6,182,212,0.5),rgba(34,197,94,0.4));border-radius:3px;transition:width 0.5s;"></div>
+                        </div>
+                        <span style="flex-shrink:0;width:1.5rem;font-size:0.68rem;font-weight:600;opacity:0.6;">${d.value}</span>
+                    </div>`;
+                }).join('');
+            }
+
+        } catch (err) {
+            console.error('[admin] overview error:', err);
+            document.getElementById('admin-total-users').textContent = '!';
+        }
+
+        // ── Updates Tab ──
+        const loadUpdates = async () => {
+            const list = document.getElementById('admin-updates-list');
+            try {
+                const updates = await adminFetch('/api/admin/updates');
+                if (!Array.isArray(updates) || !updates.length) {
+                    list.innerHTML = '<p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">No updates posted yet.</p>';
+                    return;
+                }
+                list.innerHTML = updates.map(u => `
+                    <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem;background:rgba(255,255,255,0.03);border-radius:10px;">
+                        <div style="flex:1;min-width:0;">
+                            <p style="margin:0;font-size:0.85rem;font-weight:600;">${escapeHtml(u.title)}</p>
+                            ${u.message ? `<p style="margin:0.3rem 0 0;font-size:0.78rem;opacity:0.55;line-height:1.4;">${escapeHtml(u.message)}</p>` : ''}
+                            ${u.link ? `<a href="${escapeHtml(u.link)}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#a78bfa;text-decoration:none;display:inline-block;margin-top:0.25rem;">${escapeHtml(u.link)}</a>` : ''}
+                            <p style="margin:0.3rem 0 0;font-size:0.65rem;opacity:0.25;">${new Date(u.created_at).toLocaleString()}${u.target_versions?.length ? ` · v${u.target_versions.join(', ')}` : ''}</p>
+                        </div>
+                        <button class="admin-delete-update-btn" data-id="${u.id}" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0.3rem 0.6rem;border-radius:6px;white-space:nowrap;">Delete</button>
+                    </div>`).join('');
+                list.querySelectorAll('.admin-delete-update-btn').forEach(btn => {
+                    btn.onclick = async () => {
+                        if (!confirm('Delete this update?')) return;
+                        await adminFetch('/api/admin/updates/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.id }) });
+                        showNotification('Update deleted');
+                        loadUpdates();
+                    };
+                });
+            } catch (e) {
+                list.innerHTML = `<p style="color:#ef4444;font-size:0.8rem;">Error: ${escapeHtml(e.message)}</p>`;
+            }
+        };
+
+        document.getElementById('admin-update-submit').onclick = async () => {
+            const title = document.getElementById('admin-update-title').value.trim();
+            const message = document.getElementById('admin-update-message').value.trim();
+            const link = document.getElementById('admin-update-link').value.trim();
+            const versionsRaw = document.getElementById('admin-update-versions').value.trim();
+            if (!title) { showNotification('Title is required'); return; }
+            const target_versions = versionsRaw ? versionsRaw.split(',').map(v => v.trim()).filter(Boolean) : [];
+            try {
+                const res = await adminFetch('/api/admin/updates', {
+                    method: 'POST',
+                    body: JSON.stringify({ title, message, link, target_versions }),
+                });
+                if (res.error) throw new Error(res.error);
+                showNotification('Update posted!');
+                document.getElementById('admin-update-title').value = '';
+                document.getElementById('admin-update-message').value = '';
+                document.getElementById('admin-update-link').value = '';
+                document.getElementById('admin-update-versions').value = '';
+                loadUpdates();
+            } catch (e) { showNotification('Failed: ' + e.message); }
+        };
+
+        await loadUpdates();
+
+        // ── Announcements Tab ──
+        const loadAnnouncements = async () => {
+            const list = document.getElementById('admin-announcements-list');
+            try {
+                const anns = await adminFetch('/api/admin/announcements');
+                if (!Array.isArray(anns) || !anns.length) {
+                    list.innerHTML = '<p style="font-size:0.8rem;opacity:0.4;text-align:center;padding:1rem 0;">No announcements yet.</p>';
+                    return;
+                }
+                list.innerHTML = anns.map(a => {
+                    const isActive = a.is_active && (!a.ends_at || new Date(a.ends_at) > new Date());
+                    return `
+                    <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem;background:rgba(255,255,255,0.03);border-radius:10px;">
+                        ${a.image_url ? `<img src="${escapeHtml(a.image_url)}" alt="" style="width:48px;height:48px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'" />` : ''}
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem;">
+                                <p style="margin:0;font-size:0.85rem;font-weight:600;">${escapeHtml(a.title)}</p>
+                                <span style="font-size:0.6rem;padding:0.15rem 0.4rem;border-radius:4px;background:${isActive ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'};color:${isActive ? '#22c55e' : '#ef4444'};font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">${isActive ? 'Active' : 'Ended'}</span>
+                            </div>
+                            ${a.link ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#67e8f9;text-decoration:none;">${escapeHtml(a.link)}</a>` : ''}
+                            <p style="margin:0.2rem 0 0;font-size:0.65rem;opacity:0.25;">${a.starts_at ? new Date(a.starts_at).toLocaleString() : ''} ${a.ends_at ? '→ ' + new Date(a.ends_at).toLocaleString() : '(no end)'}</p>
+                        </div>
+                        <button class="admin-delete-ann-btn" data-id="${a.id}" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.7rem;padding:0.3rem 0.6rem;border-radius:6px;white-space:nowrap;">Delete</button>
+                    </div>`;
+                }).join('');
+                list.querySelectorAll('.admin-delete-ann-btn').forEach(btn => {
+                    btn.onclick = async () => {
+                        if (!confirm('Delete this announcement?')) return;
+                        await adminFetch('/api/admin/announcements/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.id }) });
+                        showNotification('Announcement deleted');
+                        loadAnnouncements();
+                    };
+                });
+            } catch (e) {
+                list.innerHTML = `<p style="color:#ef4444;font-size:0.8rem;">Error: ${escapeHtml(e.message)}</p>`;
+            }
+        };
+
+        document.getElementById('admin-ann-submit').onclick = async () => {
+            const title = document.getElementById('admin-ann-title').value.trim();
+            const link = document.getElementById('admin-ann-link').value.trim();
+            const image_url = document.getElementById('admin-ann-image').value.trim();
+            const starts_at = document.getElementById('admin-ann-start').value;
+            const ends_at = document.getElementById('admin-ann-end').value;
+            if (!title) { showNotification('Headline is required'); return; }
+            try {
+                const res = await adminFetch('/api/admin/announcements', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title, link, image_url,
+                        starts_at: starts_at ? new Date(starts_at).toISOString() : new Date().toISOString(),
+                        ends_at: ends_at ? new Date(ends_at).toISOString() : null,
+                    }),
+                });
+                if (res.error) throw new Error(res.error);
+                showNotification('Announcement posted!');
+                document.getElementById('admin-ann-title').value = '';
+                document.getElementById('admin-ann-link').value = '';
+                document.getElementById('admin-ann-image').value = '';
+                document.getElementById('admin-ann-start').value = '';
+                document.getElementById('admin-ann-end').value = '';
+                loadAnnouncements();
+            } catch (e) { showNotification('Failed: ' + e.message); }
+        };
+
+        await loadAnnouncements();
+    }
+
+    /** Render a simple HTML bar chart replacing a canvas element */
+    _renderAdminBarChart(canvasId, title, data) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const container = canvas.parentElement;
+        canvas.style.display = 'none';
+
+        // Remove any previously rendered chart
+        container.querySelector('.admin-html-chart')?.remove();
+
+        if (!data || !data.length) {
+            const empty = document.createElement('p');
+            empty.className = 'admin-html-chart';
+            empty.style.cssText = 'font-size:0.78rem;opacity:0.3;text-align:center;padding:1.5rem 0;';
+            empty.textContent = 'No data yet';
+            container.appendChild(empty);
+            return;
+        }
+
+        // Update the title label
+        const titleEl = container.querySelector('p');
+        if (titleEl && title) titleEl.textContent = title;
+
+        const maxVal = Math.max(...data.map(d => d.value), 1);
+        const chart = document.createElement('div');
+        chart.className = 'admin-html-chart';
+        chart.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
+        data.forEach(d => {
+            const pct = Math.round((d.value / maxVal) * 100);
+            chart.innerHTML += `
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <span style="flex-shrink:0;width:5.5rem;font-size:0.72rem;opacity:0.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;">${escapeHtml(String(d.label))}</span>
+                    <div style="flex:1;height:18px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden;">
+                        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(168,85,247,0.5),rgba(236,72,153,0.4));border-radius:4px;transition:width 0.5s;min-width:${d.value > 0 ? '2px' : '0'};"></div>
+                    </div>
+                    <span style="flex-shrink:0;width:2.5rem;font-size:0.72rem;font-weight:600;opacity:0.7;">${d.value}</span>
+                </div>`;
+        });
+        container.appendChild(chart);
     }
 }
 
