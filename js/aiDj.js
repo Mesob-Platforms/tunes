@@ -206,38 +206,43 @@ export class AIDJManager {
        ══════════════════════════════════════════════ */
 
     async _queueAITracks(aiTracks) {
+        const shouldStartFresh = !this.player.currentTrack || !this.isActive;
+        let startedPlaying = false;
+
+        // Search all tracks in parallel (batches of 5 to avoid hammering)
+        const BATCH_SIZE = 5;
         const resolvedTracks = [];
 
-        for (const t of aiTracks) {
-            try {
-                const query = `${t.title} ${t.artist}`;
-                const results = await this.api.search(query, { limit: 3 });
+        for (let i = 0; i < aiTracks.length; i += BATCH_SIZE) {
+            const batch = aiTracks.slice(i, i + BATCH_SIZE);
+            const batchResults = await Promise.allSettled(
+                batch.map(async (t) => {
+                    const query = `${t.title} ${t.artist}`;
+                    const results = await this.api.search(query, { limit: 3 });
+                    if (results?.tracks?.items?.length) return results.tracks.items[0];
+                    if (results?.tracks?.length) return results.tracks[0];
+                    return null;
+                })
+            );
 
-                // Find best match from search results
-                let bestTrack = null;
-                if (results?.tracks?.items?.length) {
-                    bestTrack = results.tracks.items[0];
-                } else if (results?.tracks?.length) {
-                    bestTrack = results.tracks[0];
-                }
+            const found = batchResults
+                .filter(r => r.status === 'fulfilled' && r.value)
+                .map(r => r.value);
+            resolvedTracks.push(...found);
 
-                if (bestTrack) {
-                    resolvedTracks.push(bestTrack);
-                }
-            } catch (e) {
-                // Skip tracks that fail to resolve
-                console.warn(`AI DJ: Could not find "${t.title}" by ${t.artist}`);
+            // Start playing immediately once we have the first batch
+            if (!startedPlaying && resolvedTracks.length > 0 && shouldStartFresh) {
+                this.player.setQueue([...resolvedTracks], 0);
+                this.player.playTrackFromQueue(0, 0);
+                startedPlaying = true;
+            } else if (found.length > 0 && startedPlaying) {
+                // Append subsequent batches as they arrive
+                this.player.addToQueue(found);
             }
         }
 
-        if (resolvedTracks.length === 0) return;
-
-        // Set as queue and start playing
-        if (!this.player.currentTrack || !this.isActive) {
-            this.player.setQueue(resolvedTracks, 0);
-            this.player.playTrackFromQueue(0, 0);
-        } else {
-            // Append to existing queue
+        // If we never started fresh (appending to existing queue)
+        if (!shouldStartFresh && resolvedTracks.length > 0) {
             this.player.addToQueue(resolvedTracks);
         }
     }
@@ -436,12 +441,15 @@ export class DJPersona {
 
     _initParticles() {
         this.particles = [];
-        for (let i = 0; i < 60; i++) {
+        // Fewer particles on mobile for better perf
+        const isMobile = window.innerWidth < 768;
+        const count = isMobile ? 30 : 55;
+        for (let i = 0; i < count; i++) {
             this.particles.push({
                 angle: Math.random() * Math.PI * 2,
                 radius: this.baseRadius * (0.8 + Math.random() * 1.5),
                 speed: 0.001 + Math.random() * 0.003,
-                size: 1 + Math.random() * 2.5,
+                size: 1 + Math.random() * (isMobile ? 1.8 : 2.5),
                 alpha: 0.1 + Math.random() * 0.5,
                 drift: (Math.random() - 0.5) * 0.5,
             });
@@ -476,9 +484,13 @@ export class DJPersona {
 
     start() {
         if (this.animId) return;
-        const animate = () => {
-            this.time += 0.016;
-            this._update();
+        let lastTs = 0;
+        const animate = (ts) => {
+            if (!lastTs) lastTs = ts;
+            const dt = Math.min((ts - lastTs) / 1000, 0.05); // Cap at 50ms to prevent jumps
+            lastTs = ts;
+            this.time += dt;
+            this._update(dt);
             this._draw();
             this.animId = requestAnimationFrame(animate);
         };
@@ -492,21 +504,24 @@ export class DJPersona {
         }
     }
 
-    _update() {
+    _update(dt = 0.016) {
+        // Use dt (seconds) to make animations frame-rate independent
+        const speed = dt * 60; // Normalize so speed=1 at 60fps
+
         // Smooth pulse transition
-        this.currentPulse += (this.targetPulse - this.currentPulse) * 0.05;
-        this.pulsePhase += 0.02 + this.currentPulse * 0.02;
+        this.currentPulse += (this.targetPulse - this.currentPulse) * 0.05 * speed;
+        this.pulsePhase += (0.02 + this.currentPulse * 0.02) * speed;
 
         // Update glow
         const targetGlow = this.state === DJ_STATES.PROCESSING ? 1 : this.state === DJ_STATES.LISTENING ? 0.7 : 0.3;
-        this.glowIntensity += (targetGlow - this.glowIntensity) * 0.03;
+        this.glowIntensity += (targetGlow - this.glowIntensity) * 0.03 * speed;
 
         // Update particles
         for (const p of this.particles) {
-            p.angle += p.speed * (1 + this.currentPulse);
+            p.angle += p.speed * (1 + this.currentPulse) * speed;
             // Add drift in processing state
             if (this.state === DJ_STATES.PROCESSING) {
-                p.radius += Math.sin(this.time * 3 + p.angle) * 0.3;
+                p.radius += Math.sin(this.time * 3 + p.angle) * 0.3 * speed;
             }
         }
     }
