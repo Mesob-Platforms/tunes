@@ -1105,16 +1105,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         }
 
-        if (e.target.closest('.delete-playlist-btn')) {
-            const card = e.target.closest('.user-playlist');
-            const playlistId = card.dataset.userPlaylistId;
-            if (confirm('Are you sure you want to delete this playlist?')) {
-                db.deletePlaylist(playlistId).then(() => {
-                    syncManager.syncUserPlaylist({ id: playlistId }, 'delete');
-                    ui.renderLibraryPage();
-                });
-            }
-        }
+        // Delete button removed from library grid - only available on detail page
 
         if (e.target.closest('#edit-playlist-btn')) {
             const playlistId = window.location.pathname.split('/')[2];
@@ -1146,10 +1137,72 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (e.target.closest('#delete-playlist-btn')) {
             const playlistId = window.location.pathname.split('/')[2];
-            if (confirm('Are you sure you want to delete this playlist?')) {
+            const deleteModal = document.getElementById('delete-playlist-modal');
+            if (deleteModal && playlistId) {
+                deleteModal.classList.add('active');
+                
+                // Store playlist ID for confirmation
+                deleteModal.dataset.playlistId = playlistId;
+            }
+        }
+
+        // Handle delete confirmation
+        if (e.target.closest('#delete-confirm')) {
+            const deleteModal = document.getElementById('delete-playlist-modal');
+            const playlistId = deleteModal?.dataset.playlistId;
+            if (playlistId) {
+                deleteModal.classList.remove('active');
                 db.deletePlaylist(playlistId).then(() => {
                     syncManager.syncUserPlaylist({ id: playlistId }, 'delete');
                     navigate('/library');
+                });
+            }
+        }
+
+        // Handle delete cancellation
+        if (e.target.closest('#delete-cancel') || (e.target.closest('#delete-playlist-modal .modal-overlay'))) {
+            const deleteModal = document.getElementById('delete-playlist-modal');
+            if (deleteModal) {
+                deleteModal.classList.remove('active');
+                deleteModal.dataset.playlistId = '';
+            }
+        }
+
+        // Handle share playlist button
+        if (e.target.closest('#share-playlist-btn-header')) {
+            const shareBtn = e.target.closest('#share-playlist-btn-header');
+            const playlistId = shareBtn.dataset.playlistId;
+            const playlistName = shareBtn.dataset.playlistName || 'Playlist';
+            const url = `${window.location.origin}/userplaylist/${playlistId}`;
+
+            // Use native Web Share API if available
+            if (navigator.share) {
+                navigator.share({
+                    title: playlistName,
+                    text: `Check out this playlist: ${playlistName}`,
+                    url: url
+                }).catch((err) => {
+                    // User cancelled or error occurred - fallback to clipboard
+                    if (err.name !== 'AbortError') {
+                        navigator.clipboard.writeText(url).then(() => {
+                            // Show toast notification
+                            const toast = document.createElement('div');
+                            toast.textContent = 'Link copied to clipboard!';
+                            toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--secondary);color:var(--foreground);padding:0.75rem 1.5rem;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:10000;font-size:0.9rem;';
+                            document.body.appendChild(toast);
+                            setTimeout(() => toast.remove(), 3000);
+                        });
+                    }
+                });
+            } else {
+                // Fallback to clipboard
+                navigator.clipboard.writeText(url).then(() => {
+                    // Show toast notification
+                    const toast = document.createElement('div');
+                    toast.textContent = 'Link copied to clipboard!';
+                    toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--secondary);color:var(--foreground);padding:0.75rem 1.5rem;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:10000;font-size:0.9rem;';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 3000);
                 });
             }
         }

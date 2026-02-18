@@ -36,16 +36,38 @@ export function initializeUIInteractions(player, api, ui) {
 
     sidebarOverlay.addEventListener('click', closeSidebar);
 
-    // Mobile back button - handles both fullscreen and side panel closing
+    // Mobile back button - handles modals, fullscreen, side panel, and history
     const mobileBackBtn = document.getElementById('mobile-back-btn');
     if (mobileBackBtn) {
         mobileBackBtn.addEventListener('click', () => {
+            // Close playlist modal if open
+            const playlistModal = document.getElementById('playlist-modal');
+            if (playlistModal && playlistModal.classList.contains('active')) {
+                playlistModal.classList.remove('active');
+                return;
+            }
+            
+            // Close folder modal if open
+            const folderModal = document.getElementById('folder-modal');
+            if (folderModal && folderModal.classList.contains('active')) {
+                folderModal.classList.remove('active');
+                return;
+            }
+            
+            // Close any other active modals
+            const activeModal = document.querySelector('.modal.active');
+            if (activeModal) {
+                activeModal.classList.remove('active');
+                return;
+            }
+            
             // Close side panel if open
             const sidePanel = document.getElementById('side-panel');
             if (sidePanel && sidePanel.classList.contains('active')) {
                 sidePanelManager.close();
                 return;
             }
+            
             // Close fullscreen if open
             const fullscreenOverlay = document.getElementById('fullscreen-cover-overlay');
             if (fullscreenOverlay && fullscreenOverlay.style.display !== 'none') {
@@ -56,6 +78,7 @@ export function initializeUIInteractions(player, api, ui) {
                 }
                 return;
             }
+            
             // Otherwise go back in history
             window.history.back();
         });

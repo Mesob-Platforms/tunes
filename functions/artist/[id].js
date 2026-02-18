@@ -83,7 +83,7 @@ export async function onRequest(context) {
                 const description = `Listen to ${name} on Tunes`;
                 const imageUrl = artist.picture
                     ? api.getArtistPictureUrl(artist.picture, '750')
-                    : 'https://monochrome.samidy.com/assets/appicon.png';
+                    : 'https://monochrome.samidy.com/assets/everywhere.png';
                 const pageUrl = new URL(request.url).href;
 
                 const metaHtml = `

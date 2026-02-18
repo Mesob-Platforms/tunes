@@ -275,6 +275,7 @@ html {
     -moz-osx-font-smoothing: grayscale;
     height: 100%;
     overflow: hidden;
+    max-width: 100%;
 }
 
 body {
@@ -288,6 +289,8 @@ body {
     height: 100%;
     position: fixed;
     width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     letter-spacing: -0.01em;
 }
 
@@ -358,6 +361,8 @@ kbd {
     display: grid;
     height: 100vh;
     height: 100dvh;
+    max-width: 100%;
+    overflow-x: hidden;
     grid-template:
         'sidebar main' 1fr
         'player player' auto / 210px 1fr;
@@ -389,12 +394,14 @@ kbd {
 .main-content {
     grid-area: main;
     overflow-y: auto;
+    overflow-x: hidden;
+    max-width: 100%;
     padding: var(--spacing-xl);
     scroll-behavior: auto;
     position: relative;
 
-    /* Context for background */
-    padding-bottom: 160px !important;
+    /* No bottom reservation – now-playing bar overlays */
+    padding-bottom: var(--spacing-xl) !important;
 }
 
 #page-background {
@@ -1432,23 +1439,40 @@ input[type='search']::-webkit-search-cancel-button {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    background: rgba(255,255,255,0.06);
-    border-radius: 0.5rem;
-    padding: 0 0.65rem;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    padding: 0.85rem 1rem;
     margin-bottom: 0.5rem;
     animation: fade-in-slide-up 0.2s ease;
+    transition: box-shadow var(--transition-fast, 0.2s ease), border-color var(--transition-fast, 0.2s ease), background-color var(--transition-fast, 0.2s ease);
 }
-.library-search-icon { font-size: 20px; color: var(--muted-foreground); }
+.library-search-bar:focus-within {
+    border-color: rgba(99, 102, 241, 0.4);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    background-color: rgba(255, 255, 255, 0.06);
+}
+.library-search-icon { 
+    font-size: 20px; 
+    color: var(--muted-foreground);
+    flex-shrink: 0;
+}
 .library-search-bar input {
     flex: 1;
     background: none;
     border: none;
     outline: none;
     color: var(--foreground);
-    font-size: 0.85rem;
-    padding: 0.55rem 0;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    padding: 0;
+    width: 100%;
 }
-.library-search-bar input::placeholder { color: var(--muted-foreground); }
+.library-search-bar input::placeholder { 
+    color: var(--muted-foreground);
+    font-weight: 400;
+}
 
 /* --- Sort bar (inline with filters) --- */
 .library-toolbar-bottom {
@@ -1642,39 +1666,25 @@ input[type='search']::-webkit-search-cancel-button {
     position: sticky;
     top: 0;
     z-index: 10;
-    background:
-        radial-gradient(ellipse at 0% 50%, color-mix(in srgb, var(--subview-accent) 38%, transparent), transparent 55%),
-        linear-gradient(180deg, rgba(6,6,10,0.94) 0%, rgba(10,10,14,0.88) 100%);
-    backdrop-filter: blur(40px) saturate(2);
-    -webkit-backdrop-filter: blur(40px) saturate(2);
-    border: 1px solid color-mix(in srgb, var(--subview-accent) 14%, transparent);
+    background: color-mix(in srgb, var(--card) 60%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 18px;
     margin: 0 0 0.65rem;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 color-mix(in srgb, var(--subview-accent) 8%, transparent);
-}
-
-/* Accent glow diffusion across the header */
-.library-subview-header::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: radial-gradient(ellipse at 5% 50%, var(--subview-accent), transparent 50%);
-    opacity: 0.16;
-    pointer-events: none;
 }
 
 .library-subview-header .library-back-btn {
     color: var(--subview-accent);
-    background: color-mix(in srgb, var(--subview-accent) 12%, transparent);
+    background: color-mix(in srgb, var(--subview-accent) 8%, transparent);
     border-radius: 12px;
     width: 38px;
     height: 38px;
     transition: all 0.25s ease;
 }
 .library-subview-header .library-back-btn:hover {
-    background: color-mix(in srgb, var(--subview-accent) 22%, transparent);
-    box-shadow: 0 0 14px color-mix(in srgb, var(--subview-accent) 15%, transparent);
+    background: color-mix(in srgb, var(--subview-accent) 15%, transparent);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--subview-accent) 10%, transparent);
 }
 .library-subview-header .library-back-btn:active {
     transform: scale(0.9);
@@ -1714,7 +1724,7 @@ input[type='search']::-webkit-search-cancel-button {
 
 .library-subview-header .library-action-btn {
     color: var(--subview-accent);
-    background: color-mix(in srgb, var(--subview-accent) 12%, transparent);
+    background: color-mix(in srgb, var(--subview-accent) 8%, transparent);
     border: none;
     border-radius: 12px;
     width: 36px;
@@ -1726,8 +1736,8 @@ input[type='search']::-webkit-search-cancel-button {
     transition: all 0.25s ease;
 }
 .library-subview-header .library-action-btn:hover {
-    background: color-mix(in srgb, var(--subview-accent) 22%, transparent);
-    box-shadow: 0 0 14px color-mix(in srgb, var(--subview-accent) 15%, transparent);
+    background: color-mix(in srgb, var(--subview-accent) 15%, transparent);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--subview-accent) 10%, transparent);
 }
 .library-subview-header .library-action-btn:active {
     transform: scale(0.9);
@@ -2045,6 +2055,31 @@ input[type='search']::-webkit-search-cancel-button {
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#home-recommended-songs {
+    max-height: 600px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+#home-recommended-songs::-webkit-scrollbar {
+    width: 6px;
+}
+
+#home-recommended-songs::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#home-recommended-songs::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+#home-recommended-songs::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
 }
 
 @media (max-width: 768px) {
@@ -2851,6 +2886,21 @@ input[type='search']::-webkit-search-cancel-button {
 /* ─── Downloaded Detail Sub-view (Premium Hero Layout) ─── */
 .dl-detail-overlay {
     animation: dl-slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 2000 !important; /* Higher than header (1000) */
+    padding-top: 88px !important; /* Account for header (44px hamburger + 16px top + 16px bottom + 12px margin) */
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+@media (max-width: 768px) {
+    .dl-detail-overlay {
+        bottom: 56px !important; /* Above mobile tab bar on mobile */
+        padding-top: 88px !important;
+    }
 }
 .dl-detail-nav {
     display: flex;
@@ -2858,6 +2908,8 @@ input[type='search']::-webkit-search-cancel-button {
     gap: 0.75rem;
     padding: 0.85rem 0;
     margin-bottom: 0.25rem;
+    position: relative;
+    z-index: 1;
 }
 .dl-detail-nav-back {
     background: rgba(255,255,255,0.08);
@@ -5591,13 +5643,20 @@ input:checked + .slider::before {
 
 #download-notifications {
     position: fixed;
-    bottom: 120px;
+    bottom: 20px;
     right: 20px;
     z-index: 9999;
     max-width: 350px;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    transition: bottom 0.3s ease;
+}
+
+/* When now-playing bar is visible, push notifications up */
+.now-playing-bar.npb-visible ~ #download-notifications,
+body:has(.now-playing-bar.npb-visible) #download-notifications {
+    bottom: calc(130px + 15px);
 }
 
 .download-task {
@@ -6551,6 +6610,179 @@ img[src=''] {
     animation: fade-in 0.1s ease-in;
 }
 
+#playlist-modal .playlist-modal-content {
+    border-radius: 20px;
+    padding: 1.75rem;
+    max-width: 380px;
+    background-color: rgba(9, 9, 11, 0.65);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+    box-shadow: 0 0 18px rgba(168, 85, 247, 0.15), 0 20px 50px rgba(0, 0, 0, 0.5);
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s;
+}
+
+#playlist-modal .playlist-modal-content:hover {
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 0 28px rgba(168, 85, 247, 0.25), 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.playlist-modal-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 0 0 1.25rem 0;
+    text-align: center;
+    font-family: inherit;
+    color: var(--foreground);
+}
+
+.playlist-modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.playlist-modal-input {
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 500;
+    font-family: inherit;
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    outline: none;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+
+.playlist-modal-input:focus {
+    border-color: var(--primary);
+    background: var(--secondary);
+}
+
+.playlist-modal-input::placeholder {
+    font-size: 1rem;
+    font-weight: 500;
+    font-family: inherit;
+    color: var(--muted-foreground);
+}
+
+.playlist-modal-textarea {
+    resize: vertical;
+    min-height: 60px;
+}
+
+.playlist-modal-helper {
+    font-size: 0.75rem;
+    margin: 0;
+    color: var(--muted-foreground);
+    line-height: 1.4;
+    font-family: inherit;
+}
+
+.playlist-modal-link {
+    color: var(--primary);
+    text-decoration: underline;
+    transition: opacity 0.2s;
+}
+
+.playlist-modal-link:hover {
+    opacity: 0.8;
+}
+
+.playlist-modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.playlist-modal-btn {
+    flex: 1;
+    padding: 0.75rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: transform 0.2s, opacity 0.2s;
+}
+
+.playlist-modal-btn-primary {
+    flex: 1.5;
+}
+
+.playlist-modal-btn:hover {
+    transform: translateY(-1px);
+}
+
+.playlist-modal-btn:active {
+    transform: translateY(0);
+}
+
+.playlist-modal-icon {
+    font-size: 1.1rem;
+    vertical-align: middle;
+    margin-right: 0.3rem;
+}
+
+/* Delete Playlist Modal */
+#delete-playlist-modal {
+    animation: fade-in 0.1s ease-in;
+}
+
+.delete-modal-content {
+    border-radius: 20px;
+    padding: 2rem;
+    max-width: 400px;
+    background-color: rgba(9, 9, 11, 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.2), 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.delete-modal-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0 0 0.75rem 0;
+    text-align: center;
+    font-family: inherit;
+    color: var(--foreground);
+}
+
+.delete-modal-message {
+    font-size: 0.95rem;
+    margin: 0 0 1.5rem 0;
+    text-align: center;
+    font-family: inherit;
+    color: var(--muted-foreground);
+    line-height: 1.5;
+}
+
+.delete-modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+}
+
+.delete-modal-btn {
+    flex: 1;
+    padding: 0.75rem 1.5rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: transform 0.2s, opacity 0.2s;
+    max-width: 150px;
+}
+
+.delete-modal-btn:hover {
+    transform: translateY(-1px);
+}
+
+.delete-modal-btn:active {
+    transform: translateY(0);
+}
+
 /* fuck this chud ass shit bro */
 .csv-import-progress {
     position: fixed;
@@ -6916,7 +7148,7 @@ img[src=''] {
     }
 
     .main-content {
-        padding: var(--spacing-md);
+        padding: var(--spacing-md) 0.5rem;
         grid-area: main;
     }
 
@@ -7121,10 +7353,16 @@ img[src=''] {
     }
 
     #download-notifications {
-        bottom: calc(56px + 8px + var(--player-bar-height-mobile) + 12px);
+        bottom: calc(56px + 12px); /* 56px (tab bar height) + 12px spacing */
         right: 12px;
         left: auto;
         max-width: calc(100vw - 24px);
+        transition: bottom 0.3s ease;
+    }
+
+    /* When now-playing bar is visible on mobile, push notifications up */
+    body:has(.now-playing-bar.npb-visible) #download-notifications {
+        bottom: calc(56px + 8px + var(--player-bar-height-mobile) + 12px);
     }
 
     .track-menu-btn {
@@ -7537,7 +7775,7 @@ img[src=''] {
 
 @media (hover: none) and (pointer: coarse) {
     .main-content {
-        padding: var(--spacing-sm);
+        padding: var(--spacing-sm) 0.5rem;
         grid-area: main;
     }
 
@@ -8414,12 +8652,13 @@ textarea:focus {
         bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px) !important;
     }
 
-    body.fullscreen-open .now-playing-bar {
+    body.fullscreen-open .now-playing-bar,
+    body.hide-tab-bar .now-playing-bar {
         display: none !important;
     }
 
     .main-content {
-        padding-bottom: calc(160px + 56px) !important;
+        padding-bottom: calc(56px + 16px) !important;
     }
 }
 
@@ -8479,9 +8718,9 @@ textarea:focus {
 :root[data-theme='light'] .library-chip:hover { color: rgba(0,0,0,0.65); }
 :root[data-theme='light'] .library-chip.active { color: #000; }
 
-:root[data-theme='light'] .library-subview-header { background: radial-gradient(ellipse at 0% 50%, color-mix(in srgb, var(--subview-accent) 22%, transparent), transparent 60%), rgba(255,255,255,0.82); border-bottom-color: color-mix(in srgb, var(--subview-accent) 10%, rgba(0,0,0,0.06)); }
-:root[data-theme='light'] .library-subview-header .library-back-btn { background: color-mix(in srgb, var(--subview-accent) 8%, transparent); }
-:root[data-theme='light'] .library-subview-header .library-action-btn { background: color-mix(in srgb, var(--subview-accent) 8%, transparent); }
+:root[data-theme='light'] .library-subview-header { background: radial-gradient(ellipse at 0% 50%, color-mix(in srgb, var(--subview-accent) 10%, transparent), transparent 60%), rgba(245,245,248,0.92); border-bottom-color: color-mix(in srgb, var(--subview-accent) 8%, rgba(0,0,0,0.04)); }
+:root[data-theme='light'] .library-subview-header .library-back-btn { background: color-mix(in srgb, var(--subview-accent) 6%, transparent); }
+:root[data-theme='light'] .library-subview-header .library-action-btn { background: color-mix(in srgb, var(--subview-accent) 6%, transparent); }
 :root[data-theme='light'] .library-filters { mask-image: linear-gradient(to right, transparent 0%, black 4%, black 92%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0%, black 4%, black 92%, transparent 100%); }
 :root[data-theme='light'] .dl-back-to-library { background: rgba(0,0,0,0.06); }
 :root[data-theme='light'] .dl-back-to-library:hover { background: rgba(0,0,0,0.1); }

@@ -43,7 +43,7 @@ export async function onRequest(context) {
                 const trackCount = tracks.length;
                 const description = `User Playlist • ${trackCount} Tracks\nListen on Tunes`;
 
-                let imageUrl = 'https://monochrome.samidy.com/assets/appicon.png';
+                let imageUrl = 'https://monochrome.samidy.com/assets/everywhere.png';
                 if (playlist.cover) {
                     if (playlist.cover.startsWith('http')) {
                         imageUrl = playlist.cover;

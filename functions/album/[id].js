@@ -88,7 +88,7 @@ export async function onRequest(context) {
                 const description = `Album by ${artist} • ${year} • ${trackCount} Tracks\nListen on Tunes`;
                 const imageUrl = album.cover
                     ? api.getCoverUrl(album.cover, '1280')
-                    : 'https://monochrome.samidy.com/assets/appicon.png';
+                    : 'https://monochrome.samidy.com/assets/everywhere.png';
                 const pageUrl = new URL(request.url).href;
 
                 const metaHtml = `

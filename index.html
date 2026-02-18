@@ -325,34 +325,31 @@
 
         <div id="playlist-modal" class="modal">
             <div class="modal-overlay"></div>
-            <div class="modal-content" style="border-radius:20px;padding:1.75rem;max-width:380px;">
-                <h3 id="playlist-modal-title" style="font-size:1.35rem;font-weight:700;margin:0 0 1.25rem 0;text-align:center;">Create Playlist</h3>
+            <div class="modal-content playlist-modal-content">
+                <h3 id="playlist-modal-title" class="playlist-modal-title">Create Playlist</h3>
 
-                <div style="display:flex;flex-direction:column;gap:1rem;">
+                <div class="playlist-modal-form">
                     <input
                         type="text"
                         id="playlist-name-input"
-                        class="template-input"
+                        class="template-input playlist-modal-input"
                         placeholder="Playlist name"
-                        style="padding:0.85rem 1rem;border-radius:12px;font-size:0.95rem;background:var(--secondary);border:1px solid var(--border);color:var(--foreground);outline:none;"
                     />
                     <textarea
                         id="playlist-description-input"
-                        class="template-input"
+                        class="template-input playlist-modal-input playlist-modal-textarea"
                         placeholder="Add a description (optional)"
                         rows="2"
-                        style="padding:0.85rem 1rem;border-radius:12px;font-size:0.95rem;background:var(--secondary);border:1px solid var(--border);color:var(--foreground);outline:none;resize:vertical;font-family:inherit;"
                     ></textarea>
                     <input
                         type="url"
                         id="playlist-cover-input"
-                        class="template-input"
+                        class="template-input playlist-modal-input"
                         placeholder="Cover image URL (optional)"
-                        style="padding:0.85rem 1rem;border-radius:12px;font-size:0.95rem;background:var(--secondary);border:1px solid var(--border);color:var(--foreground);outline:none;"
                     />
-                    <p style="font-size:0.75rem;margin:0;color:var(--muted-foreground);line-height:1.4;">
+                    <p class="playlist-modal-helper">
                         Upload your cover to
-                        <a href="https://catbox.moe" style="color:var(--primary);text-decoration:underline;">catbox.moe</a>
+                        <a href="https://catbox.moe" class="playlist-modal-link">catbox.moe</a>
                         then paste the link here.
                     </p>
                 </div>
@@ -365,12 +362,24 @@
                 <!-- Public toggle hidden - all playlists are public -->
                 <input type="checkbox" id="playlist-public-toggle" checked style="display:none;" />
 
-                <div class="modal-actions" style="display:flex;gap:0.75rem;margin-top:0.5rem;">
-                    <button id="playlist-share-btn" class="btn-secondary" style="display:none;flex:1;padding:0.75rem;border-radius:12px;font-weight:600;font-size:0.9rem;">
-                        <span class="material-symbols-rounded" style="font-size:1.1rem;vertical-align:middle;margin-right:0.3rem;">share</span>Share
+                <div class="modal-actions playlist-modal-actions">
+                    <button id="playlist-share-btn" class="btn-secondary playlist-modal-btn" style="display:none;">
+                        <span class="material-symbols-rounded playlist-modal-icon">share</span>Share
                     </button>
-                    <button id="playlist-modal-cancel" class="btn-secondary" style="flex:1;padding:0.75rem;border-radius:12px;font-weight:600;font-size:0.9rem;">Cancel</button>
-                    <button id="playlist-modal-save" class="btn-primary" style="flex:1.5;padding:0.75rem;border-radius:12px;font-weight:600;font-size:0.9rem;">Save</button>
+                    <button id="playlist-modal-cancel" class="btn-secondary playlist-modal-btn">Cancel</button>
+                    <button id="playlist-modal-save" class="btn-primary playlist-modal-btn playlist-modal-btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="delete-playlist-modal" class="modal">
+            <div class="modal-overlay"></div>
+            <div class="modal-content delete-modal-content">
+                <h3 class="delete-modal-title">Delete Playlist?</h3>
+                <p class="delete-modal-message">This action cannot be undone.</p>
+                <div class="modal-actions delete-modal-actions">
+                    <button id="delete-cancel" class="btn-secondary delete-modal-btn">Cancel</button>
+                    <button id="delete-confirm" class="btn-danger delete-modal-btn">Delete</button>
                 </div>
             </div>
         </div>
@@ -932,30 +941,6 @@
                                     <span class="material-symbols-rounded">close</span>
                                 </button>
                             </div>
-                            <div class="library-filters-row">
-                                <div class="library-filters" id="library-filters">
-                                    <button class="library-chip active" data-filter="all">All</button>
-                                    <button class="library-chip" data-filter="playlists">Playlists</button>
-                                    <button class="library-chip" data-filter="albums">Albums</button>
-                                    <button class="library-chip" data-filter="artists">Artists</button>
-                                </div>
-                                <div class="library-toolbar-bottom">
-                                    <div class="library-sort-wrapper">
-                                        <button id="library-sort-btn" class="library-sort-trigger">
-                                            <span class="material-symbols-rounded" style="font-size:16px;">swap_vert</span>
-                                            <span id="library-sort-label">Recents</span>
-                                        </button>
-                                        <div class="library-sort-dropdown" id="library-sort-dropdown" style="display:none;">
-                                            <button class="library-sort-option active" data-sort="recents">Recents</button>
-                                            <button class="library-sort-option" data-sort="alpha">Alphabetical</button>
-                                            <button class="library-sort-option" data-sort="creator">Creator</button>
-                                        </div>
-                                    </div>
-                                    <button id="library-view-toggle-btn" class="library-icon-btn-sm" title="Change view">
-                                        <span class="material-symbols-rounded" id="library-view-icon">format_list_bulleted</span>
-                                    </button>
-                                </div>
-                            </div>
                         </div>
                         <div id="library-items-container" class="library-list-view"></div>
                     </div>
@@ -1005,7 +990,31 @@
                                 <p id="liked-albums-count" class="subview-count"></p>
                             </div>
                         </div>
-                        <div id="library-liked-albums-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;padding:0.5rem 0;"></div>
+                        <div id="library-liked-albums-grid"></div>
+                    </div>
+
+                    <!-- ===== LIKED PLAYLISTS SUB-VIEW ===== -->
+                    <div id="library-liked-playlists-detail" class="library-subview" style="display:none;">
+                        <div class="library-subview-header" style="--subview-accent:#f59e0b;">
+                            <button class="library-back-btn" data-back="main"><span class="material-symbols-rounded">arrow_back</span></button>
+                            <div class="subview-title-group">
+                                <h2 class="subview-title">Liked Playlists</h2>
+                                <p id="liked-playlists-count" class="subview-count"></p>
+                            </div>
+                        </div>
+                        <div id="library-liked-playlists-grid"></div>
+                    </div>
+
+                    <!-- ===== MY PLAYLISTS SUB-VIEW ===== -->
+                    <div id="library-my-playlists-detail" class="library-subview" style="display:none;">
+                        <div class="library-subview-header" style="--subview-accent:#8b5cf6;">
+                            <button class="library-back-btn" data-back="main"><span class="material-symbols-rounded">arrow_back</span></button>
+                            <div class="subview-title-group">
+                                <h2 class="subview-title">My Playlists</h2>
+                                <p id="my-playlists-count" class="subview-count"></p>
+                            </div>
+                        </div>
+                        <div id="library-my-playlists-grid"></div>
                     </div>
 
                     <!-- ===== DOWNLOADED SUB-VIEW ===== -->
@@ -1272,6 +1281,21 @@
                                         ></path>
                                     </svg>
                                 </button>
+                                <div class="detail-more-wrapper">
+                                    <button class="detail-more-btn" title="More">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                            <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+                                        </svg>
+                                    </button>
+                                    <div class="detail-more-dropdown">
+                                        <button id="download-playlist-dropdown-btn">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                                            </svg>
+                                            <span>Download</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </header>

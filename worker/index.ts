@@ -472,15 +472,31 @@ async function handleDeleteAnnouncement(request: Request, env: Env): Promise<Res
    AI SEARCH — Workers AI powered search intent resolution
    ══════════════════════════════════════════════════════════════ */
 
-const AI_SYSTEM_PROMPT = `You are a music search assistant. Given a user's search query (which may contain typos, abbreviations, or slang), determine what they most likely mean.
+const AI_SYSTEM_PROMPT = `You are a music search assistant. Given a user's search query, find the MOST POPULAR match across all categories.
+
+For the query "{query}", think of it as:
+1. "popular song called {query}" - find the most popular track
+2. "popular album called {query}" - find the most popular album
+3. "popular artist called {query}" - find the most popular artist
+4. "popular playlist called {query}" - find the most popular playlist
+
+Then determine which category has the MOST POPULAR result and should be the top result.
+
+CRITICAL RULES:
+- Always pick the MOST FAMOUS, MOST POPULAR version (the mega-hit, not covers or remixes)
+- For "sorry" → "Sorry" by Justin Bieber (the hit song, not random covers)
+- For "justn" → Justin Bieber (the real, famous artist)
+- For "graduation" → "Graduation" album by Kanye West (the famous album)
+- If search results are provided with popularity scores, pick the HIGHEST popularity match
 
 Return a JSON object with these fields:
 - "artist": the most likely artist name (full, correct spelling), or null
 - "title": the most likely song/album title (full, correct spelling), or null
-- "type": one of "artist", "album", "track", or "unknown"
+- "type": one of "artist", "album", "track", "playlist", or "unknown"
 - "confidence": a number 0-100
 
 Examples:
+Query: "sorry" → {"artist":"Justin Bieber","title":"Sorry","type":"track","confidence":95}
 Query: "justn" → {"artist":"Justin Bieber","title":null,"type":"artist","confidence":95}
 Query: "graduation" → {"artist":"Kanye West","title":"Graduation","type":"album","confidence":90}
 Query: "ye" → {"artist":"Kanye West","title":null,"type":"artist","confidence":85}
@@ -507,14 +523,23 @@ async function handleAiSearch(request: Request, env: Env): Promise<Response> {
       return Response.json({ error: 'Missing query' }, { status: 400, headers: CORS_HEADERS });
     }
 
-    // Build user prompt — include candidate context if provided
-    let userPrompt = `Query: "${query}"`;
+    // Build user prompt — explicitly search for popular matches in all categories
+    let userPrompt = `Find the most popular match for: "${query}"
+
+Consider these searches:
+1. "popular song called ${query}" - list popular tracks by popularity
+2. "popular album called ${query}" - list popular albums by popularity  
+3. "popular artist called ${query}" - list popular artists by popularity
+4. "popular playlist called ${query}" - list popular playlists by popularity
+
+From these 4 categories, determine which has the MOST POPULAR result and should be the top result.`;
+    
     if (body.candidates && body.candidates.length > 0) {
       const candidateList = body.candidates
-        .slice(0, 15)
-        .map((c: any, i: number) => `${i + 1}. ${c.name}${c.artist ? ` by ${c.artist}` : ''} (${c.type})`)
+        .slice(0, 20)
+        .map((c: any, i: number) => `${i + 1}. ${c.name}${c.artist ? ` by ${c.artist}` : ''} (${c.type})${c.popularity ? ` - popularity: ${c.popularity}` : ''}`)
         .join('\n');
-      userPrompt += `\n\nSearch results found. Pick the best match or suggest the globally popular one:\n${candidateList}`;
+      userPrompt += `\n\nActual search results found (with popularity scores):\n${candidateList}\n\nPick the result with the HIGHEST popularity that matches the query.`;
     }
 
     const aiResponse: any = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {

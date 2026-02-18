@@ -252,7 +252,7 @@ export class UIRenderer {
     createTrackItemHTML(track, index, showCover = false, hasMultipleDiscs = false, useTrackNumber = false) {
         const isUnavailable = track.isUnavailable;
         const trackImageHTML = showCover
-            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy">`
+            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy" onerror="this.src='/assets/everywhere.png'">`
             : '';
 
         let displayIndex;
@@ -357,9 +357,17 @@ export class UIRenderer {
         `;
     }
 
-    createPlaylistCardHTML(playlist) {
-        const imageId = playlist.squareImage || playlist.image || playlist.uuid;
+    createPlaylistCardHTML(playlist, eagerLoad = false) {
+        // Use squareImage first, then image, but only if they're valid UUIDs/IDs (not empty strings)
+        let imageId = playlist.squareImage || playlist.image;
+        // Only use UUID as last resort if no valid image ID exists
+        if (!imageId || imageId === playlist.uuid) {
+            imageId = playlist.uuid;
+        }
         const isCompact = cardSettings.isCompactAlbum();
+        const loadingAttr = eagerLoad ? 'eager' : 'lazy';
+        const fetchPriority = eagerLoad ? 'fetchpriority="high"' : '';
+        const coverUrl = this.api.getCoverUrl(imageId);
 
         return this.createBaseCardHTML({
             type: 'playlist',
@@ -367,7 +375,7 @@ export class UIRenderer {
             href: `/playlist/${playlist.uuid}`,
             title: playlist.title,
             subtitle: `${playlist.numberOfTracks || 0} tracks`,
-            imageHTML: `<img src="${this.api.getCoverUrl(imageId)}" alt="${playlist.title}" class="card-image" loading="lazy">`,
+            imageHTML: `<img src="${coverUrl}" alt="${playlist.title}" class="card-image" loading="${loadingAttr}" ${fetchPriority} onerror="console.error('Playlist image failed:', '${coverUrl}'); this.src='/assets/everywhere.png';">`,
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="playlist" title="Add to Liked">
                     ${this.createHeartIcon(false)}
@@ -394,7 +402,7 @@ export class UIRenderer {
     }
 
     createMixCardHTML(mix) {
-        const imageSrc = mix.cover || '/assets/appicon.png';
+        const imageSrc = mix.cover || '/assets/everywhere.png';
         const description = mix.subTitle || mix.description || '';
         const isCompact = cardSettings.isCompactAlbum();
 
@@ -446,7 +454,7 @@ export class UIRenderer {
             } else if (uniqueCovers.length > 0) {
                 imageHTML = `<img src="${this.api.getCoverUrl(uniqueCovers[0])}" alt="${playlist.name}" class="card-image" loading="lazy">`;
             } else {
-                imageHTML = `<img src="/assets/appicon.png" alt="${playlist.name}" class="card-image" loading="lazy">`;
+                imageHTML = `<img src="/assets/everywhere.png" alt="${playlist.name}" class="card-image" loading="lazy">`;
             }
         }
 
@@ -465,15 +473,6 @@ export class UIRenderer {
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
                         <path d="m15 5 4 4"/>
-                    </svg>
-                </button>
-                <button class="delete-playlist-btn" data-action="delete-playlist" title="Delete Playlist">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 6h18"/>
-                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                        <line x1="10" y1="11" x2="10" y2="17"/>
-                        <line x1="14" y1="11" x2="14" y2="17"/>
                     </svg>
                 </button>
             `,
@@ -1287,27 +1286,42 @@ export class UIRenderer {
                 : 'Your listening history'
         );
 
-        // ─── Dynamic content (merged + sorted by recency) ───
-        const dynamicItems = [];
-        likedAlbums.forEach((a) => dynamicItems.push({ ...a, _rowType: 'album', _sortTime: a.addedAt || 0 }));
-        likedArtists.forEach((a) => dynamicItems.push({ ...a, _rowType: 'artist', _sortTime: a.addedAt || 0 }));
-        likedPlaylists.forEach((p) => dynamicItems.push({ ...p, _rowType: 'playlist', _sortTime: p.addedAt || 0 }));
-        likedMixes.forEach((m) => dynamicItems.push({ ...m, _rowType: 'mix', _sortTime: m.addedAt || 0 }));
-
-        const playlistsInFolders = new Set();
-        folders.forEach((f) => {
-            if (f.playlists) f.playlists.forEach((id) => playlistsInFolders.add(id));
-        });
-        const visibleUserPlaylists = myPlaylists.filter((p) => !playlistsInFolders.has(p.id));
-        visibleUserPlaylists.forEach((p) =>
-            dynamicItems.push({ ...p, _rowType: 'userPlaylist', _sortTime: p.createdAt || p.addedAt || 0 })
+        // Pinned: Liked Albums
+        rows += this._pinnedRowHTML(
+            'liked-albums',
+            'album',
+            '#a78bfa',
+            'Liked Albums',
+            likedAlbums.length
+                ? `${likedAlbums.length} album${likedAlbums.length !== 1 ? 's' : ''}`
+                : 'Tap to see your liked albums'
         );
-        folders.forEach((f) => dynamicItems.push({ ...f, _rowType: 'folder', _sortTime: f.createdAt || 0 }));
 
-        dynamicItems.sort((a, b) => (b._sortTime || 0) - (a._sortTime || 0));
-        dynamicItems.forEach((item) => {
-            rows += this._libraryRowHTML(item);
-        });
+        // Pinned: Liked Playlists
+        rows += this._pinnedRowHTML(
+            'liked-playlists',
+            'queue_music',
+            '#f59e0b',
+            'Liked Playlists',
+            likedPlaylists.length
+                ? `${likedPlaylists.length} playlist${likedPlaylists.length !== 1 ? 's' : ''}`
+                : 'Tap to see your liked playlists'
+        );
+
+        // Pinned: My Playlists (user-created playlists)
+        const userPlaylists = await db.getPlaylists();
+        rows += this._pinnedRowHTML(
+            'my-playlists',
+            'playlist_add',
+            '#8b5cf6',
+            'My Playlists',
+            userPlaylists.length
+                ? `${userPlaylists.length} playlist${userPlaylists.length !== 1 ? 's' : ''}`
+                : 'Tap to see your playlists'
+        );
+
+        // ─── NO DYNAMIC CONTENT - Only pinned rows are shown in main view ───
+        // Albums, playlists, artists, etc. are only accessible through their pinned row subviews
 
         if (itemsContainer) itemsContainer.innerHTML = rows;
 
@@ -1323,25 +1337,17 @@ export class UIRenderer {
                     } else if (sv === 'recent') {
                         this._showSubview('library-recent-detail');
                         this._populateRecentSubview();
+                    } else if (sv === 'liked-albums') {
+                        this._showSubview('library-liked-albums-detail');
+                        this._populateLikedAlbumsSubview(likedAlbums);
+                    } else if (sv === 'liked-playlists') {
+                        this._showSubview('library-liked-playlists-detail');
+                        this._populateLikedPlaylistsSubview(likedPlaylists);
+                    } else if (sv === 'my-playlists') {
+                        this._showSubview('library-my-playlists-detail');
+                        this._populateMyPlaylistsSubview();
                     }
                 });
-            });
-
-            // Wire dynamic row clicks
-            itemsContainer.querySelectorAll('.library-row[data-album-id]').forEach((row) => {
-                row.addEventListener('click', () => navigate(`/album/${row.dataset.albumId}`));
-            });
-            itemsContainer.querySelectorAll('.library-row[data-artist-id]').forEach((row) => {
-                row.addEventListener('click', () => navigate(`/artist/${row.dataset.artistId}`));
-            });
-            itemsContainer.querySelectorAll('.library-row[data-playlist-id]').forEach((row) => {
-                row.addEventListener('click', () => navigate(`/playlist/${row.dataset.playlistId}`));
-            });
-            itemsContainer.querySelectorAll('.library-row[data-mix-id]').forEach((row) => {
-                row.addEventListener('click', () => navigate(`/mix/${row.dataset.mixId}`));
-            });
-            itemsContainer.querySelectorAll('.library-row[data-user-playlist-id]').forEach((row) => {
-                row.addEventListener('click', () => navigate(`/userplaylist/${row.dataset.userPlaylistId}`));
             });
         }
 
@@ -1366,37 +1372,22 @@ export class UIRenderer {
                 ? `${likedTracks.length} song${likedTracks.length !== 1 ? 's' : ''}`
                 : '';
 
-        // ─── Populate Liked Albums sub-view ───
-        const albumsGrid = document.getElementById('library-liked-albums-grid');
-        if (albumsGrid) {
-            if (likedAlbums.length) {
-                albumsGrid.innerHTML = likedAlbums.map((a) => this.createAlbumCardHTML(a)).join('');
-                likedAlbums.forEach((album) => {
-                    const el = albumsGrid.querySelector(`[data-album-id="${album.id}"]`);
-                    if (el) {
-                        trackDataStore.set(el, album);
-                        this.updateLikeState(el, 'album', album.id);
-                    }
-                });
-            } else {
-                albumsGrid.innerHTML = createPlaceholder('No liked albums yet.');
-            }
-        }
-
-        const likedAlbumsCount = document.getElementById('liked-albums-count');
-        if (likedAlbumsCount)
-            likedAlbumsCount.textContent = likedAlbums.length
-                ? `${likedAlbums.length} album${likedAlbums.length !== 1 ? 's' : ''}`
-                : '';
+        // ─── Populate Liked Albums sub-view (initial population) ───
+        this._populateLikedAlbumsSubview(likedAlbums);
 
         // ─── Wire ALL sub-view back buttons ───
         this._wireLibraryBackButtons();
 
-        // ─── Wire filter chips ───
-        this._wireLibraryFilters(itemsContainer);
-
-        // ─── Wire sort + view toggle ───
-        this._wireLibrarySort(itemsContainer);
+        // ─── Wire search + create (chips/sort/view removed) ───
+        // Store library data for search
+        this._librarySearchData = {
+            likedTracks,
+            likedAlbums,
+            likedPlaylists,
+            downloadedCatalog,
+            history: history.filter((track, index, arr) => index === 0 || track.id !== arr[index - 1].id), // Deduplicate
+        };
+        this._wireLibrarySort(itemsContainer, this._librarySearchData);
     }
 
     async renderLocalFiles(container) {
@@ -1506,7 +1497,7 @@ export class UIRenderer {
 
         const thumbClass = isArtist ? 'library-row-thumb artist-thumb' : 'library-row-thumb';
         const coverHTML = cover
-            ? `<img class="${thumbClass}" src="${cover}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">`
+            ? `<img class="${thumbClass}" src="${cover}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">`
             : `<div class="library-row-icon library-row-icon--muted"><span class="material-symbols-rounded">${iconFallback}</span></div>`;
 
         return `
@@ -1527,15 +1518,178 @@ export class UIRenderer {
         if (sv) sv.style.display = 'block';
     }
 
-    /** Populate the Recently Played sub-view */
+    /** Populate the Recently Played sub-view (consecutive duplicates collapsed) */
     async _populateRecentSubview() {
         const list = document.getElementById('library-recent-container');
         if (!list) return;
         const history = await db.getHistory();
-        if (history.length) {
-            this.renderListWithTracks(list, history, false);
+        // Remove consecutive duplicates – keep only the first occurrence in each run
+        const deduped = history.filter((t, i) => i === 0 || String(t.id) !== String(history[i - 1].id));
+
+        if (deduped.length) {
+            this.renderListWithTracks(list, deduped, true); // Changed to true to show covers instead of numbers
         } else {
             list.innerHTML = createPlaceholder('No recently played tracks yet.');
+        }
+    }
+
+    /** Populate the Liked Albums sub-view */
+    _populateLikedAlbumsSubview(likedAlbums) {
+        const albumsGrid = document.getElementById('library-liked-albums-grid');
+        if (albumsGrid) {
+            if (likedAlbums && likedAlbums.length) {
+                // Use the same card structure as downloaded albums for consistency
+                albumsGrid.innerHTML = `<div class="dl-albums-grid">${likedAlbums.map((a) => {
+                    const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : '/assets/everywhere.png';
+                    return `
+                        <div class="dl-album-card" data-album-id="${a.id}">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='/assets/everywhere.png'">
+                            <div class="dl-album-card-info">
+                                <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
+                                <div class="dl-album-card-subtitle">${escapeHtml(a.artist?.name || a.artist || 'Unknown')}${a.releaseDate ? ` • ${a.releaseDate}` : ''}</div>
+                            </div>
+                        </div>`;
+                }).join('')}</div>`;
+                
+                // Wire album card clicks and data
+                albumsGrid.querySelectorAll('.dl-album-card').forEach((card) => {
+                    const albumId = card.dataset.albumId;
+                    const album = likedAlbums.find((a) => String(a.id) === String(albumId));
+                    if (album) {
+                        trackDataStore.set(card, album);
+                        card.addEventListener('click', () => {
+                            navigate(`/album/${album.id}`);
+                        });
+                }
+            });
+            } else {
+                albumsGrid.innerHTML = createPlaceholder('No liked albums yet.');
+            }
+        }
+
+        const likedAlbumsCount = document.getElementById('liked-albums-count');
+        if (likedAlbumsCount)
+            likedAlbumsCount.textContent = likedAlbums && likedAlbums.length
+                ? `${likedAlbums.length} album${likedAlbums.length !== 1 ? 's' : ''}`
+                : '';
+    }
+
+    /** Populate the Liked Playlists sub-view */
+    async _populateLikedPlaylistsSubview(likedPlaylists) {
+        const playlistsGrid = document.getElementById('library-liked-playlists-grid');
+        if (playlistsGrid) {
+            if (likedPlaylists && likedPlaylists.length) {
+                // ALWAYS fetch fresh playlist data from API - TIDAL playlist images change frequently,
+                // stored UUIDs become stale and CDN URLs 404 (confirmed by runtime logs)
+                const enrichedPlaylists = await Promise.all(likedPlaylists.map(async (p) => {
+                    try {
+                        const fresh = await this.api.getPlaylist(p.uuid);
+                        // FIX: getPlaylist returns { playlist, tracks } — access nested .playlist
+                        const pl = fresh?.playlist;
+                        const enriched = {
+                            ...p,
+                            squareImage: pl?.squareImage || p.squareImage || null,
+                            image: pl?.squareImage || pl?.image || p.image,
+                        };
+                        // Cache resolved image back to IndexedDB so it persists across reloads
+                        if (pl?.squareImage || pl?.image) {
+                            db.performTransaction('favorites_playlists', 'readwrite', (store) =>
+                                store.put(enriched)
+                            ).catch(() => {}); // fire-and-forget
+                        }
+                        return enriched;
+                    } catch {
+                        return p; // keep stored data on failure
+                    }
+                }));
+
+                // Use the same card structure as downloaded albums for consistency
+                playlistsGrid.innerHTML = `<div class="dl-albums-grid">${enrichedPlaylists.map((p) => {
+                    const imageId = p.squareImage || p.image;
+                    const coverUrl = (imageId && imageId !== p.uuid) ? this.api.getCoverUrl(imageId, '480') : '/assets/everywhere.png';
+                    return `
+                        <div class="dl-album-card" data-playlist-id="${p.uuid}">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="eager" fetchpriority="high" onerror="this.src='/assets/everywhere.png'">
+                            <div class="dl-album-card-info">
+                                <div class="dl-album-card-title">${escapeHtml(p.title || 'Unknown Playlist')}</div>
+                                <div class="dl-album-card-subtitle">${p.numberOfTracks || 0} track${(p.numberOfTracks || 0) !== 1 ? 's' : ''}</div>
+                            </div>
+                        </div>`;
+                }).join('')}</div>`;
+                
+                // Wire playlist card clicks and data
+                playlistsGrid.querySelectorAll('.dl-album-card').forEach((card) => {
+                    const playlistId = card.dataset.playlistId;
+                    const playlist = enrichedPlaylists.find((p) => p.uuid === playlistId);
+                    if (playlist) {
+                        trackDataStore.set(card, playlist);
+                        card.addEventListener('click', () => {
+                            navigate(`/playlist/${playlist.uuid}`);
+                        });
+                }
+                });
+            } else {
+                playlistsGrid.innerHTML = createPlaceholder('No liked playlists yet.');
+            }
+        }
+
+        const likedPlaylistsCount = document.getElementById('liked-playlists-count');
+        if (likedPlaylistsCount)
+            likedPlaylistsCount.textContent = likedPlaylists && likedPlaylists.length
+                ? `${likedPlaylists.length} playlist${likedPlaylists.length !== 1 ? 's' : ''}`
+                : '';
+    }
+
+    /** Populate the My Playlists sub-view (user-created playlists) */
+    async _populateMyPlaylistsSubview() {
+        const playlistsGrid = document.getElementById('library-my-playlists-grid');
+        if (playlistsGrid) {
+            const userPlaylists = await db.getPlaylists(true);
+            if (userPlaylists && userPlaylists.length) {
+                // Use the same card structure as downloaded albums for consistency
+                playlistsGrid.innerHTML = `<div class="dl-albums-grid">${userPlaylists.map((p) => {
+                    let coverUrl = '/assets/everywhere.png';
+                    if (p.cover && (p.cover.startsWith('http') || p.cover.startsWith('blob:') || p.cover.startsWith('data:'))) {
+                        // Valid URL - use directly
+                        coverUrl = p.cover;
+                    } else if (p.tracks && p.tracks.length > 0) {
+                        // Use the first track's album cover as fallback
+                        const firstTrackCover = p.tracks[0]?.album?.cover;
+                        if (firstTrackCover) coverUrl = this.api.getCoverUrl(firstTrackCover, '480');
+                    }
+                    const trackCount = p.numberOfTracks || (p.tracks ? p.tracks.length : 0);
+                    return `
+                        <div class="dl-album-card" data-user-playlist-id="${p.id}">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='/assets/everywhere.png'">
+                            <div class="dl-album-card-info">
+                                <div class="dl-album-card-title">${escapeHtml(p.name || 'Unknown Playlist')}</div>
+                                <div class="dl-album-card-subtitle">${trackCount} track${trackCount !== 1 ? 's' : ''}</div>
+                            </div>
+                        </div>`;
+                }).join('')}</div>`;
+                
+                // Wire playlist card clicks and data
+                playlistsGrid.querySelectorAll('.dl-album-card').forEach((card) => {
+                    const playlistId = card.dataset.userPlaylistId;
+                    const playlist = userPlaylists.find((p) => String(p.id) === String(playlistId));
+                    if (playlist) {
+                        trackDataStore.set(card, playlist);
+                        card.addEventListener('click', () => {
+                            navigate(`/userplaylist/${playlist.id}`);
+                        });
+                    }
+                });
+            } else {
+                playlistsGrid.innerHTML = createPlaceholder('No playlists yet. Create one to get started!');
+            }
+        }
+
+        const myPlaylistsCount = document.getElementById('my-playlists-count');
+        if (myPlaylistsCount) {
+            const userPlaylists = await db.getPlaylists();
+            myPlaylistsCount.textContent = userPlaylists && userPlaylists.length
+                ? `${userPlaylists.length} playlist${userPlaylists.length !== 1 ? 's' : ''}`
+                : '';
         }
     }
 
@@ -1580,24 +1734,59 @@ export class UIRenderer {
     }
 
     /** Wire library toolbar: search toggle, create dropdown, sort dropdown, view toggle */
-    _wireLibrarySort(container) {
+    _wireLibrarySort(container, searchData = null) {
         // ─── Search Toggle ───
         const searchToggleBtn = document.getElementById('library-search-toggle-btn');
         const searchBar = document.getElementById('library-search-bar');
         const searchInput = document.getElementById('library-search-input');
         const searchCloseBtn = document.getElementById('library-search-close-btn');
 
+        // Store original pinned rows HTML for restoration
+        const originalHTML = container ? container.innerHTML : '';
+
+        const resetSearch = () => {
+            if (container && originalHTML) {
+                container.innerHTML = originalHTML;
+                // Re-wire pinned row clicks after reset
+                if (container) {
+                    container.querySelectorAll('.library-row[data-subview]').forEach((row) => {
+                        row.addEventListener('click', () => {
+                            const sv = row.dataset.subview;
+                            if (sv === 'downloaded') {
+                                this.showLibraryDownloads();
+                            } else if (sv === 'liked') {
+                                this._showSubview('library-liked-detail');
+                            } else if (sv === 'recent') {
+                                this._showSubview('library-recent-detail');
+                                this._populateRecentSubview();
+                            } else if (sv === 'liked-albums') {
+                                this._showSubview('library-liked-albums-detail');
+                                if (searchData?.likedAlbums) {
+                                    this._populateLikedAlbumsSubview(searchData.likedAlbums);
+                                }
+                            } else if (sv === 'liked-playlists') {
+                                this._showSubview('library-liked-playlists-detail');
+                                if (searchData?.likedPlaylists) {
+                                    this._populateLikedPlaylistsSubview(searchData.likedPlaylists);
+                                }
+                            }
+                        });
+                    });
+                }
+            }
+        };
+
         if (searchToggleBtn && searchBar && searchInput) {
-            searchToggleBtn.addEventListener('click', () => {
-                const isOpen = searchBar.style.display !== 'none';
+            searchToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = searchBar.style.display !== 'none' && searchBar.style.display !== '';
                 searchBar.style.display = isOpen ? 'none' : 'flex';
                 if (!isOpen) {
                     searchInput.value = '';
-                    searchInput.focus();
-                } else {
+                    setTimeout(() => searchInput.focus(), 50);
+        } else {
                     searchInput.value = '';
-                    // Reset filter
-                    if (container) container.querySelectorAll('.library-row').forEach((r) => (r.style.display = ''));
+                    resetSearch();
                 }
             });
         }
@@ -1605,18 +1794,254 @@ export class UIRenderer {
             searchCloseBtn.addEventListener('click', () => {
                 searchBar.style.display = 'none';
                 searchInput.value = '';
-                if (container) container.querySelectorAll('.library-row').forEach((r) => (r.style.display = ''));
+                resetSearch();
             });
         }
-        if (searchInput && container) {
+        if (searchInput && container && searchData) {
             searchInput.addEventListener('input', () => {
                 const q = searchInput.value.trim().toLowerCase();
-                container.querySelectorAll('.library-row').forEach((row) => {
-                    if (!q) { row.style.display = ''; return; }
-                    const title = (row.querySelector('.library-row-title')?.textContent || '').toLowerCase();
-                    const subtitle = (row.querySelector('.library-row-subtitle')?.textContent || '').toLowerCase();
-                    row.style.display = title.includes(q) || subtitle.includes(q) ? '' : 'none';
+                if (!q) {
+                    resetSearch();
+                    return;
+                }
+
+                // Filter through all library data
+                const matches = [];
+
+                // Search liked tracks
+                if (searchData.likedTracks) {
+                    searchData.likedTracks.forEach(track => {
+                        const title = (track.title || '').toLowerCase();
+                        const artist = (track.artist?.name || track.artists?.[0]?.name || '').toLowerCase();
+                        const album = (track.album?.title || '').toLowerCase();
+                        if (title.includes(q) || artist.includes(q) || album.includes(q)) {
+                            matches.push({ type: 'track', item: track, source: 'Liked Songs' });
+                        }
+                    });
+                }
+
+                // Search downloaded tracks
+                if (searchData.downloadedCatalog) {
+                    searchData.downloadedCatalog.forEach(track => {
+                        const title = (track.title || '').toLowerCase();
+                        const artist = (track.artist || '').toLowerCase();
+                        const album = (track.album || '').toLowerCase();
+                        if (title.includes(q) || artist.includes(q) || album.includes(q)) {
+                            matches.push({ type: 'downloaded-track', item: track, source: 'Downloads' });
+                        }
+                    });
+                }
+
+                // Search liked albums
+                if (searchData.likedAlbums) {
+                    searchData.likedAlbums.forEach(album => {
+                        const title = (album.title || '').toLowerCase();
+                        const artist = (album.artist?.name || '').toLowerCase();
+                        if (title.includes(q) || artist.includes(q)) {
+                            matches.push({ type: 'album', item: album, source: 'Liked Albums' });
+                        }
+                    });
+                }
+
+                // Search liked playlists
+                if (searchData.likedPlaylists) {
+                    searchData.likedPlaylists.forEach(playlist => {
+                        const title = (playlist.title || '').toLowerCase();
+                        if (title.includes(q)) {
+                            matches.push({ type: 'playlist', item: playlist, source: 'Liked Playlists' });
+                        }
+                    });
+                }
+
+                // Search recently played
+                if (searchData.history) {
+                    searchData.history.forEach(track => {
+                        const title = (track.title || '').toLowerCase();
+                        const artist = (track.artist?.name || track.artists?.[0]?.name || '').toLowerCase();
+                        const album = (track.album?.title || '').toLowerCase();
+                        if (title.includes(q) || artist.includes(q) || album.includes(q)) {
+                            matches.push({ type: 'track', item: track, source: 'Recently Played' });
+                        }
+                    });
+                }
+
+                // Group downloaded tracks by album/artist for better display
+                const downloadedByAlbum = new Map();
+                const downloadedByArtist = new Map();
+                if (searchData.downloadedCatalog) {
+                    searchData.downloadedCatalog.forEach(track => {
+                        if (track.album && track.albumId) {
+                            if (!downloadedByAlbum.has(track.albumId)) {
+                                downloadedByAlbum.set(track.albumId, {
+                                    id: track.albumId,
+                                    title: track.album,
+                                    artist: track.artist,
+                                    cover: track.cover,
+                                    tracks: []
+                                });
+                            }
+                            downloadedByAlbum.get(track.albumId).tracks.push(track);
+                        }
+                        if (track.artistId) {
+                            if (!downloadedByArtist.has(track.artistId)) {
+                                downloadedByArtist.set(track.artistId, {
+                                    id: track.artistId,
+                                    name: track.artist,
+                                    picture: track.artistPicture,
+                                    tracks: []
+                                });
+                            }
+                            downloadedByArtist.get(track.artistId).tracks.push(track);
+                        }
+                    });
+                }
+
+                // Search downloaded albums
+                downloadedByAlbum.forEach((album, albumId) => {
+                    const title = (album.title || '').toLowerCase();
+                    const artist = (album.artist || '').toLowerCase();
+                    if (title.includes(q) || artist.includes(q)) {
+                        matches.push({ type: 'downloaded-album', item: album, source: 'Downloads' });
+                    }
                 });
+
+                // Search downloaded artists
+                downloadedByArtist.forEach((artist, artistId) => {
+                    const name = (artist.name || '').toLowerCase();
+                    if (name.includes(q)) {
+                        matches.push({ type: 'downloaded-artist', item: artist, source: 'Downloads' });
+                    }
+                });
+
+                // Render matches
+                if (matches.length > 0) {
+                    let html = '';
+                    matches.forEach(match => {
+                        if (match.type === 'track' || match.type === 'downloaded-track') {
+                            const track = match.item;
+                            const title = track.title || 'Unknown';
+                            const artist = track.artist?.name || track.artists?.[0]?.name || track.artist || 'Unknown';
+                            const cover = track.album?.cover || track.cover || null;
+                            const coverUrl = cover ? this.api.getCoverUrl(cover) : 'assets/everywhere.png';
+                            html += `
+                                <div class="library-row library-row--search-result" data-track-id="${track.id}" data-source="${match.source}">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <div class="library-row-content">
+                                        <div class="library-row-title">${escapeHtml(title)}</div>
+                                        <div class="library-row-subtitle">${escapeHtml(artist)} · ${match.source}</div>
+                                    </div>
+                                    <span class="material-symbols-rounded library-row-chevron">chevron_right</span>
+                                </div>
+                            `;
+                        } else if (match.type === 'album' || match.type === 'downloaded-album') {
+                            const album = match.item;
+                            const title = album.title || 'Unknown';
+                            const artist = album.artist?.name || album.artist || 'Unknown';
+                            const cover = album.cover || album.image || null;
+                            const coverUrl = cover ? this.api.getCoverUrl(cover) : 'assets/everywhere.png';
+                            const albumId = album.id || album.albumId;
+                            html += `
+                                <div class="library-row library-row--search-result" data-album-id="${albumId}" data-source="${match.source}">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <div class="library-row-content">
+                                        <div class="library-row-title">${escapeHtml(title)}</div>
+                                        <div class="library-row-subtitle">${escapeHtml(artist)} · ${match.source}</div>
+                                    </div>
+                                    <span class="material-symbols-rounded library-row-chevron">chevron_right</span>
+                                </div>
+                            `;
+                        } else if (match.type === 'playlist') {
+                            const playlist = match.item;
+                            const title = playlist.title || 'Unknown';
+                            const cover = playlist.squareImage || playlist.image || playlist.uuid;
+                            const coverUrl = this.api.getCoverUrl(cover);
+                            html += `
+                                <div class="library-row library-row--search-result" data-playlist-id="${playlist.uuid}" data-source="${match.source}">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <div class="library-row-content">
+                                        <div class="library-row-title">${escapeHtml(title)}</div>
+                                        <div class="library-row-subtitle">${playlist.numberOfTracks || 0} tracks · ${match.source}</div>
+                                    </div>
+                                    <span class="material-symbols-rounded library-row-chevron">chevron_right</span>
+                                </div>
+                            `;
+                        } else if (match.type === 'downloaded-artist') {
+                            const artist = match.item;
+                            const name = artist.name || 'Unknown';
+                            const picture = artist.picture || null;
+                            const pictureUrl = picture ? this.api.getArtistPictureUrl(picture) : 'assets/logo.svg';
+                            html += `
+                                <div class="library-row library-row--search-result" data-artist-id="${artist.id}" data-source="${match.source}">
+                                    <img src="${pictureUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <div class="library-row-content">
+                                        <div class="library-row-title">${escapeHtml(name)}</div>
+                                        <div class="library-row-subtitle">${artist.tracks?.length || 0} tracks · ${match.source}</div>
+                                    </div>
+                                    <span class="material-symbols-rounded library-row-chevron">chevron_right</span>
+                                </div>
+                            `;
+                        }
+                    });
+                    if (container) container.innerHTML = html;
+
+                    // Wire click handlers for search results
+                    if (container) {
+                        container.querySelectorAll('.library-row--search-result').forEach((row) => {
+                            row.addEventListener('click', () => {
+                                if (row.dataset.trackId) {
+                                    // Handle track click - could open track details or play
+                                    const trackId = row.dataset.trackId;
+                                    // Find the track in the data and play it
+                                    const allTracks = [
+                                        ...(searchData.likedTracks || []),
+                                        ...(searchData.history || []),
+                                        ...(searchData.downloadedCatalog || [])
+                                    ];
+                                    const track = allTracks.find(t => String(t.id) === String(trackId));
+                                    if (track) {
+                                        // You might want to play the track or show details
+                                        // For now, just navigate to the appropriate subview
+                                        if (row.dataset.source === 'Liked Songs') {
+                                            this._showSubview('library-liked-detail');
+                                        } else if (row.dataset.source === 'Downloads') {
+                                            this.showLibraryDownloads();
+                                        } else if (row.dataset.source === 'Recently Played') {
+                                            this._showSubview('library-recent-detail');
+                                            this._populateRecentSubview();
+                                        }
+                                    }
+                                } else if (row.dataset.albumId) {
+                                    // Handle album click
+                                    const albumId = row.dataset.albumId;
+                                    if (row.dataset.source === 'Liked Albums') {
+                                        this._showSubview('library-liked-albums-detail');
+                                        if (searchData.likedAlbums) {
+                                            this._populateLikedAlbumsSubview(searchData.likedAlbums);
+                                        }
+                                    } else if (row.dataset.source === 'Downloads') {
+                                        this.showLibraryDownloads();
+                                    }
+                                } else if (row.dataset.playlistId) {
+                                    // Handle playlist click
+                                    const playlistId = row.dataset.playlistId;
+                                    if (row.dataset.source === 'Liked Playlists') {
+                                        this._showSubview('library-liked-playlists-detail');
+                                        if (searchData.likedPlaylists) {
+                                            this._populateLikedPlaylistsSubview(searchData.likedPlaylists);
+                                        }
+                                    }
+                                } else if (row.dataset.artistId) {
+                                    // Handle artist click
+                                    if (row.dataset.source === 'Downloads') {
+                                        this.showLibraryDownloads();
+                                    }
+                                }
+                            });
+                        });
+                    }
+        } else {
+                    if (container) container.innerHTML = createPlaceholder('No results found.');
+                }
             });
         }
 
@@ -1626,7 +2051,7 @@ export class UIRenderer {
         if (createToggle && createDropdown) {
             createToggle.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const isOpen = createDropdown.style.display !== 'none';
+                const isOpen = createDropdown.style.display !== 'none' && createDropdown.style.display !== '';
                 createDropdown.style.display = isOpen ? 'none' : 'block';
             });
             // Close on outside click
@@ -1676,7 +2101,7 @@ export class UIRenderer {
                     sortDropdown.style.display = 'none';
 
                     const sortKey = opt.dataset.sort; // 'recents', 'alpha', 'creator'
-                    if (!container) return;
+        if (!container) return;
                     const rows = [...container.querySelectorAll('.library-row:not(.library-row--pinned)')];
                     rows.sort((a, b) => {
                         const titleA = (a.querySelector('.library-row-title')?.textContent || '').toLowerCase();
@@ -1813,7 +2238,7 @@ export class UIRenderer {
             const dur = t.duration ? formatTime(t.duration) : '';
             return `
                 <div class="dl-track-item" data-track-id="${t.id}">
-                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                     <div class="dl-track-item-info">
                         <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
                         <div class="dl-track-item-meta">
@@ -1896,7 +2321,7 @@ export class UIRenderer {
             const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg';
             return `
                 <div class="dl-album-card" data-album-id="${a.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
                         <div class="dl-album-card-subtitle">${escapeHtml(a.artist || 'Unknown')} · ${a.count} track${a.count !== 1 ? 's' : ''}</div>
@@ -1925,7 +2350,7 @@ export class UIRenderer {
             detailEl = document.createElement('div');
             detailEl.id = 'dl-album-detail-overlay';
             detailEl.className = 'dl-detail-overlay';
-            detailEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            detailEl.style.cssText = 'background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
             dlView.style.position = 'relative';
             dlView.appendChild(detailEl);
         }
@@ -1940,7 +2365,7 @@ export class UIRenderer {
                 <span class="dl-detail-nav-title">Downloads</span>
             </div>
             <div class="dl-detail-hero">
-                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/everywhere.png'">
                 <div class="dl-detail-hero-title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</div>
                 <div class="dl-detail-hero-meta">${escapeHtml(albumInfo?.artist || 'Unknown')} · ${tracks.length} track${tracks.length !== 1 ? 's' : ''}</div>
                 <div class="dl-detail-actions">
@@ -1957,10 +2382,11 @@ export class UIRenderer {
                 ${tracks.map((t, i) => {
                     const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
                     const dur = t.duration ? formatTime(t.duration) : '';
+                    const trackNum = t.trackNumber !== null && t.trackNumber !== undefined ? t.trackNumber : '';
                     return `
                     <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
-                        <span class="dl-track-number">${i + 1}</span>
-                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <span class="dl-track-number">${trackNum}</span>
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                         <div class="dl-detail-track-info">
                             <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
                             <div class="dl-detail-track-meta">${escapeHtml(t.artist || 'Unknown')}</div>
@@ -2023,7 +2449,13 @@ export class UIRenderer {
             if (!t.artistId) return;
             const key = String(t.artistId);
             if (!artistMap.has(key)) {
-                artistMap.set(key, { id: t.artistId, name: t.artist, cover: t.cover, count: 0 });
+                artistMap.set(key, { 
+                    id: t.artistId, 
+                    name: t.artist, 
+                    cover: t.cover, 
+                    picture: t.artistPicture || null,
+                    count: 0 
+                });
             }
             artistMap.get(key).count++;
         });
@@ -2035,10 +2467,12 @@ export class UIRenderer {
         }
 
         container.innerHTML = `<div class="dl-artists-grid">${artists.map((a) => {
-            const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg';
+            const avatarUrl = a.picture 
+                ? this.api.getArtistPictureUrl(a.picture, '160')
+                : (a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg');
             return `
                 <div class="dl-artist-card" data-artist-id="${a.id}">
-                    <img class="dl-artist-card-avatar" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                    <img class="dl-artist-card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                     <div class="dl-artist-card-name">${escapeHtml(a.name || 'Unknown')}</div>
                     <div class="dl-artist-card-count">${a.count} track${a.count !== 1 ? 's' : ''}</div>
                 </div>`;
@@ -2065,13 +2499,32 @@ export class UIRenderer {
             detailEl = document.createElement('div');
             detailEl.id = 'dl-artist-detail-overlay';
             detailEl.className = 'dl-detail-overlay';
-            detailEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            detailEl.style.cssText = 'background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
             dlView.style.position = 'relative';
             dlView.appendChild(detailEl);
         }
         detailEl.style.display = 'block';
 
-        const coverUrl = artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/logo.svg';
+        // Group tracks by album for Albums tab
+        const albumMap = new Map();
+        tracks.forEach((t) => {
+            if (!t.albumId) return;
+            const key = String(t.albumId);
+            if (!albumMap.has(key)) {
+                albumMap.set(key, {
+                    id: t.albumId,
+                    title: t.album || 'Unknown Album',
+                    cover: t.cover || null,
+                    tracks: []
+                });
+            }
+            albumMap.get(key).tracks.push(t);
+        });
+        const albums = Array.from(albumMap.values());
+
+        const artistPictureUrl = artistInfo?.picture 
+            ? this.api.getArtistPictureUrl(artistInfo.picture, '320')
+            : (artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/logo.svg');
         detailEl.innerHTML = `
             <div class="dl-detail-nav">
                 <button class="dl-detail-nav-back" id="dl-artist-detail-back">
@@ -2080,7 +2533,7 @@ export class UIRenderer {
                 <span class="dl-detail-nav-title">Downloads</span>
             </div>
             <div class="dl-detail-hero dl-detail-hero--artist">
-                <img class="dl-detail-cover-lg dl-detail-cover--round" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <img class="dl-detail-cover-lg dl-detail-cover--round" src="${artistPictureUrl}" alt="" onerror="this.src='assets/everywhere.png'">
                 <div class="dl-detail-hero-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -2090,24 +2543,76 @@ export class UIRenderer {
                 </div>
             </div>
             <div class="dl-detail-divider"></div>
-            <div class="dl-detail-tracks">
-                ${tracks.map((t, i) => {
-                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
-                    const dur = t.duration ? formatTime(t.duration) : '';
-                    return `
-                    <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
-                        <span class="dl-track-number">${i + 1}</span>
-                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
-                        <div class="dl-detail-track-info">
-                            <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
-                            <div class="dl-detail-track-meta">
-                                ${escapeHtml(t.artist || 'Unknown')}${t.album ? ` · ${escapeHtml(t.album)}` : ''}
+            <div class="search-tabs" style="margin-top: 0.5rem;">
+                <button class="search-tab active" data-tab="albums">Albums</button>
+                <button class="search-tab" data-tab="tracks">Tracks</button>
+            </div>
+            <div class="search-tab-content active" id="dl-artist-tab-albums">
+                <div id="dl-artist-albums-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;padding:0.5rem 0;"></div>
+            </div>
+            <div class="search-tab-content" id="dl-artist-tab-tracks">
+                <div class="dl-detail-tracks">
+                    ${tracks.map((t, i) => {
+                        const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                        const dur = t.duration ? formatTime(t.duration) : '';
+                        return `
+                        <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
+                            <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                            <div class="dl-detail-track-info">
+                                <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
+                                <div class="dl-detail-track-meta">
+                                    ${escapeHtml(t.artist || 'Unknown')}${t.album ? ` · ${escapeHtml(t.album)}` : ''}
+                                </div>
                             </div>
-                        </div>
-                        <span class="dl-detail-track-duration">${dur}</span>
-                    </div>`;
-                }).join('')}
+                            <span class="dl-detail-track-duration">${dur}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
             </div>`;
+
+        // Populate albums grid
+        const albumsGrid = detailEl.querySelector('#dl-artist-albums-grid');
+        if (albumsGrid) {
+            if (albums.length) {
+                albumsGrid.innerHTML = albums.map((a) => {
+                    const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg';
+                    return `
+                        <div class="dl-album-card" data-album-id="${a.id}">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                            <div class="dl-album-card-info">
+                                <div class="dl-album-card-title">${escapeHtml(a.title)}</div>
+                                <div class="dl-album-card-subtitle">${a.tracks.length} track${a.tracks.length !== 1 ? 's' : ''}</div>
+                            </div>
+                        </div>`;
+                }).join('');
+                
+                // Wire album card clicks
+                albumsGrid.querySelectorAll('.dl-album-card').forEach((card) => {
+                    card.addEventListener('click', () => {
+                        const albumId = card.dataset.albumId;
+                        const albumTracks = tracks.filter((t) => String(t.albumId) === String(albumId));
+                        const albumInfo = albums.find((a) => String(a.id) === String(albumId));
+                        if (albumInfo && albumTracks.length) {
+                            this._showDownloadedAlbumDetail(albumInfo, albumTracks);
+                        }
+                    });
+                });
+        } else {
+                albumsGrid.innerHTML = createPlaceholder('No albums found.');
+            }
+        }
+
+        // Wire tab switching
+        detailEl.querySelectorAll('.search-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                detailEl.querySelectorAll('.search-tab').forEach((t) => t.classList.remove('active'));
+                detailEl.querySelectorAll('.search-tab-content').forEach((c) => c.classList.remove('active'));
+                tab.classList.add('active');
+                const contentId = `dl-artist-tab-${tab.dataset.tab}`;
+                const contentEl = detailEl.querySelector(`#${contentId}`);
+                if (contentEl) contentEl.classList.add('active');
+            });
+        });
 
         // Back button
         detailEl.querySelector('#dl-artist-detail-back')?.addEventListener('click', () => {
@@ -2126,8 +2631,8 @@ export class UIRenderer {
             this.player.playTrackFromQueue();
         });
 
-        // Track clicks
-        detailEl.querySelectorAll('.dl-detail-track-item[data-dl-detail-idx]').forEach((item) => {
+        // Track clicks (only in tracks tab)
+        detailEl.querySelectorAll('#dl-artist-tab-tracks .dl-detail-track-item[data-dl-detail-idx]').forEach((item) => {
             item.addEventListener('click', () => {
                 const idx = parseInt(item.dataset.dlDetailIdx, 10);
                 this.player.setQueue(playerTracks, idx);
@@ -2162,7 +2667,7 @@ export class UIRenderer {
             const coverUrl = p.cover ? this.api.getCoverUrl(p.cover) : 'assets/logo.svg';
             return `
                 <div class="dl-album-card" data-playlist-id="${p.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(p.name)}</div>
                         <div class="dl-album-card-subtitle">${p.count} track${p.count !== 1 ? 's' : ''}</div>
@@ -2190,7 +2695,7 @@ export class UIRenderer {
             detailEl = document.createElement('div');
             detailEl.id = 'dl-playlist-detail-overlay';
             detailEl.className = 'dl-detail-overlay';
-            detailEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            detailEl.style.cssText = 'background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
             dlView.style.position = 'relative';
             dlView.appendChild(detailEl);
         }
@@ -2205,7 +2710,7 @@ export class UIRenderer {
                 <span class="dl-detail-nav-title">Downloads</span>
             </div>
             <div class="dl-detail-hero">
-                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/logo.svg'">
+                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/everywhere.png'">
                 <div class="dl-detail-hero-title">${escapeHtml(playlistInfo?.name || 'Unknown Playlist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -2219,10 +2724,11 @@ export class UIRenderer {
                 ${tracks.map((t, i) => {
                     const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
                     const dur = t.duration ? formatTime(t.duration) : '';
+                    const trackNum = t.trackNumber !== null && t.trackNumber !== undefined ? t.trackNumber : '';
                     return `
                     <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
-                        <span class="dl-track-number">${i + 1}</span>
-                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/logo.svg'">
+                        <span class="dl-track-number">${trackNum}</span>
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                         <div class="dl-detail-track-info">
                             <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
                             <div class="dl-detail-track-meta">
@@ -2386,6 +2892,7 @@ export class UIRenderer {
         this.renderHomeAlbums();
         this.renderHomeArtists();
             this.renderHomeRecent();
+        this.renderHomeTrending();
     }
 
     async getSeeds() {
@@ -2424,13 +2931,47 @@ export class UIRenderer {
 
             try {
                 const seeds = await this.getSeeds();
+                
+                // If no seeds (new user), show Billboard Hot 100 top songs
+                if (seeds.length === 0) {
+                    try {
+                        // Get Billboard Hot 100 - using popular tracks
+                        // Try to get popular tracks by searching for common terms or using charts
+                        let billboardTracks = { items: [] };
+                        try {
+                            // Try multiple popular search terms to get diverse results
+                            const popularSearches = ['pop', 'hip hop', 'rock', 'r&b', 'country'];
+                            const searchPromises = popularSearches.map(term => this.api.searchTracks(term, { limit: 20 }));
+                            const results = await Promise.all(searchPromises);
+                            const allTracks = results.flatMap(r => r.items || []);
+                            // Deduplicate and take top 10 by popularity
+                            const uniqueTracks = Array.from(new Map(allTracks.map(t => [t.id, t])).values());
+                            billboardTracks.items = uniqueTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 10);
+                        } catch (e) {
+                            console.warn('Failed to get Billboard tracks, using fallback:', e);
+                        }
+                        const topSongs = billboardTracks.items.slice(0, 10);
+                        if (topSongs.length > 0) {
+                            this.renderListWithTracks(songsContainer, topSongs, true);
+                        } else {
+                            songsContainer.innerHTML = createPlaceholder('No songs found.');
+                        }
+                    } catch (e) {
+                        console.error('Failed to load Billboard songs:', e);
+                        songsContainer.innerHTML = createPlaceholder('Failed to load songs.');
+                    }
+                    return;
+                }
+
                 const trackSeeds = seeds.slice(0, 5);
                 const recommendedTracks = await this.api.getRecommendedTracksForPlaylist(trackSeeds, 20);
 
                 const filteredTracks = await this.filterUserContent(recommendedTracks, 'track');
 
                 if (filteredTracks.length > 0) {
-                    this.renderListWithTracks(songsContainer, filteredTracks, true);
+                    // Limit to 10 items
+                    const limitedTracks = filteredTracks.slice(0, 10);
+                    this.renderListWithTracks(songsContainer, limitedTracks, true);
                     } else {
                     songsContainer.innerHTML = createPlaceholder('No song recommendations found.');
                 }
@@ -2458,7 +2999,48 @@ export class UIRenderer {
 
             try {
                 const seeds = await this.getSeeds();
+                
+                // If no seeds (new user), show Billboard 200 top albums
+                if (seeds.length === 0) {
+                    try {
+                        // Get Billboard 200 - using popular albums
+                        let billboardAlbums = { items: [] };
+                        try {
+                            // Try to get popular albums by searching for common terms
+                            const popularSearches = ['pop', 'hip hop', 'rock', 'r&b', 'country'];
+                            const searchPromises = popularSearches.map(term => this.api.searchAlbums(term, { limit: 20 }));
+                            const results = await Promise.all(searchPromises);
+                            const allAlbums = results.flatMap(r => r.items || []);
+                            // Deduplicate and take top 8 by popularity
+                            const uniqueAlbums = Array.from(new Map(allAlbums.map(a => [a.id, a])).values());
+                            billboardAlbums.items = uniqueAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 8);
+                        } catch (e) {
+                            console.warn('Failed to get Billboard albums, using fallback:', e);
+                        }
+                        const topAlbums = billboardAlbums.items.slice(0, 8);
+                        if (topAlbums.length > 0) {
+                            albumsContainer.innerHTML = topAlbums
+                                .map((a) => this.createAlbumCardHTML(a))
+                                .join('');
+                            topAlbums.forEach((a) => {
+                                const el = albumsContainer.querySelector(`[data-album-id="${a.id}"]`);
+                                if (el) {
+                                    trackDataStore.set(el, a);
+                                    this.updateLikeState(el, 'album', a.id);
+                                }
+                            });
+                        } else {
+                            albumsContainer.innerHTML = `<div style="grid-column: 1/-1; padding: 2rem 0;">${createPlaceholder('No albums found.')}</div>`;
+                        }
+                    } catch (e) {
+                        console.error('Failed to load Billboard albums:', e);
+                        albumsContainer.innerHTML = createPlaceholder('Failed to load albums.');
+                    }
+                    return;
+                }
+
                 const albumSeed = seeds.find((t) => t.album && t.album.id);
+                let rendered = false;
                 if (albumSeed) {
                     const similarAlbums = await this.api.getSimilarAlbums(albumSeed.album.id);
                     const filteredAlbums = await this.filterUserContent(similarAlbums, 'album');
@@ -2475,11 +3057,32 @@ export class UIRenderer {
                                 this.updateLikeState(el, 'album', a.id);
                             }
                         });
-                    } else {
-                        albumsContainer.innerHTML = `<div style="grid-column: 1/-1; padding: 2rem 0;">${createPlaceholder('Tell us more about what you like so we can recommend albums!')}</div>`;
+                        rendered = true;
                     }
-                } else {
-                    albumsContainer.innerHTML = `<div style="grid-column: 1/-1; padding: 2rem 0;">${createPlaceholder('Tell us more about what you like so we can recommend albums!')}</div>`;
+                }
+
+                // Fallback: show popular albums when recommendations are empty
+                if (!rendered) {
+                    try {
+                        const popularSearches = ['pop', 'hip hop', 'rock', 'r&b', 'country'];
+                        const searchPromises = popularSearches.map(term => this.api.searchAlbums(term, { limit: 20 }));
+                        const results = await Promise.all(searchPromises);
+                        const allAlbums = results.flatMap(r => r.items || []);
+                        const uniqueAlbums = Array.from(new Map(allAlbums.map(a => [a.id, a])).values());
+                        const topAlbums = uniqueAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 8);
+                        if (topAlbums.length > 0) {
+                            albumsContainer.innerHTML = topAlbums.map((a) => this.createAlbumCardHTML(a)).join('');
+                            topAlbums.forEach((a) => {
+                                const el = albumsContainer.querySelector(`[data-album-id="${a.id}"]`);
+                                if (el) {
+                                    trackDataStore.set(el, a);
+                                    this.updateLikeState(el, 'album', a.id);
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('Fallback popular albums also failed:', e);
+                    }
                 }
             } catch (e) {
                 console.error(e);
@@ -2541,26 +3144,35 @@ export class UIRenderer {
 
     renderHomeRecent() {
         const recentContainer = document.getElementById('home-recent-mixed');
-        const section = recentContainer?.closest('.content-section');
+        const section = recentContainer?.closest('.home-section') || recentContainer?.closest('.content-section');
 
         if (!homePageSettings.shouldShowJumpBackIn()) {
             if (section) section.style.display = 'none';
             return;
         }
 
-        if (section) section.style.display = '';
-
         if (recentContainer) {
             const recents = recentActivityManager.getRecents();
             const items = [];
 
             if (recents.albums) items.push(...recents.albums.slice(0, 4).map((i) => ({ ...i, _kind: 'album' })));
-            if (recents.playlists)
-                items.push(...recents.playlists.slice(0, 4).map((i) => ({ ...i, _kind: 'playlist' })));
+            if (recents.playlists) {
+                // Filter out playlists with 0 tracks
+                const validPlaylists = recents.playlists.filter(p => p.numberOfTracks > 0 || (p.tracks && p.tracks.length > 0));
+                items.push(...validPlaylists.slice(0, 4).map((i) => ({ ...i, _kind: 'playlist' })));
+            }
             if (recents.mixes) items.push(...recents.mixes.slice(0, 4).map((i) => ({ ...i, _kind: 'mix' })));
 
             items.sort(() => Math.random() - 0.5);
             const displayItems = items.slice(0, 6);
+
+            // Hide section if no items
+            if (displayItems.length === 0) {
+                if (section) section.style.display = 'none';
+                return;
+            }
+
+            if (section) section.style.display = '';
 
             if (displayItems.length > 0) {
                 recentContainer.innerHTML = displayItems
@@ -2596,6 +3208,105 @@ export class UIRenderer {
             } else {
                 recentContainer.innerHTML = createPlaceholder('No recent items yet...');
             }
+        }
+    }
+
+    async renderHomeTrending() {
+        // Render trending albums and tracks from Tunes app data
+        const trendingAlbumsSection = document.getElementById('home-trending-albums-section');
+        const trendingAlbumsContainer = document.getElementById('home-trending-albums');
+        const trendingTracksSection = document.getElementById('home-trending-tracks-section');
+        const trendingTracksContainer = document.getElementById('home-trending-tracks');
+
+        if (!trendingAlbumsSection || !trendingTracksSection) return;
+
+        try {
+            // Get trending data from syncManager (based on listening_events)
+            const trending = await syncManager.getGlobalTrending(15);
+
+            // Only show if we have meaningful data (at least 3 items with count > 1)
+            const validTrendingAlbums = trending.albums.filter(a => a.count > 1).slice(0, 12);
+            const validTrendingTracks = trending.tracks.filter(t => t.count > 1).slice(0, 10);
+
+            if (validTrendingAlbums.length >= 3 && trendingAlbumsContainer) {
+                trendingAlbumsSection.style.display = '';
+                // Fetch full album data for each trending album
+                const albumPromises = validTrendingAlbums.map(async (trend) => {
+                    try {
+                        const albumData = await this.api.getAlbum(trend.id);
+                        return albumData?.album || null;
+                    } catch {
+                        return null;
+                    }
+                });
+                const albums = (await Promise.all(albumPromises)).filter(Boolean);
+                
+                if (albums.length > 0) {
+                    trendingAlbumsContainer.innerHTML = albums
+                        .map((a) => this.createAlbumCardHTML(a))
+                        .join('');
+                    albums.forEach((a) => {
+                        const el = trendingAlbumsContainer.querySelector(`[data-album-id="${a.id}"]`);
+                        if (el) {
+                            trackDataStore.set(el, a);
+                            this.updateLikeState(el, 'album', a.id);
+                        }
+                    });
+                } else {
+                    trendingAlbumsSection.style.display = 'none';
+                }
+            } else {
+                trendingAlbumsSection.style.display = 'none';
+            }
+
+            if (validTrendingTracks.length >= 3 && trendingTracksContainer) {
+                trendingTracksSection.style.display = '';
+                // Fetch full track METADATA for each trending track
+                // Use getTrackMetadata (not getTrack) because getTrack returns streaming info, not album/artist metadata
+                const trackPromises = validTrendingTracks.map(async (trend) => {
+                    try {
+                        const track = await this.api.getTrackMetadata(trend.id);
+                        if (track && track.title) return track;
+
+                        // Fallback: create minimal track object from trending data
+                        if (trend.id && trend.title) {
+                            return {
+                                id: trend.id,
+                                title: trend.title,
+                                artist: { name: trend.artist || 'Unknown Artist' },
+                                album: null,
+                                duration: 0
+                            };
+                        }
+                        return null;
+                    } catch {
+                        // Fallback: create minimal track object from trending data
+                        if (trend.id && trend.title) {
+                            return {
+                                id: trend.id,
+                                title: trend.title,
+                                artist: { name: trend.artist || 'Unknown Artist' },
+                                album: null,
+                                duration: 0
+                            };
+                        }
+                        return null;
+                    }
+                });
+                const tracks = (await Promise.all(trackPromises)).filter(Boolean);
+
+                if (tracks.length > 0) {
+                    this.renderListWithTracks(trendingTracksContainer, tracks, true);
+                } else {
+                    trendingTracksSection.style.display = 'none';
+                }
+            } else {
+                trendingTracksSection.style.display = 'none';
+            }
+        } catch (e) {
+            console.error('Failed to load trending data:', e);
+            if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
+            if (trendingTracksSection) trendingTracksSection.style.display = 'none';
         }
     }
 
@@ -2698,29 +3409,65 @@ export class UIRenderer {
             //  query → sort by raw popularity. That's it.
             // ══════════════════════════════════════════════════════
 
-            // 1) Fire AI + original query searches in parallel
-            //    AI runs WITHOUT abort signal so it survives fast typing
-            const aiSearchPromise = fetch('/api/ai-search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
-            }).then(r => r.ok ? r.json() : null).catch(() => null);
-
-            const [tracksResult, artistsResult, albumsResult, playlistsResult, aiResult] = await Promise.all([
+            // 1) Fire original query searches first to get candidates
+            const [tracksResult, artistsResult, albumsResult, playlistsResult] = await Promise.all([
                 this.api.searchTracks(query, { signal }),
                 this.api.searchArtists(query, { signal }),
                 this.api.searchAlbums(query, { signal }),
                 this.api.searchPlaylists(query, { signal }),
-                aiSearchPromise,
             ]);
+
+            // 2) Build candidates list with popularity for AI
+            const candidates = [];
+            // Top 5 tracks with popularity
+            tracksResult.items.slice(0, 5).forEach(t => {
+                candidates.push({
+                    name: t.title,
+                    artist: t.artist?.name || (t.artists?.[0]?.name),
+                    type: 'track',
+                    popularity: t.popularity || 0
+                });
+            });
+            // Top 3 albums with popularity
+            albumsResult.items.slice(0, 3).forEach(a => {
+                candidates.push({
+                    name: a.title,
+                    artist: a.artist?.name,
+                    type: 'album',
+                    popularity: a.popularity || 0
+                });
+            });
+            // Top 3 artists with popularity
+            artistsResult.items.slice(0, 3).forEach(a => {
+                candidates.push({
+                    name: a.name,
+                    artist: null,
+                    type: 'artist',
+                    popularity: a.popularity || 0
+                });
+            });
+            // Top 2 playlists
+            playlistsResult.items.slice(0, 2).forEach(p => {
+                candidates.push({
+                    name: p.title,
+                    artist: null,
+                    type: 'playlist',
+                    popularity: p.numberOfTracks || 0
+                });
+            });
+
+            // 3) Fire AI with candidates (AI runs WITHOUT abort signal so it survives fast typing)
+            const aiSearchPromise = fetch('/api/ai-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, candidates }),
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+            const aiResult = await aiSearchPromise;
 
             const aiIntent = aiResult?.intent || null;
 
-            // #region agent log — AI intent
-            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:search:step1',message:'AI intent + original results',data:{query,aiIntent,tracks:tracksResult.items.length,artists:artistsResult.items.length,albums:albumsResult.items.length},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-AI'})}).catch(()=>{});
-            // #endregion
-
-            // 2) Collect original results into maps for dedup
+            // 4) Collect original results into maps for dedup
             const trackMap = new Map();
             const artistMap = new Map();
             const albumMap = new Map();
@@ -2736,7 +3483,7 @@ export class UIRenderer {
                 if (t.album && !albumMap.has(t.album.id)) albumMap.set(t.album.id, t.album);
             }
 
-            // 3) If AI identified a DIFFERENT query, do a SECONDARY search
+            // 5) If AI identified a DIFFERENT query, do a SECONDARY search
             //    e.g. user typed "justn" → AI says "Justin Bieber" → search "Justin Bieber"
             //    e.g. user typed "graduation" → AI says artist:"Kanye West" title:"Graduation" → search "Kanye West Graduation"
             let aiQuery = '';
@@ -2769,19 +3516,41 @@ export class UIRenderer {
             let finalAlbums = Array.from(albumMap.values());
             let finalPlaylists = playlistsResult.items;
 
-            // #region agent log — after merge
-            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:search:step2',message:'After AI re-search merge',data:{query,aiQuery,aiIntent,tracks:finalTracks.length,artists:finalArtists.length,albums:finalAlbums.length,topAlbums:finalAlbums.slice(0,8).map(a=>({t:a.title,ar:a.artist?.name,p:a.popularity})),topArtists:finalArtists.slice(0,5).map(a=>({n:a.name,p:a.popularity}))},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-MERGE'})}).catch(()=>{});
-            // #endregion
-
-            // 4) Sort EVERYTHING by raw popularity. Nothing else.
+            // 6) Sort EVERYTHING by raw popularity. Nothing else.
             finalTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
             finalArtists.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
             finalAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
             finalPlaylists.sort((a, b) => (b.numberOfTracks || 0) - (a.numberOfTracks || 0));
 
-            // #region agent log — after sort
-            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:search:step3',message:'After popularity sort',data:{query,aiIntent,topTracks:finalTracks.slice(0,3).map(t=>({t:t.title,ar:t.artist?.name,p:t.popularity})),topAlbums:finalAlbums.slice(0,5).map(a=>({t:a.title,ar:a.artist?.name,p:a.popularity})),topArtists:finalArtists.slice(0,3).map(a=>({n:a.name,p:a.popularity}))},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-SORT'})}).catch(()=>{});
-            // #endregion
+            // 7) If AI identified a specific match, boost it to the top
+            if (aiIntent && aiIntent.confidence >= 70 && aiIntent.type === 'track' && aiIntent.artist && aiIntent.title) {
+                const aiMatch = finalTracks.find(t => 
+                    t.artist?.name?.toLowerCase().includes(aiIntent.artist.toLowerCase()) &&
+                    t.title?.toLowerCase().includes(aiIntent.title.toLowerCase())
+                );
+                if (aiMatch) {
+                    // Remove from current position and add to top
+                    finalTracks = finalTracks.filter(t => t.id !== aiMatch.id);
+                    finalTracks.unshift(aiMatch);
+                }
+            } else if (aiIntent && aiIntent.confidence >= 70 && aiIntent.type === 'album' && aiIntent.artist && aiIntent.title) {
+                const aiMatch = finalAlbums.find(a => 
+                    a.artist?.name?.toLowerCase().includes(aiIntent.artist.toLowerCase()) &&
+                    a.title?.toLowerCase().includes(aiIntent.title.toLowerCase())
+                );
+                if (aiMatch) {
+                    finalAlbums = finalAlbums.filter(a => a.id !== aiMatch.id);
+                    finalAlbums.unshift(aiMatch);
+                }
+            } else if (aiIntent && aiIntent.confidence >= 70 && aiIntent.type === 'artist' && aiIntent.artist) {
+                const aiMatch = finalArtists.find(a => 
+                    a.name?.toLowerCase().includes(aiIntent.artist.toLowerCase())
+                );
+                if (aiMatch) {
+                    finalArtists = finalArtists.filter(a => a.id !== aiMatch.id);
+                    finalArtists.unshift(aiMatch);
+                }
+            }
 
             // 5) Render each tab
             if (finalTracks.length) {
@@ -2807,7 +3576,7 @@ export class UIRenderer {
             });
 
             playlistsContainer.innerHTML = finalPlaylists.length
-                ? finalPlaylists.map((playlist) => this.createPlaylistCardHTML(playlist)).join('')
+                ? finalPlaylists.map((playlist) => this.createPlaylistCardHTML(playlist, true)).join('')
                 : createPlaceholder('No playlists found.');
             finalPlaylists.forEach((playlist) => {
                 const el = playlistsContainer.querySelector(`[data-playlist-id="${playlist.uuid}"]`);
@@ -2835,17 +3604,8 @@ export class UIRenderer {
     //  ALL TAB: Top Result hero card + mixed interleaved feed
     // ═══════════════════════════════════════════════════════════════
     _populateAllTab(query, _score, tracks, albums, artists, playlists, aiIntent) {
-        // #region agent log — entry
-        fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab:ENTRY',message:'_populateAllTab called',data:{query,version:'clean-v2',aiIntent,trackCount:tracks.length,albumCount:albums.length,artistCount:artists.length,topAlbums:albums.slice(0,3).map(a=>({t:a.title,ar:a.artist?.name,p:a.popularity})),topArtists:artists.slice(0,3).map(a=>({n:a.name,p:a.popularity}))},timestamp:Date.now(),runId:'clean2',hypothesisId:'H-CACHE,H-AI-NULL'})}).catch(()=>{});
-        // #endregion
-
         const allContainer = document.getElementById('search-all-container');
-        if (!allContainer) {
-            // #region agent log — no container
-            fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab:NO_CONTAINER',message:'allContainer is null!',data:{query},timestamp:Date.now(),runId:'clean2',hypothesisId:'H-RENDER'})}).catch(()=>{});
-            // #endregion
-            return;
-        }
+        if (!allContainer) return;
 
         // ── Determine top result ──
         // If AI has an intent, try to find the EXACT item AI identified and pin it
@@ -2889,10 +3649,6 @@ export class UIRenderer {
             topCandidates.sort((a, b) => b.score - a.score);
             topResult = topCandidates[0] || null;
         }
-
-        // #region agent log — All tab top result
-        fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab',message:'All-tab top result',data:{query,aiIntent,topResultName:topResult?.item?.title||topResult?.item?.name,topResultType:topResult?.type,topResultScore:topResult?.score,usedAI:!!(aiIntent&&aiIntent.confidence>=50)},timestamp:Date.now(),runId:'clean1',hypothesisId:'H-TOP'})}).catch(()=>{});
-        // #endregion
 
         let html = '';
 
@@ -3013,10 +3769,6 @@ export class UIRenderer {
         }
 
         allContainer.innerHTML = html || createPlaceholder('No results found.');
-
-        // #region agent log — after render
-        fetch('http://127.0.0.1:7244/ingest/d8c176e4-3799-411c-834a-ebe12f4c6da6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ui.js:_populateAllTab:RENDERED',message:'All tab HTML set',data:{query,htmlLength:html.length,mixedCount:mixedItems.length,topResultName:topResult?.item?.title||topResult?.item?.name,allContainerChildCount:allContainer.childElementCount,allContainerVisible:allContainer.offsetParent!==null,mixedItems:mixedItems.slice(0,6).map(m=>({type:m.type,title:m.title,score:m.score}))},timestamp:Date.now(),runId:'clean2',hypothesisId:'H-RENDER,H-CRASH'})}).catch(()=>{});
-        // #endregion
 
         // ── Wire up click events ──
         const topResultEl = allContainer.querySelector('.search-top-result');
@@ -3415,7 +4167,7 @@ export class UIRenderer {
                 // ... (rest of the logic)
 
                 // Render user or public Pocketbase playlist
-                imageEl.src = playlistData.cover || '/assets/appicon.png';
+                imageEl.src = playlistData.cover || '/assets/everywhere.png';
                 imageEl.style.backgroundColor = '';
 
                 titleEl.textContent = playlistData.name || playlistData.title;
@@ -3551,7 +4303,7 @@ export class UIRenderer {
 
                     this.extractAndApplyColor(this.api.getCoverUrl(imageId, '160'));
                 } else {
-                    imageEl.src = '/assets/appicon.png';
+                    imageEl.src = '/assets/everywhere.png';
                     this.setPageBackground(null);
                     this.resetVibrantColor();
                 }
@@ -3723,7 +4475,7 @@ export class UIRenderer {
                     this.setPageBackground(imageEl.src);
                     this.extractAndApplyColor(this.api.getCoverUrl(tracks[0].album.cover, '160'));
                 } else {
-                    imageEl.src = '/assets/appicon.png';
+                    imageEl.src = '/assets/everywhere.png';
                     this.setPageBackground(null);
                     this.resetVibrantColor();
                 }
@@ -3894,7 +4646,7 @@ export class UIRenderer {
                 const sorted = _sortAlbums(currentAlbums, currentSort);
                 albumsContainer.innerHTML = sorted.length
                     ? sorted.map((album) => this.createAlbumCardHTML(album)).join('')
-                    : createPlaceholder('No albums found.');
+                : createPlaceholder('No albums found.');
                 sorted.forEach((album) => {
                     const el = albumsContainer.querySelector(`[data-album-id="${album.id}"]`);
                     if (el) {
@@ -4185,6 +4937,7 @@ export class UIRenderer {
             'edit-playlist-btn',
             'delete-playlist-btn',
             'share-playlist-btn',
+            'share-playlist-btn-header',
             'sort-playlist-btn',
         ].forEach((id) => {
             const btn = actionsDiv.querySelector(`#${id}`);
@@ -4223,6 +4976,27 @@ export class UIRenderer {
             const moreWrapper = actionsDiv.querySelector('.detail-more-wrapper');
             if (moreWrapper) actionsDiv.insertBefore(shuffleBtn, moreWrapper);
             else actionsDiv.appendChild(shuffleBtn);
+        }
+
+        // Share button - visible in header for public playlists AND owned playlists
+        if (playlist.isPublic === true || isOwned) {
+            const shareBtn = document.createElement('button');
+            shareBtn.id = 'share-playlist-btn-header';
+            shareBtn.className = 'btn-secondary';
+            shareBtn.innerHTML =
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+            shareBtn.title = 'Share Playlist';
+            shareBtn.dataset.playlistId = playlist.id || playlist.uuid;
+            shareBtn.dataset.playlistName = playlist.name || playlist.title || 'Playlist';
+            
+            // Insert share button before Like
+            if (likeBtn) {
+                actionsDiv.insertBefore(shareBtn, likeBtn);
+            } else {
+                const moreWrapper = actionsDiv.querySelector('.detail-more-wrapper');
+                if (moreWrapper) actionsDiv.insertBefore(shareBtn, moreWrapper);
+                else actionsDiv.appendChild(shareBtn);
+            }
         }
 
         // Sort button → goes into dropdown
@@ -4293,19 +5067,7 @@ export class UIRenderer {
             dropdown.appendChild(deleteBtn);
         }
 
-        // Share (User Playlists Only) → goes into dropdown
-        if (showShare || (isOwned && playlist.isPublic)) {
-            const shareBtn = document.createElement('button');
-            shareBtn.id = 'share-playlist-btn';
-            shareBtn.innerHTML =
-                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg><span>Share</span>';
-
-            shareBtn.onclick = () => {
-                const url = `${window.location.origin}/userplaylist/${playlist.id || playlist.uuid}`;
-                navigator.clipboard.writeText(url).then(() => alert('Link copied to clipboard!'));
-            };
-            dropdown.appendChild(shareBtn);
-        }
+        // Share button removed from dropdown - now visible in header for public playlists
     }
 
     enableTrackReordering(container, tracks, playlistId, syncManager) {

@@ -1548,9 +1548,10 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
         contextMenu._contextType = null;
     });
 
-    // Now playing bar interactions
-    document.querySelector('.now-playing-bar .title').addEventListener('click', () => {
-        // Trigger click on cover to open fullscreen now-playing
+    // Now playing bar interactions – clicking anywhere on the bar (except buttons/sliders/artist-links) opens fullscreen
+    document.querySelector('.now-playing-bar').addEventListener('click', (e) => {
+        // Skip if click is on interactive elements
+        if (e.target.closest('button, input, .progress-bar, .volume-bar, .artist-link, .player-controls .buttons')) return;
         document.querySelector('.now-playing-bar .cover')?.click();
     });
 

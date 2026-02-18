@@ -368,12 +368,16 @@ export class MusicDatabase {
         }
 
         if (type === 'playlist') {
+            // Prefer squareImage for cover (image is often just the playlist UUID on TIDAL)
+            const imageVal = item.squareImage || item.cover || null;
+            // Only use item.image if it's different from the playlist uuid (not a placeholder)
+            const fallbackImage = (item.image && item.image !== item.uuid && item.image !== item.id) ? item.image : null;
             return {
                 uuid: item.uuid || item.id,
                 addedAt: item.addedAt || item.createdAt || null,
                 title: item.title || item.name || null,
-                // UI checks squareImage || image || uuid
-                image: item.image || item.squareImage || item.cover || null,
+                squareImage: item.squareImage || null,
+                image: imageVal || fallbackImage,
                 numberOfTracks: item.numberOfTracks || (item.tracks ? item.tracks.length : 0),
                 user: item.user ? { name: item.user.name || null } : null,
             };

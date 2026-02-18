@@ -50,6 +50,9 @@ export function catalogDownloadedTrack(track) {
         albumId:   track.album?.id || null,
         cover:     track.album?.cover || null,
         duration:  track.duration || 0,
+        trackNumber: track.trackNumber || null,
+        discNumber: track.discNumber || null,
+        artistPicture: track.artist?.picture || (track.artists?.[0]?.picture) || null,
         downloadedAt: Date.now(),
     });
     _saveCatalog(catalog);

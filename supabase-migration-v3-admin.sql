@@ -132,3 +132,4 @@ RETURNS TABLE (
     ORDER BY a.created_at DESC;
 $$ LANGUAGE sql SECURITY DEFINER;
 
+
