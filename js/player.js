@@ -30,6 +30,8 @@ export class Player {
         this.currentRgValues = null;
         this.userVolume = parseFloat(localStorage.getItem('volume') || '0.7');
         this.isFallbackRetry = false;
+        this._playRetryCount = 0;     // retry counter for slow-network resilience
+        this._maxPlayRetries = 3;     // max retries before giving up on a track
 
         // Sleep timer properties
         this.sleepTimer = null;
@@ -150,8 +152,9 @@ export class Player {
                 }
                 if (artistEl) artistEl.innerHTML = trackArtistsHTML + yearDisplay;
 
-                // Fetch album release date in background if missing
-                if (!yearDisplay && track.album?.id) {
+                // Always fetch album release date in background to ensure we have the correct year
+                // (even if yearDisplay exists, it might be from streamStartDate which is wrong)
+                if (track.album?.id) {
                     this.loadAlbumYear(track, trackArtistsHTML, artistEl);
                 }
 
@@ -338,8 +341,9 @@ export class Player {
         const artistEl = document.querySelector('.now-playing-bar .artist');
         artistEl.innerHTML = trackArtistsHTML + yearDisplay;
 
-        // Fetch album release date in background if missing
-        if (!yearDisplay && track.album?.id) {
+        // Always fetch album release date in background to ensure we have the correct year
+        // (even if yearDisplay exists, it might be from streamStartDate which is wrong)
+        if (track.album?.id) {
             this.loadAlbumYear(track, trackArtistsHTML, artistEl);
         }
 
@@ -453,12 +457,12 @@ export class Player {
                     this.audio.addEventListener('canplay', onCanPlay);
                     this.audio.addEventListener('error', onError);
 
-                    // Timeout after 10 seconds
+                    // Longer timeout for slow connections (45s)
                     setTimeout(() => {
                         this.audio.removeEventListener('canplay', onCanPlay);
                         this.audio.removeEventListener('error', onError);
                         reject(new Error('Timeout waiting for audio to load'));
-                    }, 10000);
+                    }, 45000);
                 });
 
                 if (startTime > 0) {
@@ -562,12 +566,12 @@ export class Player {
                         this.audio.addEventListener('canplay', onCanPlay);
                         this.audio.addEventListener('error', onError);
 
-                        // Timeout after 10 seconds
+                        // Longer timeout for slow connections (45s)
                         setTimeout(() => {
                             this.audio.removeEventListener('canplay', onCanPlay);
                             this.audio.removeEventListener('error', onError);
                             reject(new Error('Timeout waiting for audio to load'));
-                        }, 10000);
+                        }, 45000);
                     });
 
                     if (startTime > 0) {
@@ -577,12 +581,24 @@ export class Player {
                 }
             }
 
+            this._playRetryCount = 0; // success – reset retry counter
             this.preloadNextTracks();
         } catch (error) {
             console.error(`Could not play track: ${trackTitle}`, error);
-            // Skip to next track on unexpected error
-            if (recursiveCount < currentQueue.length) {
-                setTimeout(() => this.playNext(recursiveCount + 1), 1000);
+
+            // Retry the SAME track up to _maxPlayRetries times before skipping
+            if (this._playRetryCount < this._maxPlayRetries) {
+                this._playRetryCount++;
+                const delay = this._playRetryCount * 2000; // 2s, 4s, 6s backoff
+                console.warn(`Retrying track "${trackTitle}" (attempt ${this._playRetryCount}/${this._maxPlayRetries}) in ${delay / 1000}s...`);
+                setTimeout(() => this.playTrackFromQueue(startTime, recursiveCount), delay);
+            } else {
+                // All retries exhausted – skip to next
+                console.warn(`Giving up on "${trackTitle}" after ${this._maxPlayRetries} retries. Skipping.`);
+                this._playRetryCount = 0;
+                if (recursiveCount < currentQueue.length) {
+                    setTimeout(() => this.playNext(recursiveCount + 1), 1000);
+                }
             }
         }
     }
@@ -854,15 +870,16 @@ export class Player {
     }
 
     loadAlbumYear(track, trackArtistsHTML, artistEl) {
-        if (!trackDateSettings.useAlbumYear()) return;
-
+        // Always fetch album year to ensure accuracy (don't check useAlbumYear setting)
         this.api
             .getAlbum(track.album.id)
             .then(({ album }) => {
-                if (album?.releaseDate && this.currentTrack?.id === track.id) {
+                if (album?.releaseDate && this.currentTrack?.id === track.id && artistEl) {
                     track.album.releaseDate = album.releaseDate;
-                    const year = new Date(album.releaseDate).getFullYear();
-                    if (!isNaN(year) && artistEl) {
+                    const date = new Date(album.releaseDate);
+                    const year = date.getFullYear();
+                    // Validate the year is reasonable before displaying
+                    if (!isNaN(date.getTime()) && year >= 1900 && year <= new Date().getFullYear() + 1) {
                         artistEl.innerHTML = `${trackArtistsHTML} • ${year}`;
                     }
                 }

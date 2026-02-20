@@ -35,7 +35,6 @@ import { getVibrantColorFromImage } from './vibrant-color.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { Visualizer } from './visualizer.js';
 import { navigate } from './router.js';
-import { aiDjManager, DJPersona } from './aiDj.js';
 import {
     renderUnreleasedPage as renderUnreleasedTrackerPage,
     renderTrackerArtistPage as renderTrackerArtistContent,
@@ -1215,10 +1214,7 @@ export class UIRenderer {
         // Hide mobile tab bar on admin page (slide-down)
         document.body.classList.toggle('hide-tab-bar', pageId === 'admin');
 
-        // Hide header for AI DJ page (fullscreen experience)
-        if (mainHeader) {
-            mainHeader.style.display = pageId === 'ai-dj' ? 'none' : '';
-        }
+        // (no special page overrides needed)
 
         // Clear background and color if not on album, artist, playlist, or mix page
         if (!['album', 'artist', 'playlist', 'mix'].includes(pageId)) {
@@ -1393,7 +1389,10 @@ export class UIRenderer {
             downloadedCatalog,
             history: history.filter((track, index, arr) => index === 0 || track.id !== arr[index - 1].id), // Deduplicate
         };
-        this._wireLibrarySort(itemsContainer, this._librarySearchData);
+        // Wire library toolbar buttons - ensure DOM is ready
+        requestAnimationFrame(() => {
+            this._wireLibrarySort(itemsContainer, this._librarySearchData);
+        });
     }
 
     async renderLocalFiles(container) {
@@ -1783,14 +1782,18 @@ export class UIRenderer {
         };
 
         if (searchToggleBtn && searchBar && searchInput) {
-            searchToggleBtn.addEventListener('click', (e) => {
+            // Remove existing listener if any (by cloning the element)
+            const newSearchToggleBtn = searchToggleBtn.cloneNode(true);
+            searchToggleBtn.parentNode?.replaceChild(newSearchToggleBtn, searchToggleBtn);
+            
+            newSearchToggleBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isOpen = searchBar.style.display !== 'none' && searchBar.style.display !== '';
                 searchBar.style.display = isOpen ? 'none' : 'flex';
                 if (!isOpen) {
                     searchInput.value = '';
                     setTimeout(() => searchInput.focus(), 50);
-        } else {
+                } else {
                     searchInput.value = '';
                     resetSearch();
                 }
@@ -2055,17 +2058,31 @@ export class UIRenderer {
         const createToggle = document.getElementById('library-create-toggle');
         const createDropdown = document.getElementById('library-create-dropdown');
         if (createToggle && createDropdown) {
-            createToggle.addEventListener('click', (e) => {
+            // Remove existing listener if any (by cloning the element)
+            const newCreateToggle = createToggle.cloneNode(true);
+            createToggle.parentNode?.replaceChild(newCreateToggle, createToggle);
+            
+            // Remove old outside click listener by using a named function we can track
+            if (!window._libraryCreateOutsideClickHandler) {
+                window._libraryCreateOutsideClickHandler = (e) => {
+                    const currentToggle = document.getElementById('library-create-toggle');
+                    const currentDropdown = document.getElementById('library-create-dropdown');
+                    if (currentToggle && currentDropdown && 
+                        !currentToggle.contains(e.target) && !currentDropdown.contains(e.target)) {
+                        currentDropdown.style.display = 'none';
+                    }
+                };
+            }
+            // Remove old listener if it exists
+            document.removeEventListener('click', window._libraryCreateOutsideClickHandler);
+            
+            newCreateToggle.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isOpen = createDropdown.style.display !== 'none' && createDropdown.style.display !== '';
                 createDropdown.style.display = isOpen ? 'none' : 'block';
             });
             // Close on outside click
-            document.addEventListener('click', (e) => {
-                if (!createToggle.contains(e.target) && !createDropdown.contains(e.target)) {
-                    createDropdown.style.display = 'none';
-                }
-            });
+            document.addEventListener('click', window._libraryCreateOutsideClickHandler);
         }
         const createPlaylistBtn = document.getElementById('create-playlist-btn');
         if (createPlaylistBtn) {
@@ -3580,7 +3597,8 @@ export class UIRenderer {
                 }
             }
 
-            // 5) Render each tab
+            // 5) Render each tab - wait until ALL searches complete before showing results
+            // This prevents the "boom changes itself" issue where results update after initial render
             if (finalTracks.length) {
                 this.renderListWithTracks(tracksContainer, finalTracks, true);
             } else {
@@ -3611,12 +3629,15 @@ export class UIRenderer {
                 if (el) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
             });
 
-            // 6) "All" tab: simple popularity score, AI intent passed for top result pinning
+            // 6) "All" tab: populate AFTER individual tabs to ensure final results are used
             const _popScore = (item, type) => {
                 return (type === 'playlist') ? (item.numberOfTracks || 0) : (item.popularity || 0);
             };
 
-            this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, aiIntent);
+            // Use requestAnimationFrame to ensure DOM is ready before populating All tab
+            requestAnimationFrame(() => {
+                this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, aiIntent);
+            });
         } catch (error) {
             if (error.name === 'AbortError') return;
             console.error('Search failed:', error);
@@ -5742,6 +5763,10 @@ export class UIRenderer {
                     ...(opts.headers || {}),
                 },
             });
+            if (!res.ok) {
+                const error = await res.json().catch(() => ({ error: `HTTP ${res.status}: ${res.statusText}` }));
+                throw new Error(error.error || error.message || `Request failed with status ${res.status}`);
+            }
             return res.json();
         };
 
@@ -5969,9 +5994,9 @@ export class UIRenderer {
 
                     userDetailContent.innerHTML = `
                         <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;">
-                            <img src="${getAvatarUrl(d.avatar_seed)}" alt="" style="width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,0.06);" />
+                            <img src="${getAvatarUrl(d.avatar_seed || d.user_id)}" alt="" style="width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,0.06);" />
                             <div>
-                                <p style="margin:0;font-size:1rem;font-weight:600;">${escapeHtml(d.display_name || 'Unknown')}</p>
+                                <p style="margin:0;font-size:1rem;font-weight:600;">${escapeHtml(d.display_name || d.email || 'Unknown')}</p>
                                 <p style="margin:0;font-size:0.75rem;opacity:0.4;">${escapeHtml(d.email || '')}</p>
                             </div>
                         </div>
@@ -5996,7 +6021,7 @@ export class UIRenderer {
                                 <span style="font-size:0.95rem;">\u2728</span>
                                 <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.5;margin:0;font-weight:600;">AI Listener Profile</p>
                             </div>
-                            <p id="admin-ai-review-text" style="font-size:0.82rem;line-height:1.55;opacity:0.75;margin:0;font-style:italic;">Generating personality review...</p>
+                            <p id="admin-ai-review-text" style="font-size:0.82rem;line-height:1.55;opacity:0.75;margin:0;">Generating personality review...</p>
                         </div>
 
                         <!-- Genre DNA Bar -->
@@ -6363,6 +6388,17 @@ export class UIRenderer {
                     const isActive = a.is_active && (!a.ends_at || new Date(a.ends_at) > new Date());
                     const gs = a.gradient_start || '#a855f7';
                     const ge = a.gradient_end || '#ec4899';
+                    // Extract first line/sentence for preview (clean one-liner)
+                    let bodyPreview = '';
+                    if (a.body) {
+                        const firstLine = a.body.split('\n')[0].trim();
+                        const firstSentence = firstLine.split(/[.!?]/)[0].trim();
+                        bodyPreview = firstSentence || firstLine;
+                        // Limit to 60 chars for clean preview
+                        if (bodyPreview.length > 60) {
+                            bodyPreview = bodyPreview.slice(0, 57) + '...';
+                        }
+                    }
                     return `
                     <div style="display:flex;align-items:flex-start;gap:0.65rem;padding:0.7rem;background:rgba(255,255,255,0.03);border-radius:10px;border-left:3px solid ${gs};">
                         <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,${gs},${ge});flex-shrink:0;"></div>
@@ -6373,7 +6409,7 @@ export class UIRenderer {
                                 <span style="font-size:0.55rem;padding:0.1rem 0.3rem;border-radius:4px;background:${isActive ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'};color:${isActive ? '#22c55e' : '#ef4444'};font-weight:600;">${isActive ? 'LIVE' : 'ENDED'}</span>
                             </div>
                             <p style="margin:0;font-size:0.82rem;font-weight:600;">${escapeHtml(a.title)}</p>
-                            ${a.body ? `<p style="margin:0.15rem 0 0;font-size:0.72rem;opacity:0.45;line-height:1.3;">${escapeHtml(a.body).slice(0, 80)}${a.body.length > 80 ? '...' : ''}</p>` : ''}
+                            ${bodyPreview ? `<p style="margin:0.15rem 0 0;font-size:0.7rem;opacity:0.5;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(bodyPreview)}</p>` : ''}
                             <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;flex-wrap:wrap;">
                                 <span style="font-size:0.58rem;opacity:0.2;">${new Date(a.created_at).toLocaleDateString()}</span>
                                 <span style="font-size:0.58rem;opacity:0.2;">${a.frequency === 'always' ? '∞' : a.frequency?.replace('once_per_', '1/')}</span>
@@ -6382,8 +6418,9 @@ export class UIRenderer {
                                 <span style="font-size:0.58rem;opacity:0.35;color:#22c55e;">${a.ctr || 0}%</span>
                             </div>
                         </div>
-                        <div style="display:flex;gap:0.25rem;flex-shrink:0;">
+                        <div style="display:flex;gap:0.25rem;flex-shrink:0;flex-direction:column;">
                             <button class="admin-edit-ann-btn" data-id="${a.id}" data-json='${JSON.stringify(a).replace(/'/g, '&#39;')}' style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">Edit</button>
+                            <button class="admin-toggle-ann-btn" data-id="${a.id}" data-active="${a.is_active}" style="background:${a.is_active ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)'};border:1px solid ${a.is_active ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)'};color:${a.is_active ? '#ef4444' : '#22c55e'};cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">${a.is_active ? 'Pause' : 'Resume'}</button>
                             <button class="admin-delete-ann-btn" data-id="${a.id}" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:0.65rem;padding:0.25rem 0.5rem;border-radius:6px;">Del</button>
                         </div>
                     </div>`;
@@ -6394,6 +6431,23 @@ export class UIRenderer {
                         await adminFetch('/api/admin/announcements/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.id }) });
                         showNotification('Announcement deleted');
                         loadAnnouncements(); loadMsgStats();
+                    };
+                });
+                list.querySelectorAll('.admin-toggle-ann-btn').forEach(btn => {
+                    btn.onclick = async () => {
+                        const id = btn.dataset.id;
+                        const currentActive = btn.dataset.active === 'true';
+                        const newActive = !currentActive;
+                        try {
+                            await adminFetch('/api/admin/announcements/edit', { 
+                                method: 'POST', 
+                                body: JSON.stringify({ id, is_active: newActive }) 
+                            });
+                            showNotification(newActive ? 'Announcement resumed' : 'Announcement paused');
+                            loadAnnouncements(); loadMsgStats();
+                        } catch (e) {
+                            showNotification('Failed to toggle: ' + e.message);
+                        }
                     };
                 });
                 list.querySelectorAll('.admin-edit-ann-btn').forEach(btn => {
@@ -6743,145 +6797,5 @@ export class UIRenderer {
         await Promise.all([loadDbStats(), loadTelegramStatus(), loadArchiveHistory()]);
     }
 
-    /* ══════════════════════════════════════════════════════════
-       AI DJ PAGE
-       ══════════════════════════════════════════════════════════ */
-
-    renderAIDJPage() {
-        this.showPage('ai-dj');
-
-        // Init manager if not already
-        if (!aiDjManager.player) {
-            aiDjManager.init(this.player, this.api);
-        }
-
-        // ── Persona canvas ──
-        const canvas = document.getElementById('ai-dj-persona-canvas');
-        if (canvas && !this._djPersona) {
-            this._djPersona = new DJPersona(canvas);
-            aiDjManager.setPersona(this._djPersona);
-            this._djPersona.start();
-        } else if (canvas && this._djPersona) {
-            this._djPersona._resize();
-            this._djPersona.start();
-        }
-
-        // ── State change listener ──
-        aiDjManager.onStateChange((state, data) => {
-            const statusEl = document.getElementById('ai-dj-status');
-            const commentaryEl = document.getElementById('ai-dj-commentary');
-            const micBtn = document.getElementById('ai-dj-mic-btn');
-            const inputEl = document.getElementById('ai-dj-text-input');
-            const sendBtn = document.getElementById('ai-dj-send-btn');
-
-            switch (state) {
-                case 'idle':
-                    if (statusEl) statusEl.textContent = 'Ready to vibe';
-                    if (commentaryEl) commentaryEl.textContent = '';
-                    if (micBtn) micBtn.classList.remove('listening', 'processing');
-                    if (inputEl) { inputEl.disabled = false; inputEl.value = ''; }
-                    if (sendBtn) sendBtn.disabled = false;
-                    break;
-                case 'listening':
-                    if (statusEl) statusEl.textContent = data.transcript || 'Listening...';
-                    if (micBtn) { micBtn.classList.add('listening'); micBtn.classList.remove('processing'); }
-                    break;
-                case 'processing':
-                    if (statusEl) statusEl.textContent = 'Cooking something fire...';
-                    if (micBtn) { micBtn.classList.remove('listening'); micBtn.classList.add('processing'); }
-                    if (inputEl) inputEl.disabled = true;
-                    if (sendBtn) sendBtn.disabled = true;
-                    break;
-                case 'playing':
-                    if (statusEl) statusEl.textContent = `Vibing · ${data.mood || ''}`;
-                    if (commentaryEl && data.commentary) {
-                        commentaryEl.textContent = data.commentary;
-                        commentaryEl.classList.add('visible');
-                        setTimeout(() => commentaryEl.classList.remove('visible'), 8000);
-                    }
-                    if (micBtn) micBtn.classList.remove('listening', 'processing');
-                    if (inputEl) { inputEl.disabled = false; inputEl.value = ''; }
-                    if (sendBtn) sendBtn.disabled = false;
-                    break;
-                case 'error':
-                    if (statusEl) statusEl.textContent = data.error || 'Something went wrong';
-                    if (micBtn) micBtn.classList.remove('listening', 'processing');
-                    if (inputEl) { inputEl.disabled = false; }
-                    if (sendBtn) sendBtn.disabled = false;
-                    setTimeout(() => {
-                        if (statusEl && statusEl.textContent === (data.error || 'Something went wrong')) {
-                            statusEl.textContent = aiDjManager.isDJActive() ? `Vibing · ${aiDjManager.getMood() || ''}` : 'Ready to vibe';
-                        }
-                    }, 4000);
-                    break;
-            }
-        });
-
-        // ── Suggestion chips ──
-        const chipsContainer = document.getElementById('ai-dj-chips');
-        if (chipsContainer && !chipsContainer.dataset.init) {
-            chipsContainer.dataset.init = '1';
-            const chips = aiDjManager.getSuggestionChips();
-            chipsContainer.innerHTML = chips.map(c =>
-                `<button class="ai-dj-chip" data-prompt="${c.prompt.replace(/"/g, '&quot;')}">${c.icon} ${c.label}</button>`
-            ).join('');
-
-            chipsContainer.addEventListener('click', (e) => {
-                const chip = e.target.closest('.ai-dj-chip');
-                if (!chip) return;
-                const prompt = chip.dataset.prompt;
-                aiDjManager.processRequest(prompt);
-            });
-        }
-
-        // ── Text input ──
-        const textInput = document.getElementById('ai-dj-text-input');
-        const sendBtn = document.getElementById('ai-dj-send-btn');
-        if (textInput && !textInput.dataset.init) {
-            textInput.dataset.init = '1';
-
-            const submitText = () => {
-                const text = textInput.value.trim();
-                if (!text) return;
-                aiDjManager.processRequest(text);
-            };
-
-            textInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') { e.preventDefault(); submitText(); }
-            });
-
-            if (sendBtn) {
-                sendBtn.addEventListener('click', submitText);
-            }
-        }
-
-        // ── Mic button (hold to talk) ──
-        const micBtn = document.getElementById('ai-dj-mic-btn');
-        if (micBtn && !micBtn.dataset.init) {
-            micBtn.dataset.init = '1';
-
-            if (!aiDjManager.isVoiceAvailable()) {
-                micBtn.style.display = 'none';
-            } else {
-                let holdTimer = null;
-
-                micBtn.addEventListener('pointerdown', (e) => {
-                    e.preventDefault();
-                    holdTimer = setTimeout(() => {
-                        aiDjManager.startListening();
-                    }, 150); // Small delay to distinguish tap from hold
-                });
-
-                const stopHandler = () => {
-                    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-                    aiDjManager.stopListening();
-                };
-
-                micBtn.addEventListener('pointerup', stopHandler);
-                micBtn.addEventListener('pointerleave', stopHandler);
-                micBtn.addEventListener('pointercancel', stopHandler);
-            }
-        }
-    }
 }
 

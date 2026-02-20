@@ -67,13 +67,14 @@ export const formatTime = (seconds) => {
 };
 
 export const getTrackYearDisplay = (track) => {
-    const useAlbumYear = trackDateSettings.useAlbumYear();
-    const releaseDate = useAlbumYear
-        ? track?.album?.releaseDate || track?.streamStartDate
-        : track?.streamStartDate || track?.album?.releaseDate;
+    // ONLY use album release date - streamStartDate is when it was added to platform, not the actual release year
+    const releaseDate = track?.album?.releaseDate;
     if (!releaseDate) return '';
     const date = new Date(releaseDate);
-    return isNaN(date.getTime()) ? '' : ` • ${date.getFullYear()}`;
+    // Validate the date is reasonable (not before 1900 or after current year + 1)
+    const year = date.getFullYear();
+    if (isNaN(date.getTime()) || year < 1900 || year > new Date().getFullYear() + 1) return '';
+    return ` • ${year}`;
 };
 
 export const createPlaceholder = (text, isLoading = false) => {

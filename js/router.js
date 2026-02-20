@@ -91,9 +91,6 @@ export function createRouter(ui) {
             case 'account':
                 await ui.renderAccountPage();
                 break;
-            case 'ai-dj':
-                ui.renderAIDJPage();
-                break;
             case 'admin':
                 await ui.renderAdminPage();
                 break;

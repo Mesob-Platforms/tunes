@@ -400,8 +400,18 @@ kbd {
     scroll-behavior: auto;
     position: relative;
 
-    /* No bottom reservation – now-playing bar overlays */
+    /* Add padding when now-playing-bar is visible to prevent overlap */
     padding-bottom: var(--spacing-xl) !important;
+}
+
+/* Add extra padding when now-playing-bar is visible (desktop) */
+body:has(.now-playing-bar.npb-visible) .main-content {
+    padding-bottom: calc(var(--player-bar-height-desktop) + 30px) !important;
+}
+
+/* Hide now-playing-bar when queue panel is open (all screen sizes) */
+body:has(#side-panel.active[data-view="queue"]) .now-playing-bar {
+    display: none !important;
 }
 
 #page-background {
@@ -774,7 +784,7 @@ body.fullscreen-open .mobile-back-btn {
 
 .search-bar {
     width: 80%;
-    max-width: 100%;
+    max-width: calc(100% - 60px); /* Leave space for back button on mobile */
 }
 
 .search-bar input {
@@ -5699,9 +5709,22 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
     transition: box-shadow 0.4s ease, transform 0.15s ease, border-color 0.4s ease, background 0.4s ease, color 0.4s ease;
     align-self: flex-end;
     flex-shrink: 0;
-    position: relative;
-    z-index: 1;
+    position: fixed;
+    right: 20px;
+    bottom: calc(var(--player-bar-height-desktop) + 20px);
+    z-index: 10000;
     animation: collapser-breathe 3s ease-in-out infinite;
+}
+
+/* Mobile: adjust position based on now-playing bar visibility */
+@media (max-width: 768px) {
+    .download-notif-toggle {
+        bottom: calc(56px + 12px); /* Above tab bar */
+    }
+    
+    body:has(.now-playing-bar.npb-visible) .download-notif-toggle {
+        bottom: calc(56px + 8px + var(--player-bar-height-mobile) + 12px);
+    }
 }
 
 @keyframes collapser-breathe {
@@ -6371,6 +6394,8 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
     cursor: pointer;
     transition: all var(--transition);
     position: relative;
+    pointer-events: auto;
+    z-index: 1;
 }
 
 .now-playing-bar .cover:hover {
@@ -7216,7 +7241,7 @@ img[src=''] {
     }
 
     .search-bar {
-        max-width: none;
+        max-width: calc(100% - 60px); /* Leave space for back button */
     }
 
     .content-section {
@@ -8705,8 +8730,23 @@ textarea:focus {
         display: none !important;
     }
 
+    /* Hide now-playing-bar when queue panel is open */
+    body:has(#side-panel.active[data-view="queue"]) .now-playing-bar {
+        display: none !important;
+    }
+
     .main-content {
         padding-bottom: calc(56px + 16px) !important;
+    }
+
+    /* Add extra padding when now-playing-bar is visible to prevent overlap */
+    body:has(.now-playing-bar.npb-visible) .main-content {
+        padding-bottom: calc(var(--player-bar-height-mobile) + 56px + env(safe-area-inset-bottom, 0px) + 24px) !important;
+    }
+
+    /* Also add padding to any page containers that might scroll */
+    body:has(.now-playing-bar.npb-visible) .page {
+        padding-bottom: calc(var(--player-bar-height-mobile) + 56px + env(safe-area-inset-bottom, 0px) + 24px) !important;
     }
 }
 
@@ -8902,395 +8942,3 @@ textarea:focus {
     box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.25), 0 2px 10px rgba(0, 0, 0, 0.5);
 }
 
-/* ═══════════════════════════════════════════════════════════
-   AI DJ PAGE — Green/Orange Futuristic Glassmorphism
-   ═══════════════════════════════════════════════════════════ */
-
-/* Kill parent padding & header when AI DJ is active */
-.main-content:has(#page-ai-dj.active) {
-    padding: 0 !important;
-    overflow: hidden !important;
-}
-
-/* Hide the header entirely so AI DJ gets full height */
-.app-container:has(#page-ai-dj.active) > .main-header {
-    display: none !important;
-}
-
-#page-ai-dj.active {
-    display: flex !important;
-    flex-direction: column;
-    width: 100%;
-    height: 100%; /* Fill parent, not viewport — parent IS the viewport now */
-}
-
-.ai-dj-container {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    flex: 1;
-    min-height: 0;
-    padding: 0.5rem 0.5rem;
-    overflow: hidden;
-    box-sizing: border-box;
-}
-
-/* Animated background gradient — green/orange */
-.ai-dj-bg {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    background:
-        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(34, 197, 94, 0.12) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(249, 115, 22, 0.10) 0%, transparent 55%),
-        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(16, 185, 129, 0.06) 0%, transparent 50%);
-    animation: ai-dj-bg-shift 12s ease-in-out infinite alternate;
-    pointer-events: none;
-}
-
-@keyframes ai-dj-bg-shift {
-    0%   { opacity: 0.7; filter: hue-rotate(0deg); }
-    50%  { opacity: 1;   filter: hue-rotate(10deg); }
-    100% { opacity: 0.8; filter: hue-rotate(-8deg); }
-}
-
-/* Header */
-.ai-dj-header {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-    margin-bottom: 0.25rem;
-    flex-shrink: 0;
-}
-
-.ai-dj-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.25rem 0.75rem;
-    border-radius: 100px;
-    background: rgba(34, 197, 94, 0.15);
-    border: 1px solid rgba(34, 197, 94, 0.25);
-    backdrop-filter: blur(12px);
-    color: rgba(134, 239, 172, 0.9);
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-}
-
-.ai-dj-status {
-    font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.5);
-    font-weight: 400;
-    letter-spacing: 0.01em;
-    transition: color 0.3s ease;
-    text-align: center;
-    min-height: 1.1em;
-}
-
-/* Persona Canvas Wrapper */
-.ai-dj-persona-wrap {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 340px;
-    aspect-ratio: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto 0.5rem;
-    flex: 1;
-    min-height: 0;
-    max-height: 45vh;
-}
-
-.ai-dj-persona-wrap canvas {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-}
-
-/* Commentary bubble */
-.ai-dj-commentary {
-    position: absolute;
-    bottom: -0.5rem;
-    left: 50%;
-    transform: translateX(-50%) translateY(8px);
-    max-width: 85%;
-    padding: 0.55rem 0.9rem;
-    border-radius: 14px;
-    background: rgba(20, 20, 30, 0.65);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    color: rgba(255, 255, 255, 0.75);
-    font-size: 0.72rem;
-    line-height: 1.5;
-    text-align: center;
-    opacity: 0;
-    transition: opacity 0.5s ease, transform 0.5s ease;
-    pointer-events: none;
-}
-
-.ai-dj-commentary.visible {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-}
-
-/* Suggestion Chips */
-.ai-dj-chips {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.35rem;
-    padding: 0 0.5rem;
-    margin-bottom: 0.5rem;
-    max-width: 420px;
-    flex-shrink: 0;
-}
-
-.ai-dj-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.4rem 0.75rem;
-    border-radius: 100px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.65);
-    font-size: 0.72rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: inherit;
-    backdrop-filter: blur(8px);
-    white-space: nowrap;
-}
-
-.ai-dj-chip:hover {
-    background: rgba(34, 197, 94, 0.15);
-    border-color: rgba(34, 197, 94, 0.3);
-    color: rgba(255, 255, 255, 0.85);
-    transform: translateY(-1px);
-}
-
-.ai-dj-chip:active {
-    transform: scale(0.95);
-}
-
-/* Input Area */
-.ai-dj-input-area {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-    padding: 0 0.75rem;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    box-sizing: border-box;
-}
-
-.ai-dj-input-row {
-    display: flex;
-    width: 100%;
-    gap: 0.5rem;
-    align-items: center;
-    box-sizing: border-box;
-}
-
-.ai-dj-text-input {
-    flex: 1;
-    height: 44px;
-    padding: 0 1rem;
-    border-radius: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(12px);
-    color: var(--foreground);
-    font-size: 0.82rem;
-    font-family: inherit;
-    outline: none;
-    transition: all 0.25s ease;
-}
-
-.ai-dj-text-input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-}
-
-.ai-dj-text-input:focus {
-    border-color: rgba(34, 197, 94, 0.4);
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.08);
-}
-
-.ai-dj-text-input:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.ai-dj-send-btn {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    border-radius: 50%;
-    border: none;
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.55), rgba(249, 115, 22, 0.55));
-    color: #fff;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    backdrop-filter: blur(8px);
-}
-
-.ai-dj-send-btn .material-symbols-rounded {
-    font-size: 20px;
-}
-
-.ai-dj-send-btn:hover {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.75), rgba(249, 115, 22, 0.75));
-    transform: scale(1.05);
-}
-
-.ai-dj-send-btn:active {
-    transform: scale(0.95);
-}
-
-.ai-dj-send-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-    transform: none;
-}
-
-/* Mic Button — prominent, full-width, tactile button */
-.ai-dj-mic-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-    width: 100%;
-    max-width: 280px;
-    padding: 0.8rem 1.5rem;
-    border-radius: 100px;
-    border: 1.5px solid rgba(34, 197, 94, 0.35);
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(16, 185, 129, 0.10));
-    color: rgba(134, 239, 172, 0.95);
-    font-size: 0.82rem;
-    font-weight: 600;
-    font-family: inherit;
-    letter-spacing: 0.03em;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    backdrop-filter: blur(12px);
-    user-select: none;
-    -webkit-user-select: none;
-    touch-action: none;
-    box-shadow:
-        0 2px 16px rgba(34, 197, 94, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.ai-dj-mic-btn .material-symbols-rounded {
-    font-size: 20px;
-}
-
-.ai-dj-mic-btn:hover {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(16, 185, 129, 0.18));
-    border-color: rgba(34, 197, 94, 0.5);
-    color: #fff;
-    box-shadow:
-        0 4px 24px rgba(34, 197, 94, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    transform: translateY(-1px);
-}
-
-.ai-dj-mic-btn:active {
-    transform: scale(0.97);
-    box-shadow: 0 1px 8px rgba(34, 197, 94, 0.1);
-}
-
-/* Listening state — green pulsing glow */
-.ai-dj-mic-btn.listening {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(16, 185, 129, 0.22));
-    border-color: rgba(34, 197, 94, 0.6);
-    color: #fff;
-    animation: ai-dj-mic-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes ai-dj-mic-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.3); }
-    50%      { box-shadow: 0 0 0 14px rgba(34, 197, 94, 0); }
-}
-
-/* Processing state — orange spinner */
-.ai-dj-mic-btn.processing {
-    background: linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(234, 88, 12, 0.12));
-    border-color: rgba(249, 115, 22, 0.45);
-    color: rgba(253, 186, 116, 0.95);
-    pointer-events: none;
-}
-
-.ai-dj-mic-btn.processing .material-symbols-rounded {
-    animation: ai-dj-spin 1s linear infinite;
-}
-
-@keyframes ai-dj-spin {
-    to { transform: rotate(360deg); }
-}
-
-/* ── Responsive tweaks for AI DJ ── */
-@media (min-width: 769px) {
-    .ai-dj-container {
-        padding: 1.5rem 1rem 1rem;
-    }
-    .ai-dj-persona-wrap {
-        max-width: 380px;
-        max-height: 380px;
-    }
-    .ai-dj-input-area {
-        max-width: 420px;
-    }
-}
-
-@media (max-width: 768px) {
-    .ai-dj-container {
-        padding: 0.4rem 0 0;
-        padding-bottom: calc(56px + 0.5rem); /* Space for mobile tab bar */
-    }
-    .ai-dj-persona-wrap {
-        max-height: 35vh;
-    }
-    .ai-dj-chips {
-        gap: 0.3rem;
-        padding: 0 0.75rem;
-        max-width: 100%;
-    }
-    .ai-dj-chip {
-        font-size: 0.68rem;
-        padding: 0.3rem 0.65rem;
-    }
-    .ai-dj-mic-btn {
-        max-width: 100%;
-    }
-}
-
-@media (max-width: 380px) {
-    .ai-dj-persona-wrap {
-        max-width: 260px;
-        max-height: 28vh;
-    }
-    .ai-dj-chip {
-        font-size: 0.62rem;
-        padding: 0.25rem 0.55rem;
-    }
-}

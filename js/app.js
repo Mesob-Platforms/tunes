@@ -14,10 +14,8 @@ import { db } from './db.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { authManager } from './accounts/auth.js';
 import { getAvatarUrl } from './accounts/profile.js';
-import { registerSW } from 'virtual:pwa-register';
+import { registerSW } from './pwa-stub.js';
 import './smooth-scrolling.js';
-import { aiDjManager } from './aiDj.js';
-
 // Lazy-loaded modules
 let settingsModule = null;
 let downloadsModule = null;
@@ -226,17 +224,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Expose refs for cross-module access (e.g. admin panel auth)
     window.__tunesRefs = { authManager, ui, api, player };
 
-    // Initialize AI DJ manager
-    aiDjManager.init(player, api);
-    window.__aiDjManager = aiDjManager;
-
     // Initialize auth — check for existing session & wire up auth gate forms
     authManager.init();
     authManager.initAuthGate();
 
     // Set the about page creator avatar (abstract art, no initials)
+    const aboutOrgImg = document.getElementById('about-org-avatar-img');
+    if (aboutOrgImg) aboutOrgImg.src = getAvatarUrl('mesob-platforms');
     const aboutAvatarImg = document.getElementById('about-creator-avatar-img');
     if (aboutAvatarImg) aboutAvatarImg.src = getAvatarUrl('naol-mideksa');
+    const aboutZfly1Img = document.getElementById('about-zfly1-avatar-img');
+    if (aboutZfly1Img) aboutZfly1Img.src = getAvatarUrl('z-fly1');
 
     const originalRenderPlaylistPage = ui.renderPlaylistPage.bind(ui);
     ui.renderPlaylistPage = async function (id, type) {
@@ -372,26 +370,41 @@ document.addEventListener('DOMContentLoaded', async () => {
         ui.setCurrentTrack(player.currentTrack);
     }
 
-    document.querySelector('.now-playing-bar .cover').addEventListener('click', async () => {
-        if (!player.currentTrack) {
-            alert('No track is currently playing');
-            return;
-        }
+    // Set up cover click handler - use event delegation to ensure it works
+    const setupCoverClick = () => {
+        const cover = document.querySelector('.now-playing-bar .cover');
+        if (cover) {
+            // Remove any existing listeners by cloning
+            const newCover = cover.cloneNode(true);
+            cover.parentNode.replaceChild(newCover, cover);
+            
+            newCover.addEventListener('click', async (e) => {
+                e.stopPropagation(); // Prevent footer click from interfering
+                if (!player.currentTrack) {
+                    alert('No track is currently playing');
+                    return;
+                }
 
-        // Open fullscreen now-playing view
-        const overlay = document.getElementById('fullscreen-cover-overlay');
-        if (overlay && overlay.style.display === 'flex') {
-            // Already open, close it
-            if (window.location.hash === '#fullscreen') {
-                window.history.back();
-            } else {
-                ui.closeFullscreenCover();
-            }
-        } else {
-            const nextTrack = player.getNextTrack();
-            ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+                // Open fullscreen now-playing view
+                const overlay = document.getElementById('fullscreen-cover-overlay');
+                if (overlay && overlay.style.display === 'flex') {
+                    // Already open, close it
+                    if (window.location.hash === '#fullscreen') {
+                        window.history.back();
+                    } else {
+                        ui.closeFullscreenCover();
+                    }
+                } else {
+                    const nextTrack = player.getNextTrack();
+                    ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+                }
+            });
         }
-    });
+    };
+    
+    // Set up immediately and also after a short delay in case element isn't ready
+    setupCoverClick();
+    setTimeout(setupCoverClick, 500);
 
     // All playlists are public – share button always available when editing
 
@@ -473,14 +486,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!pulling) { startY = 0; return; }
                 const indicator = ptrIndicator;
                 if (indicator.classList.contains('threshold')) {
-                    // Trigger refresh
+                    // Trigger a real full page reload (like Ctrl+R)
                     indicator.classList.add('refreshing');
                     indicator.style.height = '40px';
-                    window.dispatchEvent(new PopStateEvent('popstate'));
-                    setTimeout(() => {
-                        indicator.classList.remove('pulling', 'threshold', 'refreshing');
-                        indicator.style.height = '0';
-                    }, 700);
+                    window.location.reload();
+                    return; // page will reload
                 } else {
                     indicator.classList.remove('pulling', 'threshold');
                     indicator.style.height = '0';
@@ -2880,11 +2890,9 @@ async function _trackEvent(itemType, itemId, eventType) {
             const h = parseInt(indicator.style.height);
             if (h >= 60) {
                 indicator.innerHTML = '<div style="display:flex;align-items:center;gap:0.5rem;opacity:0.5;font-size:0.8rem;font-family:DM Sans,sans-serif;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite;"><path d="M21 12a9 9 0 11-6.22-8.57"/></svg> Refreshing...</div>';
-                // Trigger a re-render of the home page
-                window.dispatchEvent(new PopStateEvent('popstate'));
-                setTimeout(() => {
-                    indicator.style.height = '0px';
-                }, 1000);
+                // Real full page reload (like Ctrl+R)
+                window.location.reload();
+                return;
             } else {
                 indicator.style.height = '0px';
             }

@@ -250,20 +250,16 @@ export class LyricsManager {
 
         this.kuroshiroLoading = true;
         try {
-            // Bug on kuromoji@0.1.2 where it mangles absolute URLs
-            // Using self-hosted dict files is failed, so we use CDN with monkey-patch
-            // Monkey-patch XMLHttpRequest to redirect dictionary requests to CDN
-            // Kuromoji uses XHR, not fetch, for loading dictionary files
+            // Monkey-patch XMLHttpRequest to ensure dict file requests use local bundled path
+            // Kuromoji uses XHR for loading dictionary files and may mangle URLs
             if (!window._originalXHROpen) {
                 window._originalXHROpen = XMLHttpRequest.prototype.open;
                 XMLHttpRequest.prototype.open = function (method, url, ...rest) {
                     const urlStr = url.toString();
                     if (urlStr.includes('/dict/') && urlStr.includes('.dat.gz')) {
-                        // Extract just the filename
                         const filename = urlStr.split('/').pop();
-                        // Redirect to CDN
-                        const cdnUrl = `https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/${filename}`;
-                        return window._originalXHROpen.call(this, method, cdnUrl, ...rest);
+                        const localUrl = `/dict/${filename}`;
+                        return window._originalXHROpen.call(this, method, localUrl, ...rest);
                     }
                     return window._originalXHROpen.call(this, method, url, ...rest);
                 };
@@ -276,36 +272,25 @@ export class LyricsManager {
                     const urlStr = url.toString();
                     if (urlStr.includes('/dict/') && urlStr.includes('.dat.gz')) {
                         const filename = urlStr.split('/').pop();
-                        const cdnUrl = `https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/${filename}`;
-                        console.log(`Redirecting dict fetch: ${filename} -> CDN`);
-                        return window._originalFetch(cdnUrl, options);
+                        const localUrl = `/dict/${filename}`;
+                        return window._originalFetch(localUrl, options);
                     }
                     return window._originalFetch(url, options);
                 };
             }
 
-            // Load Kuroshiro from CDN
-            if (!window.Kuroshiro) {
-                await this.loadScript('https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js');
-            }
-
-            // Load Kuromoji analyzer from CDN
-            if (!window.KuromojiAnalyzer) {
-                await this.loadScript(
-                    'https://unpkg.com/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js'
-                );
-            }
-
-            // Initialize Kuroshiro (CDN version exports as .default)
-            const Kuroshiro = window.Kuroshiro.default || window.Kuroshiro;
-            const KuromojiAnalyzer = window.KuromojiAnalyzer.default || window.KuromojiAnalyzer;
+            // Import Kuroshiro and analyzer from bundled npm packages
+            const KuroshiroModule = await import('kuroshiro');
+            const KuromojiAnalyzerModule = await import('kuroshiro-analyzer-kuromoji');
+            const Kuroshiro = KuroshiroModule.default || KuroshiroModule;
+            const KuromojiAnalyzer = KuromojiAnalyzerModule.default || KuromojiAnalyzerModule;
 
             this.kuroshiro = new Kuroshiro();
 
-            // Initialize with a dummy path - our fetch interceptor will redirect to CDN
+            // Initialize with local dict path (bundled in public/dict/)
             await this.kuroshiro.init(
                 new KuromojiAnalyzer({
-                    dictPath: '/dict/', // This gets mangled but our interceptor fixes it
+                    dictPath: '/dict/',
                 })
             );
 
@@ -415,65 +400,45 @@ export class LyricsManager {
             return;
         }
 
-        // Try local bundle first, then CDN fallback
-        const sources = [
-            '/js/vendor/am-lyrics.min.js',
-            'https://cdn.jsdelivr.net/npm/@uimaxbai/am-lyrics@0.6.5/dist/src/am-lyrics.min.js',
-        ];
-
-        for (const src of sources) {
-            try {
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.type = 'module';
-                    script.src = src;
-
-                    script.onload = () => {
-                        if (typeof customElements !== 'undefined') {
-                            customElements
-                                .whenDefined('am-lyrics')
-                                .then(() => {
-                                    this.componentLoaded = true;
-                                    resolve();
-                                })
-                                .catch(reject);
-                        } else {
-                            resolve();
-                        }
-                    };
-
-                    script.onerror = () => reject(new Error(`Failed to load from ${src}`));
-                    document.head.appendChild(script);
-                });
-                return; // loaded successfully
-            } catch (e) {
-                console.warn('Lyrics component load attempt failed:', e.message);
+        try {
+            // Import am-lyrics web component (registers custom element)
+            await import('@uimaxbai/am-lyrics/am-lyrics.js');
+            if (typeof customElements !== 'undefined') {
+                await customElements.whenDefined('am-lyrics');
             }
+            this.componentLoaded = true;
+        } catch (e) {
+            console.error('Failed to load lyrics component:', e.message);
+            throw new Error('Failed to load lyrics component');
         }
-
-        throw new Error('Failed to load lyrics component from all sources');
     }
 
-    async fetchLyrics(trackId, track = null) {
+    async fetchLyrics(trackId, track = null, forceOnline = false) {
         if (track) {
             // 1. Check in-memory cache
             if (this.lyricsCache.has(trackId)) {
                 return this.lyricsCache.get(trackId);
             }
 
-            // 2. Check IndexedDB cache
+            // 2. Check IndexedDB cache (always check first, even when online)
             try {
                 await musicDB.open();
                 const cached = await musicDB.getCachedLyrics(trackId);
-                if (cached) {
+                if (cached && cached.subtitles) {
                     this.lyricsCache.set(trackId, cached);
+                    // Return cached lyrics immediately — no need to re-fetch
                     return cached;
                 }
             } catch (e) {
                 console.warn('IndexedDB lyrics read failed:', e);
             }
 
-            // 3. Fetch from LRCLIB
+            // 3. If offline, don't try to fetch - return null or cached
+            if (!navigator.onLine && !forceOnline) {
+                return null;
+            }
+
+            // 4. Fetch from LRCLIB (only when online)
             try {
                 const artist = Array.isArray(track.artists)
                     ? track.artists.map((a) => a.name || a).join(', ')
@@ -495,27 +460,51 @@ export class LyricsManager {
                 if (album) params.append('album_name', album);
                 if (duration) params.append('duration', duration.toString());
 
-                const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
+                // Add timeout to prevent hanging
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-                if (response.ok) {
-                    const data = await response.json();
+                try {
+                    const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, {
+                        signal: controller.signal,
+                    });
 
-                    if (data.syncedLyrics) {
-                        const lyricsData = {
-                            subtitles: data.syncedLyrics,
-                            lyricsProvider: 'LRCLIB',
-                        };
+                    clearTimeout(timeoutId);
 
-                        this.lyricsCache.set(trackId, lyricsData);
+                    if (response.ok) {
+                        const data = await response.json();
 
-                        // Persist to IndexedDB for offline access
-                        try {
-                            await musicDB.cacheLyrics(trackId, lyricsData);
-                        } catch (e) {
-                            console.warn('IndexedDB lyrics write failed:', e);
+                        if (data.syncedLyrics) {
+                            const lyricsData = {
+                                subtitles: data.syncedLyrics,
+                                lyricsProvider: 'LRCLIB',
+                            };
+
+                            this.lyricsCache.set(trackId, lyricsData);
+
+                            // ALWAYS persist to IndexedDB for offline access
+                            try {
+                                await musicDB.cacheLyrics(trackId, lyricsData);
+                            } catch (e) {
+                                console.warn('IndexedDB lyrics write failed:', e);
+                                // Retry once
+                                try {
+                                    await new Promise(resolve => setTimeout(resolve, 100));
+                                    await musicDB.cacheLyrics(trackId, lyricsData);
+                                } catch (e2) {
+                                    console.error('IndexedDB lyrics write retry failed:', e2);
+                                }
+                            }
+
+                            return lyricsData;
                         }
-
-                        return lyricsData;
+                    }
+                } catch (fetchError) {
+                    clearTimeout(timeoutId);
+                    if (fetchError.name === 'AbortError') {
+                        console.warn('LRCLIB fetch timeout');
+                    } else {
+                        throw fetchError;
                     }
                 }
             } catch (error) {
@@ -927,6 +916,50 @@ export function openLyricsPanel(track, audioPlayer, lyricsManager, forceOpen = f
     }
 }
 
+/**
+ * Convert LRC subtitle text into the array format am-lyrics component expects.
+ * Each element: { text: [{text, part, timestamp, endtime}], background, backgroundText,
+ *   oppositeTurn, timestamp, endtime, isWordSynced }
+ */
+function convertLRCToAmLyricsFormat(lrcText, durationMs) {
+    if (!lrcText) return null;
+    const lines = lrcText.split('\n').filter((l) => l.trim());
+    const parsed = [];
+    for (const line of lines) {
+        const m = line.match(/\[(\d+):(\d+)[.,](\d+)\]\s*(.*)/);
+        if (m) {
+            const mins = parseInt(m[1], 10);
+            const secs = parseInt(m[2], 10);
+            let cs = m[3];
+            // Normalise to milliseconds – handle both centiseconds (2-digit) and milliseconds (3-digit)
+            if (cs.length === 2) cs = parseInt(cs, 10) * 10;
+            else cs = parseInt(cs, 10);
+            const timestampMs = mins * 60000 + secs * 1000 + cs;
+            const text = m[4].trim();
+            if (text) {
+                parsed.push({ timestampMs, text });
+            }
+        }
+    }
+    if (parsed.length === 0) return null;
+
+    // Compute endtime for each line (= next line's start, or durationMs, or start + 5s)
+    const fallbackEnd = durationMs || parsed[parsed.length - 1].timestampMs + 5000;
+    const result = parsed.map((line, i) => {
+        const endMs = i < parsed.length - 1 ? parsed[i + 1].timestampMs : fallbackEnd;
+        return {
+            text: [{ text: line.text, part: false, timestamp: line.timestampMs, endtime: endMs }],
+            background: false,
+            backgroundText: [],
+            oppositeTurn: false,
+            timestamp: line.timestampMs,
+            endtime: endMs,
+            isWordSynced: false,
+        };
+    });
+    return result;
+}
+
 async function renderLyricsComponent(container, track, audioPlayer, lyricsManager) {
     container.innerHTML = '<div class="lyrics-loading">Loading lyrics...</div>';
 
@@ -958,6 +991,89 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         amLyrics.setAttribute('interpolate', '');
         amLyrics.style.height = '100%';
         amLyrics.style.width = '100%';
+
+        // --- Override fetchLyrics BEFORE appending to DOM ---
+        // connectedCallback calls fetchLyrics(). By overriding first, our LRCLIB
+        // fallback runs natively inside the component's lifecycle.
+        const _originalFetchLyrics = amLyrics.fetchLyrics;
+        const _track = track;
+        const _lyricsManager = lyricsManager;
+        amLyrics.fetchLyrics = async function () {
+            // 1) Let the component try its own KPOE/LyricsPlus fetch
+            try {
+                await _originalFetchLyrics.call(this);
+            } catch (e) {
+                console.warn('[Lyrics] KPOE fetch threw:', e);
+            }
+
+            // 2) If the component found lyrics, we're done
+            if (this.lyrics && Array.isArray(this.lyrics) && this.lyrics.length > 0) {
+                return;
+            }
+
+            // 3) KPOE failed — try our LRCLIB cache/fetch
+            console.log('[Lyrics] KPOE found nothing, trying LRCLIB fallback...');
+            this.isLoading = true; // keep loading spinner while we try LRCLIB
+            try {
+                const lyricsData = await _lyricsManager.fetchLyrics(_track.id, _track);
+                if (lyricsData && lyricsData.subtitles) {
+                    const durMs = _track.duration ? Math.round(_track.duration * 1000) : undefined;
+                    const converted = convertLRCToAmLyricsFormat(lyricsData.subtitles, durMs);
+                    if (converted && converted.length > 0) {
+                        console.log(`[Lyrics] Injecting ${converted.length} LRCLIB lines`);
+                        this.lyrics = converted;
+                        this.lyricsSource = 'LRCLIB';
+                        this.isLoading = false;
+                        if (typeof this.onLyricsLoaded === 'function') await this.onLyricsLoaded();
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('[Lyrics] LRCLIB cache/get failed:', e);
+            }
+
+            // 4) Last resort — LRCLIB search API (fuzzy match)
+            try {
+                const sArtist = Array.isArray(_track.artists)
+                    ? _track.artists.map((a) => a.name || a).join(', ')
+                    : _track.artist?.name || '';
+                const sTitle = _track.title || '';
+                if (sTitle && sArtist) {
+                    const q = encodeURIComponent(`${sTitle} ${sArtist}`);
+                    const resp = await fetch(`https://lrclib.net/api/search?q=${q}`, {
+                        signal: AbortSignal.timeout(8000),
+                    });
+                    if (resp.ok) {
+                        const results = await resp.json();
+                        const match = results.find((r) => r.syncedLyrics);
+                        if (match && match.syncedLyrics) {
+                            const durMs = _track.duration ? Math.round(_track.duration * 1000) : undefined;
+                            const converted = convertLRCToAmLyricsFormat(match.syncedLyrics, durMs);
+                            if (converted && converted.length > 0) {
+                                console.log(`[Lyrics] Injecting ${converted.length} LRCLIB-search lines`);
+                                this.lyrics = converted;
+                                this.lyricsSource = 'LRCLIB (Search)';
+                                this.isLoading = false;
+                                if (typeof this.onLyricsLoaded === 'function') await this.onLyricsLoaded();
+
+                                // Cache for future use
+                                const cacheData = { subtitles: match.syncedLyrics, lyricsProvider: 'LRCLIB' };
+                                _lyricsManager.lyricsCache.set(_track.id, cacheData);
+                                try {
+                                    await musicDB.open();
+                                    await musicDB.cacheLyrics(_track.id, cacheData);
+                                } catch (_) { /* ignore */ }
+                                return;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[Lyrics] LRCLIB search fallback failed:', e);
+            }
+
+            this.isLoading = false;
+        };
 
         container.appendChild(amLyrics);
 
@@ -1303,22 +1419,26 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             await lyricsManager.loadKuroshiro();
         }
 
-        lyricsManager
-            .fetchLyrics(track.id, track)
-            .then(async () => {
-                if (lyricsManager.isGeniusMode) {
-                    try {
-                        const data = await lyricsManager.geniusManager.getDataForTrack(track);
-                        if (data) {
-                            lyricsManager.currentGeniusData = data;
-                            lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
-                        }
-                    } catch (e) {
-                        console.warn('Genius auto-load failed', e);
+        // Genius annotations — load after lyrics are ready (the override handles lyrics injection)
+        (async () => {
+            // Wait for lyrics to settle
+            let waited = 0;
+            while (amLyrics.isLoading && waited < 10000) {
+                await new Promise((r) => setTimeout(r, 250));
+                waited += 250;
+            }
+            if (lyricsManager.isGeniusMode) {
+                try {
+                    const data = await lyricsManager.geniusManager.getDataForTrack(track);
+                    if (data) {
+                        lyricsManager.currentGeniusData = data;
+                        lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
                     }
+                } catch (e) {
+                    console.warn('Genius auto-load failed', e);
                 }
-            })
-            .catch((e) => console.warn('Background lyrics fetch failed', e));
+            }
+        })().catch((e) => console.warn('Genius load failed', e));
 
         // Wait for lyrics to appear, then do an immediate conversion
         const waitForLyrics = () => {
@@ -1455,7 +1575,10 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
     let animId = null;
 
     const updateActive = () => {
-        const t = audioPlayer.currentTime;
+        // Apply timing offset from lyrics manager
+        const offsetMs = lyricsManager?.timingOffset || 0;
+        const offsetSeconds = offsetMs / 1000;
+        const t = audioPlayer.currentTime - offsetSeconds; // Apply offset (positive = delay, negative = advance)
         let newIdx = -1;
         for (let i = 0; i < parsed.length; i++) {
             if (t >= parsed[i].time) newIdx = i;
@@ -1510,6 +1633,7 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     let baseTimeMs = 0;
     let lastTimestamp = performance.now();
     let animationFrameId = null;
+    let lastSyncTime = 0;
 
     // Get timing offset from lyrics manager (in milliseconds)
     const getTimingOffset = () => {
@@ -1520,17 +1644,30 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
         const currentMs = audioPlayer.currentTime * 1000;
         baseTimeMs = currentMs;
         lastTimestamp = performance.now();
+        lastSyncTime = currentMs;
         // Apply timing offset: positive offset delays lyrics, negative advances them
-        amLyrics.currentTime = currentMs - getTimingOffset();
+        const offsetMs = getTimingOffset();
+        const syncedTime = currentMs - offsetMs;
+        if (amLyrics && typeof amLyrics.currentTime !== 'undefined') {
+            amLyrics.currentTime = Math.max(0, syncedTime);
+        }
     };
 
     const tick = () => {
-        if (!audioPlayer.paused) {
+        if (!audioPlayer.paused && amLyrics) {
             const now = performance.now();
             const elapsed = now - lastTimestamp;
             const nextMs = baseTimeMs + elapsed;
+            lastSyncTime = nextMs;
+            
             // Apply timing offset: positive offset delays lyrics, negative advances them
-            amLyrics.currentTime = nextMs - getTimingOffset();
+            const offsetMs = getTimingOffset();
+            const syncedTime = nextMs - offsetMs;
+            
+            if (typeof amLyrics.currentTime !== 'undefined') {
+                amLyrics.currentTime = Math.max(0, syncedTime);
+            }
+            
             animationFrameId = requestAnimationFrame(tick);
         }
     };
@@ -1538,6 +1675,12 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     const onPlay = () => {
         baseTimeMs = audioPlayer.currentTime * 1000;
         lastTimestamp = performance.now();
+        lastSyncTime = baseTimeMs;
+        // Immediate sync on play
+        const offsetMs = getTimingOffset();
+        if (amLyrics && typeof amLyrics.currentTime !== 'undefined') {
+            amLyrics.currentTime = Math.max(0, baseTimeMs - offsetMs);
+        }
         tick();
     };
 
@@ -1545,6 +1688,12 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
+        }
+        // Sync one final time on pause
+        if (amLyrics && typeof amLyrics.currentTime !== 'undefined') {
+            const currentMs = audioPlayer.currentTime * 1000;
+            const offsetMs = getTimingOffset();
+            amLyrics.currentTime = Math.max(0, currentMs - offsetMs);
         }
     };
 

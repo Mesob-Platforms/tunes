@@ -29,6 +29,7 @@ const C = {
   orange:   '#F49D37',
   purple:   '#7B2FBE',
   blue:     '#2D46B9',
+  red:      '#E22134',
   cream:    '#F5F0E1',
   peach:    '#FFCBA4',
   lavender: '#D4BBFF',
@@ -42,13 +43,15 @@ const SECTIONS = [
   { bg: C.magenta, accent: C.lavender, text: C.white, pattern: 'stripes' },    // 2  total minutes
   { bg: C.pink,    accent: C.cream,    text: C.white, pattern: 'squares' },    // 3  unique stats
   { bg: C.dark,    accent: C.green,    text: C.white, pattern: 'dots' },       // 4  first song (image)
-  { bg: C.orange,  accent: C.black,    text: C.black, pattern: 'stripes' },    // 5  top genre
+  { bg: C.red,     accent: C.white,    text: C.white, pattern: 'lines' },      // 5  top genre (red bg, lighter pattern)
   { bg: C.dark,    accent: C.green,    text: C.white, pattern: 'stripes' },    // 6  top artist (image)
   { bg: C.dark,    accent: C.magenta,  text: C.white, pattern: 'squares' },    // 7  top track (image)
   { bg: C.green,   accent: C.black,    text: C.black, pattern: 'scattered' },  // 8  streak
-  { bg: C.magenta, accent: C.lavender, text: C.white, pattern: 'bigcircle' },  // 9  personality
-  { bg: C.dark,    accent: C.green,    text: C.white, pattern: 'lines' },      // 10 leaderboard
-  { bg: 'darkgrad',accent: C.green,    text: C.white, pattern: 'dots' },       // 11 outro
+  { bg: C.magenta, accent: C.lavender, text: C.white, pattern: 'waves' },      // 9  personality (replaced bigcircle with waves)
+  { bg: C.blue,    accent: C.white,     text: C.white, pattern: 'lines' },      // 10 top 5 artists (blue theme)
+  { bg: C.orange,  accent: C.black,    text: C.black, pattern: 'lines' },     // 11 top 5 albums (orange theme)
+  { bg: C.dark,    accent: C.green,    text: C.white, pattern: 'lines' },      // 12 leaderboard
+  { bg: 'darkgrad',accent: C.green,    text: C.white, pattern: 'dots' },       // 13 outro
 ];
 
 /* ═══════════════════════════════════════════════════════════════
@@ -57,7 +60,8 @@ const SECTIONS = [
 let data = null;
 let leaderboard = null;
 let apiRef = null;
-let imageMap = { artists: {}, tracks: {}, firstListen: null };
+let imageMap = { artists: {}, tracks: {}, albums: {}, firstListen: null };
+let albumDataMap = {}; // Maps track keys to album info: { title, artist, cover }
 let observer = null;
 let pageMutObs = null;
 
@@ -110,9 +114,10 @@ export async function initWrapped(api) {
   }
 }
 
-/* ── Resolve images for top artists, tracks, first listen ── */
+/* ── Resolve images for top artists, tracks, albums, first listen ── */
 async function resolveImages() {
-  imageMap = { artists: {}, tracks: {}, firstListen: null };
+  imageMap = { artists: {}, tracks: {}, albums: {}, firstListen: null };
+  albumDataMap = {}; // Reset album data map
   if (!apiRef) return;
   const promises = [];
 
@@ -128,14 +133,38 @@ async function resolveImages() {
   for (const t of (data.top_tracks || [])) {
     const key = `${t.title}|||${t.artist}`;
     promises.push(
-      apiRef.searchTracks(t.title).then(res => {
+      apiRef.searchTracks(t.title).then(async res => {
         const items = res.items || [];
         const exact = items.find(i =>
           i.title?.toLowerCase() === t.title.toLowerCase() &&
           (i.artist?.name?.toLowerCase() === t.artist.toLowerCase() || i.artists?.[0]?.name?.toLowerCase() === t.artist.toLowerCase())
         );
         const hit = exact || items[0];
-        if (hit?.album?.cover) imageMap.tracks[key] = apiRef.getCoverUrl(hit.album.cover, '750');
+        if (hit?.album?.cover) {
+          imageMap.tracks[key] = apiRef.getCoverUrl(hit.album.cover, '750');
+          // Store album data for this track
+          if (hit.album?.title && hit.album?.id) {
+            // Fetch album details to check if it's a single (exclude singles)
+            try {
+              const albumData = await apiRef.getAlbum(hit.album.id);
+              const trackCount = albumData?.tracks?.length || 0;
+              // Exclude singles: albums with 3 or fewer tracks are considered singles/EPs
+              if (trackCount > 3) {
+                albumDataMap[key] = {
+                  title: hit.album.title,
+                  artist: t.artist,
+                  cover: apiRef.getCoverUrl(hit.album.cover, '750'),
+                  trackCount: trackCount
+                };
+                const albumKey = `${hit.album.title}|||${t.artist}`;
+                imageMap.albums[albumKey] = apiRef.getCoverUrl(hit.album.cover, '750');
+              }
+            } catch (err) {
+              // If album fetch fails, skip this album (don't include it)
+              console.warn('[Wrapped] Failed to fetch album details:', err);
+            }
+          }
+        }
       }).catch(() => {})
     );
   }
@@ -176,6 +205,8 @@ function buildUI(container) {
     sectionTopTrack(),
     sectionStreak(),
     sectionPersonality(),
+    sectionTop5Artists(),
+    sectionTop5Albums(),
     sectionLeaderboard(),
     sectionOutro(),
   ];
@@ -456,9 +487,8 @@ function sectionTopGenre() {
   }).join('');
 
   s.innerHTML = `
-    <div class="wr-anim" style="font-size:4rem;margin-bottom:0.3rem">\uD83C\uDFA7</div>
-    <div class="wr-anim wr-section-label">Your top genre was</div>
-    <div class="wr-anim wr-genre-name">${esc(g.genre)}</div>
+    <div class="wr-anim wr-section-label-small">Your top genre was</div>
+    <div class="wr-anim wr-genre-name-big">${esc(g.genre)}</div>
     <div class="wr-anim wr-play-count">${g.plays} plays</div>
     ${bars ? `<div class="wr-anim wr-genre-bars">${bars}</div>` : ''}
   `;
@@ -532,7 +562,88 @@ function sectionPersonality() {
   return s;
 }
 
-/* ── 10  LEADERBOARD ── */
+/* ── 10  TOP 5 ARTISTS ── */
+function sectionTop5Artists() {
+  const artists = (data.top_artists || []).slice(0, 5);
+  if (!artists.length) return mk('div', 'wr-center', '<div class="wr-anim wr-section-label">No artist data yet</div>');
+  const s = mk('div', 'wr-center');
+  
+  const artistCards = artists.map((a, i) => {
+    const imgUrl = imageMap.artists[a.name] || '';
+    return `
+      <div class="wr-top5-item wr-anim">
+        <div class="wr-top5-rank">${i + 1}</div>
+        ${imgUrl ? `<img src="${imgUrl}" class="wr-top5-img" alt="" onerror="this.style.display='none'">` : '<div class="wr-top5-img-placeholder"></div>'}
+        <div class="wr-top5-info">
+          <div class="wr-top5-name">${esc(a.name)}</div>
+          <div class="wr-top5-plays">${a.plays} plays</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  s.innerHTML = `
+    <div class="wr-anim wr-section-label">Your top 5 artists</div>
+    <div class="wr-top5-list">${artistCards}</div>
+  `;
+  return s;
+}
+
+/* ── 11  TOP 5 ALBUMS ── */
+function sectionTop5Albums() {
+  // Derive top albums from top tracks by grouping by album from API data
+  const albumMap = {};
+  (data.top_tracks || []).forEach(t => {
+    const trackKey = `${t.title}|||${t.artist}`;
+    const albumInfo = albumDataMap[trackKey];
+    
+    // Only process tracks that have valid album data from API
+    if (!albumInfo || !albumInfo.title) return;
+    
+    const albumKey = `${albumInfo.title}|||${albumInfo.artist}`;
+    if (!albumMap[albumKey]) {
+      albumMap[albumKey] = {
+        name: albumInfo.title,
+        artist: albumInfo.artist,
+        cover: albumInfo.cover,
+        plays: 0,
+        tracks: []
+      };
+    }
+    albumMap[albumKey].plays += t.plays;
+    albumMap[albumKey].tracks.push(t);
+  });
+  
+  const albums = Object.values(albumMap)
+    .sort((a, b) => b.plays - a.plays)
+    .slice(0, 5);
+  
+  if (!albums.length) return mk('div', 'wr-center', '<div class="wr-anim wr-section-label">No album data yet</div>');
+  const s = mk('div', 'wr-center');
+  
+  const albumCards = albums.map((album, i) => {
+    const imgUrl = album.cover || '';
+    return `
+      <div class="wr-top5-item wr-anim">
+        <div class="wr-top5-rank">${i + 1}</div>
+        ${imgUrl ? `<img src="${imgUrl}" class="wr-top5-img" alt="" onerror="this.style.display='none'">` : '<div class="wr-top5-img-placeholder"></div>'}
+        <div class="wr-top5-info">
+          <div class="wr-top5-name">${esc(album.name)}</div>
+          <div class="wr-top5-artist">${esc(album.artist)}</div>
+          <div class="wr-top5-plays">${album.plays} plays</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  s.innerHTML = `
+    <div class="wr-anim wr-section-label">Your top 5 albums</div>
+    <div class="wr-top5-list">${albumCards}</div>
+  `;
+  return s;
+}
+
+/* ── 12  LEADERBOARD ── */
 function sectionLeaderboard() {
   const rows = (leaderboard || []).slice(0, 10).map((u, i) => `
     <div class="wr-lb-row wr-anim">
@@ -551,7 +662,7 @@ function sectionLeaderboard() {
   return s;
 }
 
-/* ── 11  OUTRO ── */
+/* ── 13  OUTRO ── */
 function sectionOutro() {
   const s = mk('div', 'wr-center wr-confetti-trigger');
   let userId = '';
@@ -635,13 +746,7 @@ export function isWrappedAvailable(isAdmin = false, userEmail = '') {
 function injectStyles() {
   if (document.getElementById('wr-styles')) return;
 
-  /* Load Montserrat font */
-  if (!document.querySelector('link[href*="Montserrat"]')) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;900&display=swap';
-    document.head.appendChild(link);
-  }
+  /* Montserrat font is now bundled in /fonts/fonts.css */
 
   const style = document.createElement('style');
   style.id = 'wr-styles';
@@ -682,8 +787,8 @@ body.wrapped-active #page-wrapped{position:fixed!important;inset:0!important;z-i
 [data-pattern="waves"]::before{content:'';position:absolute;bottom:0;left:0;right:0;height:160px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 120'%3E%3Cpath fill='rgba(0,0,0,0.18)' d='M0,40 C360,120 720,0 1080,80 C1260,110 1380,60 1440,40 L1440,120 L0,120Z'/%3E%3C/svg%3E");background-size:cover;pointer-events:none;z-index:0}
 [data-pattern="lines"]::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 18px,rgba(255,255,255,0.08) 18px,rgba(255,255,255,0.08) 19px);pointer-events:none;z-index:0}
 [data-pattern="scattered"]::before{content:'';position:absolute;inset:0;background:radial-gradient(circle 4px at 10% 12%,rgba(0,0,0,0.3) 100%,transparent 100%),radial-gradient(circle 3px at 30% 45%,rgba(0,0,0,0.25) 100%,transparent 100%),radial-gradient(circle 5px at 55% 20%,rgba(0,0,0,0.28) 100%,transparent 100%),radial-gradient(circle 3px at 75% 65%,rgba(0,0,0,0.22) 100%,transparent 100%),radial-gradient(circle 4px at 45% 80%,rgba(0,0,0,0.25) 100%,transparent 100%),radial-gradient(circle 3.5px at 85% 35%,rgba(0,0,0,0.26) 100%,transparent 100%),radial-gradient(circle 3px at 20% 70%,rgba(0,0,0,0.2) 100%,transparent 100%),radial-gradient(circle 4px at 65% 90%,rgba(0,0,0,0.24) 100%,transparent 100%),radial-gradient(circle 2.5px at 5% 55%,rgba(0,0,0,0.18) 100%,transparent 100%),radial-gradient(circle 3px at 92% 80%,rgba(0,0,0,0.2) 100%,transparent 100%),radial-gradient(circle 4px at 40% 30%,rgba(0,0,0,0.15) 100%,transparent 100%),radial-gradient(circle 2px at 68% 50%,rgba(0,0,0,0.17) 100%,transparent 100%);pointer-events:none;z-index:0}
-[data-pattern="bigcircle"]::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:120vw;height:120vw;border-radius:50%;border:3px solid rgba(255,255,255,0.3);box-shadow:inset 0 0 80px rgba(255,255,255,0.04);pointer-events:none;z-index:0}
-[data-pattern="bigcircle"]::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:65vw;height:65vw;border-radius:50%;border:3px solid rgba(255,255,255,0.22);box-shadow:inset 0 0 50px rgba(255,255,255,0.03);pointer-events:none;z-index:0}
+[data-pattern="waves"]::before{content:'';position:absolute;bottom:0;left:0;right:0;height:160px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 120'%3E%3Cpath fill='rgba(255,255,255,0.18)' d='M0,40 C360,120 720,0 1080,80 C1260,110 1380,60 1440,40 L1440,120 L0,120Z'/%3E%3C/svg%3E");background-size:cover;pointer-events:none;z-index:0}
+[data-pattern="waves"]::after{content:'';position:absolute;top:0;left:0;right:0;height:160px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 120'%3E%3Cpath fill='rgba(255,255,255,0.12)' d='M0,80 C360,0 720,120 1080,40 C1260,10 1380,60 1440,80 L1440,0 L0,0Z'/%3E%3C/svg%3E");background-size:cover;pointer-events:none;z-index:0}
 
 /* Light-theme pattern overrides (dark colors on light bg) */
 [data-theme="light"][data-pattern="dots"]::before{background:radial-gradient(circle,rgba(0,0,0,0.2) 1px,transparent 1px);background-size:14px 14px}
@@ -691,6 +796,8 @@ body.wrapped-active #page-wrapped{position:fixed!important;inset:0!important;z-i
 [data-theme="light"][data-pattern="squares"]::before{background:linear-gradient(rgba(0,0,0,0.15) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,0.15) 1px,transparent 1px);background-size:22px 22px}
 [data-theme="light"][data-pattern="lines"]::before{background:repeating-linear-gradient(0deg,transparent,transparent 18px,rgba(0,0,0,0.07) 18px,rgba(0,0,0,0.07) 19px)}
 [data-theme="light"][data-pattern="scattered"]::before{background:radial-gradient(circle 4px at 10% 12%,rgba(0,0,0,0.3) 100%,transparent 100%),radial-gradient(circle 3px at 30% 45%,rgba(0,0,0,0.25) 100%,transparent 100%),radial-gradient(circle 5px at 55% 20%,rgba(0,0,0,0.28) 100%,transparent 100%),radial-gradient(circle 3px at 75% 65%,rgba(0,0,0,0.22) 100%,transparent 100%),radial-gradient(circle 4px at 45% 80%,rgba(0,0,0,0.25) 100%,transparent 100%),radial-gradient(circle 3.5px at 85% 35%,rgba(0,0,0,0.26) 100%,transparent 100%),radial-gradient(circle 3px at 20% 70%,rgba(0,0,0,0.2) 100%,transparent 100%),radial-gradient(circle 4px at 65% 90%,rgba(0,0,0,0.24) 100%,transparent 100%),radial-gradient(circle 2.5px at 5% 55%,rgba(0,0,0,0.18) 100%,transparent 100%),radial-gradient(circle 3px at 92% 80%,rgba(0,0,0,0.2) 100%,transparent 100%),radial-gradient(circle 4px at 40% 30%,rgba(0,0,0,0.15) 100%,transparent 100%),radial-gradient(circle 2px at 68% 50%,rgba(0,0,0,0.17) 100%,transparent 100%)}
+/* Red background with lighter lines pattern */
+[style*="background-color: rgb(226, 33, 52)"][data-pattern="lines"]::before{background:repeating-linear-gradient(0deg,transparent,transparent 18px,rgba(255,255,255,0.12) 18px,rgba(255,255,255,0.12) 19px)}
 
 /* ═══ Close & Share (fixed) ═══ */
 .wr-close{position:fixed;top:16px;right:16px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:rgba(255,255,255,0.7);cursor:pointer;z-index:1000;border-radius:50%;background:rgba(0,0,0,0.4);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:all 0.2s}
@@ -706,6 +813,7 @@ body.wrapped-active #page-wrapped{position:fixed!important;inset:0!important;z-i
 .wr-scroll-hint{display:flex;flex-direction:column;align-items:center;gap:0.3rem;font-size:0.8rem;font-weight:500;opacity:0.3;margin-top:3rem;animation:wr-bounce 2s ease-in-out infinite}
 @keyframes wr-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(8px)}}
 .wr-section-label{font-size:clamp(0.85rem,2.5vw,1.05rem);font-weight:500;text-transform:uppercase;letter-spacing:0.12em;opacity:0.65}
+.wr-section-label-small{font-size:clamp(0.65rem,2vw,0.85rem);font-weight:500;text-transform:uppercase;letter-spacing:0.12em;opacity:0.5;margin-bottom:0.5rem}
 .wr-mega-num{font-size:clamp(7rem,28vw,14rem);font-weight:900;line-height:0.85;margin:0.3rem 0;letter-spacing:-0.04em}
 .wr-stat-pill{font-size:0.9rem;font-weight:500;opacity:0.6;padding:0.6rem 1.4rem;border-radius:50px;background:rgba(255,255,255,0.1)}
 
@@ -724,6 +832,7 @@ body.wrapped-active #page-wrapped{position:fixed!important;inset:0!important;z-i
 .wr-artist-sub{font-size:clamp(1rem,3.5vw,1.5rem);font-weight:500;opacity:0.6}
 .wr-artist-hero{font-size:clamp(2.5rem,9vw,5rem);font-weight:900;line-height:1;margin:0.5rem 0}
 .wr-genre-name{font-size:clamp(3.5rem,14vw,7.5rem);font-weight:900;line-height:1;margin:0.5rem 0;text-transform:capitalize}
+.wr-genre-name-big{font-size:clamp(5rem,18vw,9rem);font-weight:900;line-height:1;margin:0.8rem 0;text-transform:capitalize}
 .wr-play-count{font-size:0.8rem;font-weight:400;opacity:0.4;margin-top:0.5rem;letter-spacing:0.05em}
 .wr-date-pill{font-size:0.85rem;font-weight:500;opacity:0.45;margin-top:1.2rem;padding:0.5rem 1.2rem;border-radius:50px;background:rgba(255,255,255,0.08)}
 
@@ -746,6 +855,18 @@ body.wrapped-active #page-wrapped{position:fixed!important;inset:0!important;z-i
 /* ═══ Avatar ═══ */
 .wr-avatar-ring-sp{width:88px;height:88px;border-radius:50%;padding:3px;background:${C.green}}
 .wr-avatar-img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+
+/* ═══ Top 5 Artists & Albums ═══ */
+.wr-top5-list{display:flex;flex-direction:column;gap:0.8rem;width:100%;max-width:360px;margin-top:2rem}
+.wr-top5-item{display:flex;align-items:center;gap:1rem;padding:0.8rem;background:rgba(255,255,255,0.08);border-radius:16px;transition:all 0.3s;backdrop-filter:blur(8px)}
+.wr-top5-item:hover{background:rgba(255,255,255,0.12);transform:translateX(4px)}
+.wr-top5-rank{font-size:1.8rem;font-weight:900;min-width:40px;opacity:0.4;text-align:center}
+.wr-top5-img{width:64px;height:64px;border-radius:12px;object-fit:cover;box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+.wr-top5-img-placeholder{width:64px;height:64px;border-radius:12px;background:rgba(255,255,255,0.1)}
+.wr-top5-info{flex:1;display:flex;flex-direction:column;gap:0.2rem}
+.wr-top5-name{font-size:1.1rem;font-weight:700;line-height:1.2}
+.wr-top5-artist{font-size:0.85rem;font-weight:500;opacity:0.6}
+.wr-top5-plays{font-size:0.75rem;font-weight:500;opacity:0.4;margin-top:0.2rem}
 
 /* ═══ Leaderboard ═══ */
 .wr-lb-list{display:flex;flex-direction:column;gap:0.5rem;padding:0 0.5rem;max-height:55vh;overflow-y:auto}

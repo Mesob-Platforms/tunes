@@ -80,7 +80,7 @@ export function removeAlbumFromDownloadedCatalog(albumId) {
 
 async function loadClientZip() {
     try {
-        const module = await import('https://cdn.jsdelivr.net/npm/client-zip@2.4.5/+esm');
+        const module = await import('client-zip');
         return module;
     } catch (error) {
         console.error('Failed to load client-zip:', error);
@@ -405,9 +405,27 @@ async function bulkDownloadSequentially(tracks, api, quality, lyricsManager, not
             await db.cacheTrackBlob(track.id, blob);
             catalogDownloadedTrack(track);
 
-            // Cache lyrics for offline access
+            // Cache lyrics for offline access - ALWAYS try to fetch and cache
             if (lyricsManager) {
-                try { await lyricsManager.fetchLyrics(track.id, track); } catch { /* silent */ }
+                try {
+                    // Force online fetch even if offline (for downloads, we want fresh lyrics)
+                    const lyricsData = await lyricsManager.fetchLyrics(track.id, track, true);
+                    if (!lyricsData) {
+                        // If fetch failed, try one more time after a short delay
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        await lyricsManager.fetchLyrics(track.id, track, true);
+                    }
+                } catch (e) {
+                    console.warn(`Failed to cache lyrics for ${track.title}:`, e);
+                    // Try one more time silently
+                    try {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await lyricsManager.fetchLyrics(track.id, track, true);
+                    } catch (e2) {
+                        // Final failure - log but don't block download
+                        console.warn(`Final lyrics fetch failed for ${track.title}`);
+                    }
+                }
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
@@ -894,9 +912,27 @@ export async function downloadTrackWithMetadata(track, quality, api, lyricsManag
         completeDownloadTask(track.id, true);
         catalogDownloadedTrack(enrichedTrack);
 
-        // Cache lyrics for offline access
+        // Cache lyrics for offline access - ALWAYS try to fetch and cache
         if (lyricsManager) {
-            try { await lyricsManager.fetchLyrics(track.id, enrichedTrack); } catch { /* silent */ }
+            try {
+                // Force online fetch even if offline (for downloads, we want fresh lyrics)
+                const lyricsData = await lyricsManager.fetchLyrics(track.id, enrichedTrack, true);
+                if (!lyricsData) {
+                    // If fetch failed, try one more time after a short delay
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await lyricsManager.fetchLyrics(track.id, enrichedTrack, true);
+                }
+            } catch (e) {
+                console.warn(`Failed to cache lyrics for ${enrichedTrack.title}:`, e);
+                // Try one more time silently
+                try {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await lyricsManager.fetchLyrics(track.id, enrichedTrack, true);
+                } catch (e2) {
+                    // Final failure - log but don't block download
+                    console.warn(`Final lyrics fetch failed for ${enrichedTrack.title}`);
+                }
+            }
         }
     } catch (error) {
         if (error.name !== 'AbortError') {

@@ -53,6 +53,10 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     }
 
     audioPlayer.addEventListener('play', () => {
+        // Reset error retry counter – track is playing successfully
+        player._errorRetryCount = 0;
+        player._playRetryCount = 0;
+
         // Initialize audio context manager for EQ (only once)
         if (!audioContextManager.isReady()) {
             audioContextManager.init(audioPlayer);
@@ -91,8 +95,7 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     });
 
     audioPlayer.addEventListener('ended', () => {
-        // If AI DJ crossfade already handled the transition, skip
-        if (window.__aiDjManager?.skipPlayNext) return;
+        // (reserved for future crossfade logic)
         player.playNext();
     });
 
@@ -184,19 +187,27 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
 
         player.isFallbackRetry = false;
 
-        // Skip to next track on error to prevent queue stalling
+        // Retry the same track a few times before skipping (handles slow networks)
         if (player.currentTrack) {
-            console.warn('Skipping to next track due to playback error');
-            setTimeout(() => player.playNext(), 1000); // Small delay to avoid rapid skipping
+            if (!player._errorRetryCount) player._errorRetryCount = 0;
+            if (player._errorRetryCount < 2) {
+                player._errorRetryCount++;
+                const delay = player._errorRetryCount * 3000; // 3s, 6s backoff
+                console.warn(`Playback error – retrying same track (attempt ${player._errorRetryCount}/2) in ${delay / 1000}s...`);
+                setTimeout(() => {
+                    player.playTrackFromQueue(0, 0);
+                }, delay);
+            } else {
+                // Retries exhausted, skip to next
+                console.warn('Skipping to next track after retries failed');
+                player._errorRetryCount = 0;
+                setTimeout(() => player.playNext(), 1000);
+            }
         }
     });
 
     playPauseBtn.addEventListener('click', () => player.handlePlayPause());
     nextBtn.addEventListener('click', () => {
-        // Record skip feedback for AI DJ if active
-        if (window.__aiDjManager?.isDJActive() && player.currentTrack) {
-            window.__aiDjManager.recordFeedback('skip', player.currentTrack);
-        }
         player.playNext();
     });
     prevBtn.addEventListener('click', () => player.playPrev());
@@ -1557,11 +1568,20 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
     });
 
     // Now playing bar interactions – clicking anywhere on the bar (except buttons/sliders/artist-links) opens fullscreen
-    document.querySelector('.now-playing-bar').addEventListener('click', (e) => {
-        // Skip if click is on interactive elements
-        if (e.target.closest('button, input, .progress-bar, .volume-bar, .artist-link, .player-controls .buttons')) return;
-        document.querySelector('.now-playing-bar .cover')?.click();
-    });
+    const nowPlayingBar = document.querySelector('.now-playing-bar');
+    if (nowPlayingBar) {
+        nowPlayingBar.addEventListener('click', (e) => {
+            // If clicking directly on the cover, let it handle its own click
+            if (e.target.closest('.cover')) {
+                // The cover has its own click handler, just ensure it's not blocked
+                return;
+            }
+            // Skip if click is on interactive elements
+            if (e.target.closest('button, input, .progress-bar, .volume-bar, .artist-link, .player-controls .buttons')) return;
+            // Otherwise, trigger the cover click
+            document.querySelector('.now-playing-bar .cover')?.click();
+        });
+    }
 
     document.querySelector('.now-playing-bar .artist').addEventListener('click', (e) => {
         const link = e.target.closest('.artist-link');

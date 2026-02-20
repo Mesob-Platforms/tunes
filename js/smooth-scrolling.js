@@ -1,53 +1,13 @@
 //js/smooth-scrolling.js
 import { smoothScrollingSettings } from './storage.js';
+import Lenis from 'lenis';
 
 let lenis = null;
-let lenisLoaded = false;
-let lenisLoading = false;
-
-async function loadLenisScript() {
-    if (lenisLoaded) return true;
-    if (lenisLoading) {
-        return new Promise((resolve) => {
-            const checkLoaded = setInterval(() => {
-                if (!lenisLoading) {
-                    clearInterval(checkLoaded);
-                    resolve(lenisLoaded);
-                }
-            }, 100);
-        });
-    }
-
-    lenisLoading = true;
-
-    try {
-        await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://unpkg.com/@studio-freight/lenis';
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-
-        lenisLoaded = true;
-        lenisLoading = false;
-        console.log('✓ Lenis loaded successfully');
-        return true;
-    } catch (error) {
-        console.error('✗ Failed to load Lenis:', error);
-        lenisLoaded = false;
-        lenisLoading = false;
-        return false;
-    }
-}
 
 async function initializeSmoothScrolling() {
     if (lenis) return; // Already initialized
 
-    const loaded = await loadLenisScript();
-    if (!loaded) return;
-
-    lenis = new window.Lenis({
+    lenis = new Lenis({
         wrapper: document.querySelector('.main-content'),
         content: document.querySelector('.main-content'),
         lerp: 0.1,

@@ -924,12 +924,14 @@ export class MusicDatabase {
 
     /**
      * Check whether lyrics are cached for a track.
+     * Returns true only if lyrics exist AND have subtitles content.
      */
     async hasLyrics(trackId) {
         const entry = await this.performTransaction('cached_lyrics', 'readonly', (store) =>
             store.get(String(trackId))
         );
-        return !!entry;
+        // Verify that entry exists AND has subtitles (not just empty/null)
+        return !!(entry && entry.subtitles && entry.subtitles.trim().length > 0);
     }
 
     /**

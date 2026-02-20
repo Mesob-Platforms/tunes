@@ -13,25 +13,14 @@
         <meta name="description" content="A minimalist music streaming application" />
         <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
         <link rel="manifest" href="/manifest.json" />
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=Tiny5&family=Cinzel:wght@400..900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+        <!-- All fonts bundled locally (no Google Fonts CDN) -->
+        <link rel="stylesheet" href="/fonts/fonts.css" />
         <link rel="icon" href="/favicon.png" type="image/png" />
-        <!-- Preconnect hints for fastest DNS+TLS handshake -->
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <!-- Preconnect hints for API/CDN resources -->
         <link rel="preconnect" href="https://resources.tidal.com" crossorigin />
         <link rel="preconnect" href="https://arran.monochrome.tf" crossorigin />
         <!-- Preload instances.json so first API call doesn't waterfall -->
         <link rel="preload" href="/instances.json" as="fetch" crossorigin />
-        <!-- Primary font - render-blocking is OK for body text -->
-        <link
-            href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&family=Inter:wght@400;500;600;700;800&display=swap"
-            rel="stylesheet"
-        />
-        <!-- Material Symbols - deferred (non-render-blocking) -->
-        <link rel="preload" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
-        <noscript><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet" /></noscript>
         <link rel="stylesheet" href="/styles.css" />
         <style>
             #auth-gate input::placeholder {
@@ -57,7 +46,7 @@
             <div id="gate-screen-email" class="gate-screen" style="max-width:380px;width:100%;text-align:center;">
                 <div style="margin-bottom:1.5rem;">
                     <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY NAOLMID</span>
+                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
                 </div>
                 <p style="opacity:0.4;font-size:0.85rem;margin:0 0 2rem;color:#fff;font-family:'DM Sans',sans-serif;">Sign in to continue</p>
 
@@ -87,7 +76,7 @@
             <div id="gate-screen-password" class="gate-screen" style="display:none;max-width:380px;width:100%;text-align:center;">
                 <div style="margin-bottom:1.5rem;">
                     <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY NAOLMID</span>
+                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
                 </div>
                 <h2 style="font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 0.35rem;font-family:'DM Sans',sans-serif;">Welcome back</h2>
                 <p id="gate-password-subtitle" style="opacity:0.4;font-size:0.82rem;margin:0 0 1.75rem;color:#fff;font-family:'DM Sans',sans-serif;"></p>
@@ -109,7 +98,7 @@
             <div id="gate-screen-otp" class="gate-screen" style="display:none;max-width:380px;width:100%;text-align:center;">
                 <div style="margin-bottom:1.5rem;">
                     <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY NAOLMID</span>
+                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
                 </div>
                 <h2 style="font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 0.35rem;font-family:'DM Sans',sans-serif;">Check your email</h2>
                 <p id="gate-otp-subtitle" style="opacity:0.4;font-size:0.82rem;margin:0 0 1.75rem;color:#fff;font-family:'DM Sans',sans-serif;">We sent a code to your email</p>
@@ -130,7 +119,7 @@
             <div id="gate-screen-setpassword" class="gate-screen" style="display:none;max-width:380px;width:100%;text-align:center;">
                 <div style="margin-bottom:1.5rem;">
                     <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY NAOLMID</span>
+                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
                 </div>
                 <h2 id="gate-setpw-title" style="font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 0.35rem;font-family:'DM Sans',sans-serif;">Create your password</h2>
                 <p id="gate-setpw-subtitle" style="opacity:0.4;font-size:0.82rem;margin:0 0 1.75rem;color:#fff;font-family:'DM Sans',sans-serif;">You'll use this to sign in next time</p>
@@ -644,7 +633,7 @@
                     <div class="sidebar-logo">
                         <div class="app-logo-text">
                             <span class="logo-tunes">tunes</span>
-                            <span class="logo-byline">BY NAOLMID</span>
+                            <span class="logo-byline">BY MESOB</span>
                         </div>
                         <button
                             id="sidebar-toggle"
@@ -758,7 +747,7 @@
                     </button>
                     <div class="home-header-title" id="home-header-title">
                         <span class="logo-tunes">tunes</span>
-                        <span class="logo-byline">BY NAOLMID</span>
+                        <span class="logo-byline">BY MESOB</span>
                     </div>
                     <form class="search-bar" id="search-form">
                         <svg
@@ -1664,43 +1653,6 @@
                     <div id="wrapped-container"></div>
                 </div>
 
-                <!-- AI DJ -->
-                <div id="page-ai-dj" class="page">
-                    <div class="ai-dj-container">
-                        <!-- Glassmorphism background layer -->
-                        <div class="ai-dj-bg"></div>
-
-                        <!-- Top status area -->
-                        <div class="ai-dj-header">
-                            <span class="ai-dj-badge">AI DJ</span>
-                            <span class="ai-dj-status" id="ai-dj-status">Ready to vibe</span>
-                        </div>
-
-                        <!-- Persona visualization canvas -->
-                        <div class="ai-dj-persona-wrap">
-                            <canvas id="ai-dj-persona-canvas"></canvas>
-                            <div class="ai-dj-commentary" id="ai-dj-commentary"></div>
-                        </div>
-
-                        <!-- Suggestion chips -->
-                        <div class="ai-dj-chips" id="ai-dj-chips"></div>
-
-                        <!-- Input area -->
-                        <div class="ai-dj-input-area">
-                            <div class="ai-dj-input-row">
-                                <input type="text" id="ai-dj-text-input" class="ai-dj-text-input" placeholder="Tell me what you wanna hear..." autocomplete="off" />
-                                <button id="ai-dj-send-btn" class="ai-dj-send-btn" aria-label="Send">
-                                    <span class="material-symbols-rounded">send</span>
-                                </button>
-                            </div>
-                            <button id="ai-dj-mic-btn" class="ai-dj-mic-btn" aria-label="Hold to talk">
-                                <span class="material-symbols-rounded">mic</span>
-                                <span class="ai-dj-mic-label">Hold to talk</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Admin Dashboard (admin only) -->
                 <div id="page-admin" class="page">
                     <div style="max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem;">
@@ -1746,27 +1698,6 @@
                                 </div>
                             </div>
 
-                            <!-- Daily Activity Sparkline -->
-                            <div id="admin-daily-sparkline" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
-                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Daily Activity <span style="opacity:0.6;">(30d)</span></p>
-                                <div id="admin-sparkline-bars" style="display:flex;align-items:flex-end;gap:2px;height:60px;"></div>
-                            </div>
-
-                            <!-- Peak Hours Heatmap -->
-                            <div id="admin-peak-hours" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
-                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Peak Listening Hours</p>
-                                <div id="admin-heatmap" style="display:grid;grid-template-columns:repeat(12,1fr);gap:3px;"></div>
-                                <div style="display:flex;justify-content:space-between;margin-top:0.35rem;opacity:0.2;font-size:0.55rem;">
-                                    <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>11pm</span>
-                                </div>
-                            </div>
-
-                            <!-- Genre Breakdown -->
-                            <div id="admin-genre-section" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
-                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Genre Breakdown</p>
-                                <div id="admin-genre-bars" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
-                            </div>
-
                             <!-- User List Panel (hidden by default) -->
                             <div id="admin-user-list-panel" style="display:none;background:var(--card);border-radius:16px;padding:1.25rem;margin-bottom:1.25rem;">
                                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
@@ -1789,6 +1720,27 @@
                                     <button id="admin-user-delete-btn" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;cursor:pointer;font-size:0.75rem;padding:0.4rem 0.85rem;border-radius:8px;font-weight:500;">Delete Account</button>
                                 </div>
                                 <div id="admin-user-detail-content"></div>
+                            </div>
+
+                            <!-- Daily Activity Sparkline -->
+                            <div id="admin-daily-sparkline" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Daily Activity <span style="opacity:0.6;">(30d)</span></p>
+                                <div id="admin-sparkline-bars" style="display:flex;align-items:flex-end;gap:2px;height:60px;"></div>
+                            </div>
+
+                            <!-- Peak Hours Heatmap -->
+                            <div id="admin-peak-hours" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Peak Listening Hours</p>
+                                <div id="admin-heatmap" style="display:grid;grid-template-columns:repeat(12,1fr);gap:3px;"></div>
+                                <div style="display:flex;justify-content:space-between;margin-top:0.35rem;opacity:0.2;font-size:0.55rem;">
+                                    <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>11pm</span>
+                                </div>
+                            </div>
+
+                            <!-- Genre Breakdown -->
+                            <div id="admin-genre-section" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Genre Breakdown</p>
+                                <div id="admin-genre-bars" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
                             </div>
 
                             <!-- Trending Now - horizontal scroll -->
@@ -2068,23 +2020,49 @@
                         <div class="about-hero">
                             <h1 class="about-app-name">
                                 <span class="logo-tunes">tunes</span>
-                                <span class="logo-byline">BY NAOLMID</span>
+                                <span class="logo-byline">BY MESOB</span>
                             </h1>
                             <p class="about-tagline">A music streaming app built with love for music.</p>
                             </div>
 
-                        <div class="about-creator">
+                        <!-- Mesob Platforms Org Card -->
+                        <div class="about-creator" style="margin-bottom: 1rem;">
+                            <div class="about-creator-header">
+                                <img class="about-creator-avatar" src="" alt="MP" id="about-org-avatar-img" style="width:52px;height:52px;border-radius:50%;object-fit:cover;" />
+                                <div class="about-creator-info">
+                                    <h3 class="about-creator-name">Mesob Platforms</h3>
+                                    <p class="about-creator-bio">The team behind Tunes</p>
+                                    <p class="about-creator-location">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                                        Ethiopia
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="about-creator-links">
+                                <a href="https://github.com/Mesob-Platforms" target="_blank" rel="noopener noreferrer" class="about-link">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                                    GitHub
+                                </a>
+                                <a href="http://mesobplatforms.et" target="_blank" rel="noopener noreferrer" class="about-link">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                    Website
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Naol Mideksa Creator Card -->
+                        <div class="about-creator" style="margin-bottom: 1rem;">
                             <div class="about-creator-header">
                                 <img class="about-creator-avatar" src="" alt="NM" id="about-creator-avatar-img" style="width:52px;height:52px;border-radius:50%;object-fit:cover;" />
                                 <div class="about-creator-info">
                                     <h3 class="about-creator-name">Naol Mideksa</h3>
-                                    <p class="about-creator-bio">Computer Science Sophomore &bull; Full Stack Developer &bull; Tech & Music Enthusiast</p>
+                                    <p class="about-creator-bio">Sophomore &bull; Full Stack Developer &bull; Tech &amp; Music Enthusiast</p>
                                     <p class="about-creator-location">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
                                         Ambo, Ethiopia
                                     </p>
+                                </div>
                             </div>
-                        </div>
                             <div class="about-creator-links">
                                 <a href="https://github.com/naolmid" target="_blank" rel="noopener noreferrer" class="about-link">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -2098,25 +2076,50 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
                                     Telegram
                                 </a>
-                                <a href="https://www.linkedin.com/in/naolmideksa" target="_blank" rel="noopener noreferrer" class="about-link">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-                                    LinkedIn
-                                </a>
                                 <a href="https://roadmap.sh/u/naolmid" target="_blank" rel="noopener noreferrer" class="about-link">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6H5a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h13l4-3.5L18 6Z"/><path d="M12 13v8"/><path d="M12 3v3"/></svg>
                                     Roadmap
-                            </a>
+                                </a>
+                            </div>
                         </div>
-                </div>
+
+                        <!-- z-fly1 Creator Card -->
+                        <div class="about-creator">
+                            <div class="about-creator-header">
+                                <img class="about-creator-avatar" src="" alt="AF" id="about-zfly1-avatar-img" style="width:52px;height:52px;border-radius:50%;object-fit:cover;" />
+                                <div class="about-creator-info">
+                                    <h3 class="about-creator-name">Addisu</h3>
+                                    <p class="about-creator-bio">Co-builder &bull; Mesob Platforms</p>
+                                    <p class="about-creator-location">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                                        Ethiopia
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="about-creator-links">
+                                <a href="https://github.com/z-fly1" target="_blank" rel="noopener noreferrer" class="about-link">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                                    GitHub
+                                </a>
+                                <a href="https://t.me/z_fly1" target="_blank" rel="noopener noreferrer" class="about-link">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+                                    Telegram
+                                </a>
+                                <a href="https://instagram.com/_a.d.i.s.u_" target="_blank" rel="noopener noreferrer" class="about-link">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
+                                    Instagram
+                                </a>
+                            </div>
+                        </div>
 
                         <div class="donate-section">
                             <div class="donate-emoji">&#9749;</div>
-                            <h3 class="donate-heading">Buy Me Some Real Food</h3>
+                            <h3 class="donate-heading">Buy Us Some Real Food</h3>
                             <p class="donate-story">
-                                Real talk &mdash; I'm a CS student at an Ethiopian university surviving on cafeteria food that even the flies avoid. I built this entire app between classes, late nights, and questionable dining hall meals. I've got TeleBirr debt piling up and my CBE account is looking sadder than a buffering song at 1%.
+                                We're uni students in Ethiopia who built this between classes, late nights and hungry coz of the shitty uni food. One of us has even stacked TeleBirr debt, and is coding on a laptop with a broken keyboard that desperately needs replacing &#128546;
                             </p>
                             <p class="donate-story" style="margin-top: 0.5rem;">
-                                If Tunes has made your day even a little better, you can make mine a LOT better. Even a small donation means I get to eat something that doesn't taste like regret. Every birr counts &hearts;
+                                If Tunes made your day better, you can make ours a LOT better. Every birr counts &hearts;
                             </p>
 
                             <div class="donate-methods">
@@ -2126,14 +2129,14 @@
                                         <div>
                                             <span class="donate-card-title">TeleBirr</span>
                                             <span class="donate-card-subtitle">Mobile Money</span>
-                        </div>
-                        </div>
+                                        </div>
+                                    </div>
                                     <div class="donate-card-number" onclick="navigator.clipboard.writeText('0993353064').then(()=>{this.querySelector('.copy-feedback').style.opacity=1;setTimeout(()=>this.querySelector('.copy-feedback').style.opacity=0,1500)})">
                                         <span class="donate-number-text">0993353064</span>
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                                         <span class="copy-feedback">Copied!</span>
-                            </div>
-                        </div>
+                                    </div>
+                                </div>
 
                                 <div class="donate-card">
                                     <div class="donate-card-header">
@@ -2141,7 +2144,7 @@
                                         <div>
                                             <span class="donate-card-title">CBE (Commercial Bank of Ethiopia)</span>
                                             <span class="donate-card-subtitle">Bank Transfer</span>
-                        </div>
+                                        </div>
                                     </div>
                                     <div class="donate-card-number" onclick="navigator.clipboard.writeText('1000378776132').then(()=>{this.querySelector('.copy-feedback').style.opacity=1;setTimeout(()=>this.querySelector('.copy-feedback').style.opacity=0,1500)})">
                                         <span class="donate-number-text">1000378776132</span>
@@ -2181,7 +2184,7 @@
                                 </div>
                             </div>
 
-                            <p class="donate-thanks">Thank you for keeping me (and this app) alive &#128591;</p>
+                            <p class="donate-thanks">Thank you for keeping us (and this app) alive &#128591;</p>
                         </div>
 
                         <div class="about-footer" style="margin-top: 2rem;">
@@ -2189,7 +2192,7 @@
                                 This app does not host or distribute any media files. All content is provided by third-party APIs.
                             </p>
                             <p class="app-version" style="opacity: 0.3; font-size: 0.65rem; margin-top: 1rem; text-align: center; letter-spacing: 0.04em; font-weight: 500;">
-                                tunes bynaolmid v1.0.0
+                                tunes by mesob v1.0.0
                             </p>
                         </div>
                     </div>
@@ -2198,11 +2201,11 @@
                     <div class="contact-content">
                         <div class="contact-hero">
                             <div class="contact-avatar-wrapper">
-                                <img class="contact-avatar" src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=naol-mideksa" alt="Naol Mideksa" />
+                                <img class="contact-avatar" src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=mesob-platforms" alt="Mesob Platforms" />
                                 <div class="contact-avatar-glow"></div>
                             </div>
-                            <h1 class="contact-name">Naol Mideksa</h1>
-                            <p class="contact-role">Creator of Tunes</p>
+                            <h1 class="contact-name">Mesob Platforms</h1>
+                            <p class="contact-role">The team behind Tunes</p>
                         </div>
 
                         <div class="contact-card">
@@ -2211,11 +2214,12 @@
                             </div>
                             <h2 class="contact-card-title">Let's Talk</h2>
                             <p class="contact-card-desc">
-                                Got an idea? Want to collaborate? Interested in running ads on Tunes? Just wanna say hi? I'm all ears. Reach out through any of the channels below &mdash; I'll get back to you as soon as I can.
+                                Got an idea? Want to collaborate? Interested in running ads on Tunes? Just wanna say hi? We're all ears. Reach out through any of the channels below &mdash; we'll get back to you as soon as we can.
                             </p>
                         </div>
 
-                        <div class="contact-methods">
+                        <p style="font-size:0.78rem;opacity:0.45;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;padding-left:0.25rem;">Naol</p>
+                        <div class="contact-methods" style="margin-bottom:1.25rem;">
                             <a href="https://instagram.com/naol.mid" target="_blank" rel="noopener noreferrer" class="contact-method">
                                 <div class="contact-method-icon" style="background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
@@ -2250,6 +2254,55 @@
                             </a>
                         </div>
 
+                        <p style="font-size:0.78rem;opacity:0.45;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;padding-left:0.25rem;">Addisu (z-fly1)</p>
+                        <div class="contact-methods" style="margin-bottom:1.25rem;">
+                            <a href="https://instagram.com/_a.d.i.s.u_" target="_blank" rel="noopener noreferrer" class="contact-method">
+                                <div class="contact-method-icon" style="background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
+                                </div>
+                                <div class="contact-method-info">
+                                    <span class="contact-method-label">Instagram</span>
+                                    <span class="contact-method-handle">@_a.d.i.s.u_</span>
+                                </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="contact-method-arrow"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                            </a>
+
+                            <a href="https://t.me/z_fly1" target="_blank" rel="noopener noreferrer" class="contact-method">
+                                <div class="contact-method-icon" style="background: #2AABEE;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+                                </div>
+                                <div class="contact-method-info">
+                                    <span class="contact-method-label">Telegram</span>
+                                    <span class="contact-method-handle">@z_fly1</span>
+                                </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="contact-method-arrow"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                            </a>
+
+                            <a href="mailto:addisu@mesobplatforms.et" class="contact-method">
+                                <div class="contact-method-icon" style="background: #EA4335;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                                </div>
+                                <div class="contact-method-info">
+                                    <span class="contact-method-label">Email</span>
+                                    <span class="contact-method-handle">addisu@mesobplatforms.et</span>
+                                </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="contact-method-arrow"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                            </a>
+                        </div>
+
+                        <div class="contact-methods" style="margin-bottom:1.25rem;">
+                            <a href="http://mesobplatforms.et" target="_blank" rel="noopener noreferrer" class="contact-method">
+                                <div class="contact-method-icon" style="background: #333;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                </div>
+                                <div class="contact-method-info">
+                                    <span class="contact-method-label">Website</span>
+                                    <span class="contact-method-handle">mesobplatforms.et</span>
+                                </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="contact-method-arrow"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                            </a>
+                        </div>
+
                         <div class="contact-cta-section">
                             <h3 class="contact-cta-title">What can we work on?</h3>
                             <div class="contact-tags">
@@ -2263,7 +2316,7 @@
                         </div>
 
                         <p class="contact-footer-note">
-                            I usually respond within 24 hours. Telegram is the fastest way to reach me.
+                            We usually respond within 24 hours. Telegram is the fastest way to reach us.
                         </p>
                     </div>
                 </div>
@@ -2553,10 +2606,6 @@
                 <a href="/library" class="tab-item" data-tab="library">
                     <span class="material-symbols-rounded tab-icon">library_music</span>
                     <span class="tab-label">Library</span>
-                </a>
-                <a href="/ai-dj" class="tab-item" data-tab="ai-dj">
-                    <span class="material-symbols-rounded tab-icon">radio</span>
-                    <span class="tab-label">AI DJ</span>
                 </a>
                 <a href="/account" class="tab-item" data-tab="account">
                     <span class="material-symbols-rounded tab-icon">person</span>

@@ -9,7 +9,7 @@ bucket = "./dist"
 [ai]
 binding = "AI"
 
-# Cron trigger: archive listening data to Telegram every 7 days
+# Cron trigger: runs daily at midnight UTC; archive logic skips unless 7 days have passed
 [triggers]
-crons = ["0 0 */7 * *"]
+crons = ["0 0 * * *"]
 
