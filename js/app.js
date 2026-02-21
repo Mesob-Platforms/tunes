@@ -15,6 +15,10 @@ import { syncManager } from './accounts/supabaseSync.js';
 import { authManager } from './accounts/auth.js';
 import { getAvatarUrl } from './accounts/profile.js';
 import { registerSW } from './pwa-stub.js';
+import { apiUrl } from './platform.js';
+import { initMediaBridge } from './mediaBridge.js';
+import { isNative } from './platform.js';
+import { initNetworkMonitor, onNetworkChange, checkAndClearStaleCache } from './networkMonitor.js';
 import './smooth-scrolling.js';
 // Lazy-loaded modules
 let settingsModule = null;
@@ -182,37 +186,23 @@ function initializeKeyboardShortcuts(player, audioPlayer) {
     });
 }
 
-function showOfflineNotification() {
-    const notification = document.createElement('div');
-    notification.className = 'offline-notification';
-    notification.innerHTML = `
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-        <span>You are offline. Some features may not work.</span>
-    `;
-    document.body.appendChild(notification);
-
-    setTimeout(() => {
-        notification.style.animation = 'slide-out 0.3s ease forwards';
-        setTimeout(() => notification.remove(), 300);
-    }, 5000);
-}
-
-function hideOfflineNotification() {
-    const notification = document.querySelector('.offline-notification');
-    if (notification) {
-        notification.style.animation = 'slide-out 0.3s ease forwards';
-        setTimeout(() => notification.remove(), 300);
-    }
-}
-
 document.addEventListener('DOMContentLoaded', async () => {
+    // ── Version-based cache clear (must run before other init) ──
+    await checkAndClearStaleCache();
+
+    // ── Unified network monitoring (Capacitor Network on native, browser events on web) ──
+    initNetworkMonitor();
+
     const api = new LosslessAPI(apiSettings);
 
     const audioPlayer = document.getElementById('audio-player');
+
+    // ── Native: strip crossorigin so audio CDN requests aren't CORS-blocked ──
+    if (isNative) {
+        audioPlayer.removeAttribute('crossorigin');
+        // Add native-app class for CSS perf optimizations (disable backdrop-filter blur)
+        document.body.classList.add('native-app');
+    }
 
     // Streaming quality hardcoded to LOW
     const player = new Player(audioPlayer, api, 'LOW');
@@ -223,6 +213,83 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Expose refs for cross-module access (e.g. admin panel auth)
     window.__tunesRefs = { authManager, ui, api, player };
+
+    // Initialize native media bridge (Android foreground service + notification)
+    initMediaBridge(player, audioPlayer, api);
+
+    // Native Android hardware back button handler
+    if (isNative) {
+        import('@capacitor/app').then(({ App }) => {
+            let lastBackPress = 0;
+            App.addListener('backButton', ({ canGoBack }) => {
+                // Priority 1: close playlist modal
+                const playlistModal = document.getElementById('playlist-modal');
+                if (playlistModal?.classList.contains('active')) {
+                    playlistModal.classList.remove('active');
+                    return;
+                }
+                // Priority 2: close folder modal
+                const folderModal = document.getElementById('folder-modal');
+                if (folderModal?.classList.contains('active')) {
+                    folderModal.classList.remove('active');
+                    return;
+                }
+                // Priority 3: close any other active modal
+                const activeModal = document.querySelector('.modal.active');
+                if (activeModal) {
+                    activeModal.classList.remove('active');
+                    return;
+                }
+                // Priority 4: close side panel
+                const sidePanel = document.getElementById('side-panel');
+                if (sidePanel?.classList.contains('active')) {
+                    sidePanelManager.close();
+                    return;
+                }
+                // Priority 5: close fullscreen cover overlay
+                const overlay = document.getElementById('fullscreen-cover-overlay');
+                if (overlay && overlay.style.display !== 'none' && overlay.style.display !== '') {
+                    if (window.location.hash === '#fullscreen') {
+                        window.history.back();
+                    } else {
+                        ui.closeFullscreenCover();
+                    }
+                    return;
+                }
+                // Priority 6: close mobile sidebar
+                const sidebar = document.querySelector('.sidebar.is-open');
+                if (sidebar) {
+                    sidebar.classList.remove('is-open');
+                    document.getElementById('sidebar-overlay')?.classList.remove('is-visible');
+                    return;
+                }
+                // Priority 7: go back in history
+                if (canGoBack) {
+                    window.history.back();
+                } else {
+                    // Double-tap to exit
+                    const now = Date.now();
+                    if (now - lastBackPress < 2000) {
+                        App.exitApp();
+                    } else {
+                        lastBackPress = now;
+                        // Show brief toast
+                        const { showNotification } = window.__tunesDownloads || {};
+                        if (typeof showNotification === 'function') {
+                            showNotification('Press back again to exit');
+                        }
+                    }
+                }
+            });
+        }).catch(e => console.warn('[BackButton] @capacitor/app not available:', e));
+
+        // ── Status Bar: solid dark background with white icons, no overlay ──
+        import('@capacitor/status-bar').then(({ StatusBar, Style }) => {
+            StatusBar.setOverlaysWebView({ overlay: false });
+            StatusBar.setStyle({ style: Style.Dark }); // Dark = white icons
+            StatusBar.setBackgroundColor({ color: '#000000' });
+        }).catch(e => console.warn('[StatusBar] @capacitor/status-bar not available:', e));
+    }
 
     // Initialize auth — check for existing session & wire up auth gate forms
     authManager.init();
@@ -306,10 +373,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     // Check browser support for local files
+    // On native Android, File System Access API is unavailable — hide entire section
     const selectLocalBtn = document.getElementById('select-local-folder-btn');
     const browserWarning = document.getElementById('local-browser-warning');
 
-    if (selectLocalBtn && browserWarning) {
+    if (isNative) {
+        // Hide local files UI completely on native (WebView has no showDirectoryPicker)
+        if (selectLocalBtn) selectLocalBtn.style.display = 'none';
+        if (browserWarning) browserWarning.style.display = 'none';
+        const localIntro = document.getElementById('local-files-intro');
+        if (localIntro) localIntro.style.display = 'none';
+    } else if (selectLocalBtn && browserWarning) {
         const ua = navigator.userAgent;
         const isChromeOrEdge = (ua.indexOf('Chrome') > -1 || ua.indexOf('Edg') > -1) && !/Mobile|Android/.test(ua);
         const hasFileSystemApi = 'showDirectoryPicker' in window;
@@ -342,8 +416,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeUIInteractions(player, api, ui);
     initializeKeyboardShortcuts(player, audioPlayer);
 
-    const castBtn = document.getElementById('cast-btn');
-    initializeCasting(audioPlayer, castBtn);
+    // Casting is not supported in native Android WebView — skip entirely
+    if (!isNative) {
+        const castBtn = document.getElementById('cast-btn');
+        initializeCasting(audioPlayer, castBtn);
+    } else {
+        // Hide all cast-related buttons on native
+        document.querySelectorAll('#cast-btn, #fs-cast-btn').forEach(el => {
+            el.style.display = 'none';
+        });
+    }
 
     // Defer non-critical modules - load in background after router runs
     const deferredInit = async () => {
@@ -1544,8 +1626,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // Local Files Logic lollll
-        if (e.target.closest('#select-local-folder-btn') || e.target.closest('#change-local-folder-btn')) {
+        // Local Files Logic lollll (skip entirely on native — no File System Access API)
+        if (!isNative && (e.target.closest('#select-local-folder-btn') || e.target.closest('#change-local-folder-btn'))) {
             try {
                 const handle = await window.showDirectoryPicker({
                     id: 'music-folder',
@@ -1673,18 +1755,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    window.addEventListener('online', async () => {
-        hideOfflineNotification();
-        console.log('Back online');
-        
-        // Sync pending offline events
-        const { offlineSync } = await import('./offlineSync.js');
-        offlineSync.syncPendingEvents();
-    });
-
-    window.addEventListener('offline', () => {
-        showOfflineNotification();
-        console.log('Gone offline');
+    // ── Network-aware offline sync (uses unified networkMonitor) ──
+    onNetworkChange(async (online) => {
+        if (online) {
+            const { offlineSync } = await import('./offlineSync.js');
+            offlineSync.syncPendingEvents();
+        }
     });
 
     // Initialize offline sync and start periodic sync
@@ -1923,7 +1999,7 @@ async function _initUpdateNotificationBar() {
     const bar = document.getElementById('update-notification-bar');
     if (!bar) return;
     try {
-        const res = await fetch('/api/updates/check');
+        const res = await fetch(apiUrl('/api/updates/check'));
         const updates = await res.json();
         if (!Array.isArray(updates) || updates.length === 0) { bar.style.display = 'none'; return; }
 
@@ -2116,7 +2192,7 @@ const _annDataMap = new Map();
 
 async function _initAnnouncementBanners() {
     try {
-        const res = await fetch('/api/announcements/active');
+        const res = await fetch(apiUrl('/api/announcements/active'));
         const announcements = await res.json();
         if (!Array.isArray(announcements) || announcements.length === 0) return;
 
@@ -2818,7 +2894,7 @@ async function _trackEvent(itemType, itemId, eventType) {
 
     // Try direct send if online
     try {
-        const res = await fetch('/api/track-event', {
+        const res = await fetch(apiUrl('/api/track-event'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

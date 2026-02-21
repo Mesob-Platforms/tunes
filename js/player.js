@@ -9,9 +9,10 @@ import {
     getTrackYearDisplay,
     createQualityBadgeHTML,
 } from './utils.js';
-import { queueManager, replayGainSettings, trackDateSettings } from './storage.js';
+import { queueManager, replayGainSettings, trackDateSettings, crossfadeSettings } from './storage.js';
 import { audioContextManager } from './audio-context.js';
 import { db } from './db.js';
+import { onTrackChanged, pushNowPlaying, setSleepTimerNative, clearSleepTimerNative } from './mediaBridge.js';
 
 export class Player {
     constructor(audioElement, api, quality = 'HI_RES_LOSSLESS') {
@@ -37,6 +38,12 @@ export class Player {
         this.sleepTimer = null;
         this.sleepTimerEndTime = null;
         this.sleepTimerInterval = null;
+
+        // Crossfade properties
+        this._isCrossfading = false;
+        this._isFadingIn = false;
+        this._crossfadeVolumeFactor = 1;
+        this._crossfadeRaf = null;
 
         // Initialize dash.js player
         this.dashPlayer = MediaPlayer().create();
@@ -102,8 +109,8 @@ export class Player {
             scale = 1.0 / peak;
         }
 
-        // Calculate effective volume
-        const effectiveVolume = this.userVolume * scale;
+        // Calculate effective volume (includes crossfade factor)
+        const effectiveVolume = this.userVolume * scale * this._crossfadeVolumeFactor;
 
         // Apply to audio element
         this.audio.volume = Math.max(0, Math.min(1, effectiveVolume));
@@ -358,6 +365,8 @@ export class Player {
         this.updateMediaSessionPlaybackState();
 
         // ── Check IndexedDB cache for offline / downloaded tracks ──
+        // ALWAYS check cache first - if offline, ONLY use cached tracks
+        const isOffline = !navigator.onLine;
         try {
             const cachedBlob = await db.getCachedTrackBlob(track.id);
             if (cachedBlob) {
@@ -394,9 +403,28 @@ export class Player {
                 await this.audio.play();
                 this.preloadNextTracks();
                 return; // played from cache – done
+            } else if (isOffline) {
+                // Offline and track not downloaded - skip it
+                console.warn(`Track "${trackTitle}" is not downloaded. Skipping (offline mode).`);
+                if (typeof showNotification === 'function') {
+                    showNotification(`"${trackTitle}" is not downloaded. Skipping (offline mode).`);
+                }
+                track.isUnavailable = true;
+                this.playNext();
+                return;
             }
         } catch (cacheErr) {
-            console.warn('Cache lookup failed, falling back to streaming:', cacheErr);
+            console.warn('Cache lookup failed:', cacheErr);
+            if (isOffline) {
+                // Offline and cache lookup failed - skip it
+                console.warn(`Cannot play "${trackTitle}" offline. Skipping.`);
+                if (typeof showNotification === 'function') {
+                    showNotification(`Cannot play "${trackTitle}" offline. Skipping.`);
+                }
+                track.isUnavailable = true;
+                this.playNext();
+                return;
+            }
         }
 
         try {
@@ -508,6 +536,17 @@ export class Player {
                 }
                 await this.audio.play();
             } else {
+                // If offline, don't try to fetch from API - only use cached tracks
+                if (isOffline) {
+                    console.warn(`Track "${trackTitle}" is not downloaded. Skipping (offline mode).`);
+                    if (typeof showNotification === 'function') {
+                        showNotification(`"${trackTitle}" is not downloaded. Skipping (offline mode).`);
+                    }
+                    track.isUnavailable = true;
+                    this.playNext();
+                    return;
+                }
+                
                 // Get track data for ReplayGain (should be cached by API)
                 const trackData = await this.api.getTrack(track.id, this.quality);
 
@@ -929,11 +968,16 @@ export class Player {
 
         this.updateMediaSessionPlaybackState();
         this.updateMediaSessionPositionState();
+
+        // Push track metadata to native foreground service (Android)
+        onTrackChanged();
     }
 
     updateMediaSessionPlaybackState() {
         if (!('mediaSession' in navigator)) return;
         navigator.mediaSession.playbackState = this.audio.paused ? 'paused' : 'playing';
+        // Mirror state to native foreground service (Android)
+        pushNowPlaying();
     }
 
     updateMediaSessionPositionState() {
@@ -957,6 +1001,92 @@ export class Player {
         }
     }
 
+    // ── Crossfade Methods ──
+
+    /**
+     * Begin fading out the current track. Called from events.js when
+     * remaining playback time equals the crossfade duration.
+     */
+    startCrossfadeOut(durationSeconds) {
+        if (this._isCrossfading) return;
+        this._isCrossfading = true;
+        this._isFadingIn = false;
+
+        const startTime = performance.now();
+        const durationMs = durationSeconds * 1000;
+
+        const animate = () => {
+            const elapsed = performance.now() - startTime;
+            const progress = Math.min(1, elapsed / durationMs);
+
+            // Smooth ease-out curve for natural-sounding fade
+            this._crossfadeVolumeFactor = 1 - progress;
+            this.applyReplayGain();
+
+            if (progress < 1 && this._isCrossfading && !this._isFadingIn) {
+                this._crossfadeRaf = requestAnimationFrame(animate);
+            }
+        };
+
+        this._crossfadeRaf = requestAnimationFrame(animate);
+    }
+
+    /**
+     * Fade the new track in after a crossfade transition.
+     * Called from the 'play' event handler when _isCrossfading is true.
+     */
+    startCrossfadeIn() {
+        if (this._isFadingIn) return; // prevent double-trigger
+        this._isFadingIn = true;
+
+        // Cancel any lingering fade-out RAF
+        if (this._crossfadeRaf) {
+            cancelAnimationFrame(this._crossfadeRaf);
+            this._crossfadeRaf = null;
+        }
+
+        const fadeInMs = 1000; // 1-second fade-in for the new track
+        const startTime = performance.now();
+        this._crossfadeVolumeFactor = 0;
+        this.applyReplayGain();
+
+        const animate = () => {
+            const elapsed = performance.now() - startTime;
+            const progress = Math.min(1, elapsed / fadeInMs);
+
+            // Ease-in curve
+            this._crossfadeVolumeFactor = progress;
+            this.applyReplayGain();
+
+            if (progress < 1) {
+                this._crossfadeRaf = requestAnimationFrame(animate);
+            } else {
+                // Crossfade complete – restore normal state
+                this._isCrossfading = false;
+                this._isFadingIn = false;
+                this._crossfadeVolumeFactor = 1;
+                this._crossfadeRaf = null;
+                this.applyReplayGain();
+            }
+        };
+
+        this._crossfadeRaf = requestAnimationFrame(animate);
+    }
+
+    /**
+     * Cancel any in-progress crossfade and restore full volume.
+     */
+    cancelCrossfade() {
+        if (this._crossfadeRaf) {
+            cancelAnimationFrame(this._crossfadeRaf);
+            this._crossfadeRaf = null;
+        }
+        this._isCrossfading = false;
+        this._isFadingIn = false;
+        this._crossfadeVolumeFactor = 1;
+        this.applyReplayGain();
+    }
+
     // Sleep Timer Methods
     setSleepTimer(minutes) {
         this.clearSleepTimer(); // Clear any existing timer
@@ -971,6 +1101,10 @@ export class Player {
             },
             minutes * 60 * 1000
         );
+
+        // Also set a native AlarmManager timer as a reliable backup
+        // (fires even if the WebView JS timer is killed by the OS)
+        setSleepTimerNative(minutes);
 
         // Update UI every second
         this.sleepTimerInterval = setInterval(() => {
@@ -990,6 +1124,10 @@ export class Player {
             this.sleepTimerInterval = null;
         }
         this.sleepTimerEndTime = null;
+
+        // Also cancel the native backup timer
+        clearSleepTimerNative();
+
         this.updateSleepTimerUI();
     }
 

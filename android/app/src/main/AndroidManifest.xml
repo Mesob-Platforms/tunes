@@ -15,6 +15,7 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:exported="true">
 
             <intent-filter>
@@ -23,6 +24,49 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Audio playback foreground service -->
+        <service
+            android:name=".AudioForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Notification action button receiver -->
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mesob.tunes.ACTION_PLAY" />
+                <action android:name="com.mesob.tunes.ACTION_PAUSE" />
+                <action android:name="com.mesob.tunes.ACTION_NEXT" />
+                <action android:name="com.mesob.tunes.ACTION_PREV" />
+                <action android:name="com.mesob.tunes.ACTION_LIKE" />
+                <action android:name="com.mesob.tunes.ACTION_STOP" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Sleep timer alarm receiver -->
+        <receiver
+            android:name=".SleepTimerReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mesob.tunes.ACTION_SLEEP_TIMER" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Home screen widget (4×1 now-playing controls) -->
+        <receiver
+            android:name=".TunesWidget"
+            android:exported="true"
+            android:label="Tunes Now Playing">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.mesob.tunes.WIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -36,6 +80,11 @@
     </application>
 
     <!-- Permissions -->
-
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 </manifest>

@@ -250,16 +250,20 @@ export class LyricsManager {
 
         this.kuroshiroLoading = true;
         try {
-            // Monkey-patch XMLHttpRequest to ensure dict file requests use local bundled path
-            // Kuromoji uses XHR for loading dictionary files and may mangle URLs
+            // Bug on kuromoji@0.1.2 where it mangles absolute URLs
+            // Using self-hosted dict files is failed, so we use CDN with monkey-patch
+            // Monkey-patch XMLHttpRequest to redirect dictionary requests to CDN
+            // Kuromoji uses XHR, not fetch, for loading dictionary files
             if (!window._originalXHROpen) {
                 window._originalXHROpen = XMLHttpRequest.prototype.open;
                 XMLHttpRequest.prototype.open = function (method, url, ...rest) {
                     const urlStr = url.toString();
                     if (urlStr.includes('/dict/') && urlStr.includes('.dat.gz')) {
+                        // Extract just the filename
                         const filename = urlStr.split('/').pop();
-                        const localUrl = `/dict/${filename}`;
-                        return window._originalXHROpen.call(this, method, localUrl, ...rest);
+                        // Redirect to CDN
+                        const cdnUrl = `https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/${filename}`;
+                        return window._originalXHROpen.call(this, method, cdnUrl, ...rest);
                     }
                     return window._originalXHROpen.call(this, method, url, ...rest);
                 };
@@ -272,25 +276,36 @@ export class LyricsManager {
                     const urlStr = url.toString();
                     if (urlStr.includes('/dict/') && urlStr.includes('.dat.gz')) {
                         const filename = urlStr.split('/').pop();
-                        const localUrl = `/dict/${filename}`;
-                        return window._originalFetch(localUrl, options);
+                        const cdnUrl = `https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/${filename}`;
+                        console.log(`Redirecting dict fetch: ${filename} -> CDN`);
+                        return window._originalFetch(cdnUrl, options);
                     }
                     return window._originalFetch(url, options);
                 };
             }
 
-            // Import Kuroshiro and analyzer from bundled npm packages
-            const KuroshiroModule = await import('kuroshiro');
-            const KuromojiAnalyzerModule = await import('kuroshiro-analyzer-kuromoji');
-            const Kuroshiro = KuroshiroModule.default || KuroshiroModule;
-            const KuromojiAnalyzer = KuromojiAnalyzerModule.default || KuromojiAnalyzerModule;
+            // Load Kuroshiro from CDN
+            if (!window.Kuroshiro) {
+                await this.loadScript('https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js');
+            }
+
+            // Load Kuromoji analyzer from CDN
+            if (!window.KuromojiAnalyzer) {
+                await this.loadScript(
+                    'https://unpkg.com/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js'
+                );
+            }
+
+            // Initialize Kuroshiro (CDN version exports as .default)
+            const Kuroshiro = window.Kuroshiro.default || window.Kuroshiro;
+            const KuromojiAnalyzer = window.KuromojiAnalyzer.default || window.KuromojiAnalyzer;
 
             this.kuroshiro = new Kuroshiro();
 
-            // Initialize with local dict path (bundled in public/dict/)
+            // Initialize with a dummy path - our fetch interceptor will redirect to CDN
             await this.kuroshiro.init(
                 new KuromojiAnalyzer({
-                    dictPath: '/dict/',
+                    dictPath: '/dict/', // This gets mangled but our interceptor fixes it
                 })
             );
 
@@ -400,45 +415,75 @@ export class LyricsManager {
             return;
         }
 
-        try {
-            // Import am-lyrics web component (registers custom element)
-            await import('@uimaxbai/am-lyrics/am-lyrics.js');
-            if (typeof customElements !== 'undefined') {
-                await customElements.whenDefined('am-lyrics');
+        // Try local bundle first, then CDN fallback
+        const sources = [
+            '/js/vendor/am-lyrics.min.js',
+            'https://cdn.jsdelivr.net/npm/@uimaxbai/am-lyrics@0.6.5/dist/src/am-lyrics.min.js',
+        ];
+
+        for (const src of sources) {
+            try {
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.type = 'module';
+                    script.src = src;
+
+                    script.onload = () => {
+                        if (typeof customElements !== 'undefined') {
+                            customElements
+                                .whenDefined('am-lyrics')
+                                .then(() => {
+                                    this.componentLoaded = true;
+                                    resolve();
+                                })
+                                .catch(reject);
+                        } else {
+                            resolve();
+                        }
+                    };
+
+                    script.onerror = () => reject(new Error(`Failed to load from ${src}`));
+                    document.head.appendChild(script);
+                });
+                return; // loaded successfully
+            } catch (e) {
+                console.warn('Lyrics component load attempt failed:', e.message);
             }
-            this.componentLoaded = true;
-        } catch (e) {
-            console.error('Failed to load lyrics component:', e.message);
-            throw new Error('Failed to load lyrics component');
         }
+
+        throw new Error('Failed to load lyrics component from all sources');
     }
 
-    async fetchLyrics(trackId, track = null, forceOnline = false) {
+    async fetchLyrics(trackId, track = null, ensureIndexedDB = false) {
         if (track) {
             // 1. Check in-memory cache
             if (this.lyricsCache.has(trackId)) {
-                return this.lyricsCache.get(trackId);
+                const cached = this.lyricsCache.get(trackId);
+                // When called from downloads (ensureIndexedDB=true), guarantee IndexedDB persistence
+                if (ensureIndexedDB && cached) {
+                    try {
+                        await musicDB.open();
+                        await musicDB.cacheLyrics(trackId, cached);
+                    } catch (e) {
+                        console.warn('IndexedDB lyrics ensure-write failed:', e);
+                    }
+                }
+                return cached;
             }
 
-            // 2. Check IndexedDB cache (always check first, even when online)
+            // 2. Check IndexedDB cache
             try {
                 await musicDB.open();
                 const cached = await musicDB.getCachedLyrics(trackId);
-                if (cached && cached.subtitles) {
+                if (cached) {
                     this.lyricsCache.set(trackId, cached);
-                    // Return cached lyrics immediately — no need to re-fetch
                     return cached;
                 }
             } catch (e) {
                 console.warn('IndexedDB lyrics read failed:', e);
             }
 
-            // 3. If offline, don't try to fetch - return null or cached
-            if (!navigator.onLine && !forceOnline) {
-                return null;
-            }
-
-            // 4. Fetch from LRCLIB (only when online)
+            // 3. Fetch from LRCLIB
             try {
                 const artist = Array.isArray(track.artists)
                     ? track.artists.map((a) => a.name || a).join(', ')
@@ -460,51 +505,27 @@ export class LyricsManager {
                 if (album) params.append('album_name', album);
                 if (duration) params.append('duration', duration.toString());
 
-                // Add timeout to prevent hanging
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
 
-                try {
-                    const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, {
-                        signal: controller.signal,
-                    });
+                if (response.ok) {
+                    const data = await response.json();
 
-                    clearTimeout(timeoutId);
+                    if (data.syncedLyrics) {
+                        const lyricsData = {
+                            subtitles: data.syncedLyrics,
+                            lyricsProvider: 'LRCLIB',
+                        };
 
-                    if (response.ok) {
-                        const data = await response.json();
+                        this.lyricsCache.set(trackId, lyricsData);
 
-                        if (data.syncedLyrics) {
-                            const lyricsData = {
-                                subtitles: data.syncedLyrics,
-                                lyricsProvider: 'LRCLIB',
-                            };
-
-                            this.lyricsCache.set(trackId, lyricsData);
-
-                            // ALWAYS persist to IndexedDB for offline access
-                            try {
-                                await musicDB.cacheLyrics(trackId, lyricsData);
-                            } catch (e) {
-                                console.warn('IndexedDB lyrics write failed:', e);
-                                // Retry once
-                                try {
-                                    await new Promise(resolve => setTimeout(resolve, 100));
-                                    await musicDB.cacheLyrics(trackId, lyricsData);
-                                } catch (e2) {
-                                    console.error('IndexedDB lyrics write retry failed:', e2);
-                                }
-                            }
-
-                            return lyricsData;
+                        // Persist to IndexedDB for offline access
+                        try {
+                            await musicDB.cacheLyrics(trackId, lyricsData);
+                        } catch (e) {
+                            console.warn('IndexedDB lyrics write failed:', e);
                         }
-                    }
-                } catch (fetchError) {
-                    clearTimeout(timeoutId);
-                    if (fetchError.name === 'AbortError') {
-                        console.warn('LRCLIB fetch timeout');
-                    } else {
-                        throw fetchError;
+
+                        return lyricsData;
                     }
                 }
             } catch (error) {
@@ -916,50 +937,6 @@ export function openLyricsPanel(track, audioPlayer, lyricsManager, forceOpen = f
     }
 }
 
-/**
- * Convert LRC subtitle text into the array format am-lyrics component expects.
- * Each element: { text: [{text, part, timestamp, endtime}], background, backgroundText,
- *   oppositeTurn, timestamp, endtime, isWordSynced }
- */
-function convertLRCToAmLyricsFormat(lrcText, durationMs) {
-    if (!lrcText) return null;
-    const lines = lrcText.split('\n').filter((l) => l.trim());
-    const parsed = [];
-    for (const line of lines) {
-        const m = line.match(/\[(\d+):(\d+)[.,](\d+)\]\s*(.*)/);
-        if (m) {
-            const mins = parseInt(m[1], 10);
-            const secs = parseInt(m[2], 10);
-            let cs = m[3];
-            // Normalise to milliseconds – handle both centiseconds (2-digit) and milliseconds (3-digit)
-            if (cs.length === 2) cs = parseInt(cs, 10) * 10;
-            else cs = parseInt(cs, 10);
-            const timestampMs = mins * 60000 + secs * 1000 + cs;
-            const text = m[4].trim();
-            if (text) {
-                parsed.push({ timestampMs, text });
-            }
-        }
-    }
-    if (parsed.length === 0) return null;
-
-    // Compute endtime for each line (= next line's start, or durationMs, or start + 5s)
-    const fallbackEnd = durationMs || parsed[parsed.length - 1].timestampMs + 5000;
-    const result = parsed.map((line, i) => {
-        const endMs = i < parsed.length - 1 ? parsed[i + 1].timestampMs : fallbackEnd;
-        return {
-            text: [{ text: line.text, part: false, timestamp: line.timestampMs, endtime: endMs }],
-            background: false,
-            backgroundText: [],
-            oppositeTurn: false,
-            timestamp: line.timestampMs,
-            endtime: endMs,
-            isWordSynced: false,
-        };
-    });
-    return result;
-}
-
 async function renderLyricsComponent(container, track, audioPlayer, lyricsManager) {
     container.innerHTML = '<div class="lyrics-loading">Loading lyrics...</div>';
 
@@ -992,92 +969,10 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         amLyrics.style.height = '100%';
         amLyrics.style.width = '100%';
 
-        // --- Override fetchLyrics BEFORE appending to DOM ---
-        // connectedCallback calls fetchLyrics(). By overriding first, our LRCLIB
-        // fallback runs natively inside the component's lifecycle.
-        const _originalFetchLyrics = amLyrics.fetchLyrics;
-        const _track = track;
-        const _lyricsManager = lyricsManager;
-        amLyrics.fetchLyrics = async function () {
-            // 1) Let the component try its own KPOE/LyricsPlus fetch
-            try {
-                await _originalFetchLyrics.call(this);
-            } catch (e) {
-                console.warn('[Lyrics] KPOE fetch threw:', e);
-            }
-
-            // 2) If the component found lyrics, we're done
-            if (this.lyrics && Array.isArray(this.lyrics) && this.lyrics.length > 0) {
-                return;
-            }
-
-            // 3) KPOE failed — try our LRCLIB cache/fetch
-            console.log('[Lyrics] KPOE found nothing, trying LRCLIB fallback...');
-            this.isLoading = true; // keep loading spinner while we try LRCLIB
-            try {
-                const lyricsData = await _lyricsManager.fetchLyrics(_track.id, _track);
-                if (lyricsData && lyricsData.subtitles) {
-                    const durMs = _track.duration ? Math.round(_track.duration * 1000) : undefined;
-                    const converted = convertLRCToAmLyricsFormat(lyricsData.subtitles, durMs);
-                    if (converted && converted.length > 0) {
-                        console.log(`[Lyrics] Injecting ${converted.length} LRCLIB lines`);
-                        this.lyrics = converted;
-                        this.lyricsSource = 'LRCLIB';
-                        this.isLoading = false;
-                        if (typeof this.onLyricsLoaded === 'function') await this.onLyricsLoaded();
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.warn('[Lyrics] LRCLIB cache/get failed:', e);
-            }
-
-            // 4) Last resort — LRCLIB search API (fuzzy match)
-            try {
-                const sArtist = Array.isArray(_track.artists)
-                    ? _track.artists.map((a) => a.name || a).join(', ')
-                    : _track.artist?.name || '';
-                const sTitle = _track.title || '';
-                if (sTitle && sArtist) {
-                    const q = encodeURIComponent(`${sTitle} ${sArtist}`);
-                    const resp = await fetch(`https://lrclib.net/api/search?q=${q}`, {
-                        signal: AbortSignal.timeout(8000),
-                    });
-                    if (resp.ok) {
-                        const results = await resp.json();
-                        const match = results.find((r) => r.syncedLyrics);
-                        if (match && match.syncedLyrics) {
-                            const durMs = _track.duration ? Math.round(_track.duration * 1000) : undefined;
-                            const converted = convertLRCToAmLyricsFormat(match.syncedLyrics, durMs);
-                            if (converted && converted.length > 0) {
-                                console.log(`[Lyrics] Injecting ${converted.length} LRCLIB-search lines`);
-                                this.lyrics = converted;
-                                this.lyricsSource = 'LRCLIB (Search)';
-                                this.isLoading = false;
-                                if (typeof this.onLyricsLoaded === 'function') await this.onLyricsLoaded();
-
-                                // Cache for future use
-                                const cacheData = { subtitles: match.syncedLyrics, lyricsProvider: 'LRCLIB' };
-                                _lyricsManager.lyricsCache.set(_track.id, cacheData);
-                                try {
-                                    await musicDB.open();
-                                    await musicDB.cacheLyrics(_track.id, cacheData);
-                                } catch (_) { /* ignore */ }
-                                return;
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn('[Lyrics] LRCLIB search fallback failed:', e);
-            }
-
-            this.isLoading = false;
-        };
-
         container.appendChild(amLyrics);
 
-        // Override the built-in scrollToActiveLine to position active line at 20% from top (30% above center)
+        // Override the built-in scrollToActiveLine to pin active line near the TOP (~8% from top)
+        const SCROLL_TOP_RATIO = 0.08; // 8% from top — Apple Music style
         const overrideScroll = () => {
             if (typeof amLyrics.scrollToActiveLine === 'function') {
                 amLyrics.scrollToActiveLine = function () {
@@ -1087,16 +982,14 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                     if (el) {
                         const ch = this.lyricsContainer.clientHeight;
                         const top = el.offsetTop;
-                        const h = el.clientHeight;
                         const bg = el.querySelector('.background-text.before');
                         let bgOff = 0;
                         if (bg) bgOff = bg.clientHeight / 2;
-                        // 0.2 = 20% from top (30% above center)
-                        const target = top - ch * 0.2 + h / 2 - bgOff;
+                        const target = top - ch * SCROLL_TOP_RATIO - bgOff;
                         requestAnimationFrame(() => {
                             this.isProgrammaticScroll = true;
-                            this.lyricsContainer?.scrollTo({ top: target, behavior: 'smooth' });
-                            setTimeout(() => { this.isProgrammaticScroll = false; }, 100);
+                            this.lyricsContainer?.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+                            setTimeout(() => { this.isProgrammaticScroll = false; }, 150);
                         });
                     }
                 };
@@ -1108,15 +1001,14 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                     if (el) {
                         const ch = this.lyricsContainer.clientHeight;
                         const top = el.offsetTop;
-                        const h = el.clientHeight;
                         const bg = el.querySelector('.background-text.before');
                         let bgOff = 0;
                         if (bg) bgOff = bg.clientHeight / 2;
-                        const target = top - ch * 0.2 + h / 2 - bgOff;
+                        const target = top - ch * SCROLL_TOP_RATIO - bgOff;
                         requestAnimationFrame(() => {
                             this.isProgrammaticScroll = true;
-                            this.lyricsContainer?.scrollTo({ top: target, behavior: 'smooth' });
-                            setTimeout(() => { this.isProgrammaticScroll = false; }, 100);
+                            this.lyricsContainer?.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+                            setTimeout(() => { this.isProgrammaticScroll = false; }, 150);
                         });
                     }
                 };
@@ -1139,7 +1031,18 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             const style = document.createElement('style');
             style.id = 'custom-lyrics-style';
             style.textContent = `
-                /* Hide Rom, Trans, Auto buttons and all controls */
+                /* ═══════════════════════════════════════════════
+                   Apple Music–inspired lyrics styling
+                   ═══════════════════════════════════════════════ */
+
+                /* Register --line-progress for smooth CSS transitions */
+                @property --line-progress {
+                    syntax: '<percentage>';
+                    inherits: false;
+                    initial-value: 0%;
+                }
+
+                /* ── Hide controls, footer, version, github, etc. ── */
                 .controls, .lyrics-controls, .toolbar, .options-bar,
                 button[title*="oman"], button[title*="ranslat"], button[title*="uto"],
                 .rom-btn, .trans-btn, .auto-btn,
@@ -1148,7 +1051,6 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                 [class*="setting"], [class*="toggle"] {
                     display: none !important;
                 }
-                /* Hide version text, github star, footer, credits */
                 footer, .footer, [class*="footer"],
                 [class*="version"], [class*="credit"],
                 [class*="github"], [class*="star"],
@@ -1156,121 +1058,140 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                 [class*="watermark"], [class*="branding"] {
                     display: none !important;
                 }
-                /* Hide any text containing v0.6 or star/github via parent containers */
                 .bottom, .info-bar, .meta, .about {
                     display: none !important;
                 }
-                /* Apply Bricolage Grotesque font */
+
+                /* ── Font ── */
                 :host, *, .line, .synced-line, .lyrics-line, p, span, div {
                     font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif !important;
                 }
 
-                /* Pad so first line starts at ~20% from top and last line can reach 20% */
+                /* ── Container: pin active line near top ── */
                 .lyrics-container {
-                    padding-top: 20vh !important;
-                    padding-bottom: 80vh !important;
+                    padding-top: 8vh !important;
+                    padding-bottom: 88vh !important;
+                    scroll-behavior: smooth !important;
                 }
 
-                /* === KILL transitions ONLY on sung/past lines === */
-                [data-sung], [data-sung] *,
-                .line.past, .synced-line.past, .lyrics-line.past,
-                .line.past *, .synced-line.past *, .lyrics-line.past * {
-                    transition: none !important;
-                    -webkit-transition: none !important;
+                /* ── Apple Music glow pulse ── */
+                @keyframes am-glow {
+                    0%, 100% {
+                        text-shadow:
+                            0 0 18px rgba(255, 255, 255, 0.18),
+                            0 0 50px rgba(255, 255, 255, 0.06);
+                    }
+                    50% {
+                        text-shadow:
+                            0 0 28px rgba(255, 255, 255, 0.28),
+                            0 0 70px rgba(255, 255, 255, 0.10);
+                    }
                 }
 
-                /* Lyrics text: default dim state */
-                .line, .synced-line, .lyrics-line, [class*="line"] {
-                    font-size: 2rem !important;
-                    line-height: 1.6 !important;
+                /* ── Default (inactive) lyrics lines ── */
+                .lyrics-line {
+                    font-size: 1.9rem !important;
+                    line-height: 1.55 !important;
                     font-weight: 700 !important;
-                    letter-spacing: -0.01em !important;
-                    padding: 0.5rem 0 !important;
+                    letter-spacing: -0.015em !important;
+                    padding: 0.35rem 0 !important;
                     margin: 0 !important;
-                    opacity: 0.35 !important;
-                    color: rgba(255,255,255,0.4) !important;
-                    transition: opacity 0.4s ease, text-shadow 0.4s ease !important;
+                    opacity: 0.28 !important;
+                    color: rgba(255, 255, 255, 0.35) !important;
+                    transform: scale(0.975) translateZ(0) !important;
+                    transform-origin: left center !important;
+                    transition:
+                        opacity 0.55s cubic-bezier(0.25, 0.1, 0.25, 1),
+                        transform 0.55s cubic-bezier(0.25, 0.1, 0.25, 1),
+                        color 0.55s ease,
+                        text-shadow 0.6s ease,
+                        filter 0.55s ease !important;
+                    filter: blur(0.4px) !important;
+                    text-shadow: none !important;
+                    will-change: opacity, transform, filter !important;
                 }
 
-                /* Active line: bright white, NO glare */
-                /* .active-line is the class am-lyrics component uses */
-                .line.active, .synced-line.active,
-                .active-line, .lyrics-line.active-line,
-                [class*="line"].active, [class*="line"][class*="active"] {
-                    font-size: 2rem !important;
-                    line-height: 1.6 !important;
+                /* ── ACTIVE LINE — the star of the show ── */
+                .lyrics-line.active-line {
+                    font-size: 1.9rem !important;
+                    line-height: 1.55 !important;
                     font-weight: 800 !important;
                     opacity: 1 !important;
                     color: #ffffff !important;
-                    text-shadow: none !important;
+                    transform: scale(1) translateZ(0) !important;
                     filter: none !important;
+                    animation: am-glow 3.5s ease-in-out infinite !important;
                 }
 
-                /* Active line children (karaoke fill spans) */
-                .active-line *, .lyrics-line.active-line *,
-                .line.active *, .synced-line.active *, [class*="line"].active *,
-                [class*="line"][class*="active"] * {
-                    transition: background-position 0.6s linear, color 0.5s ease, -webkit-text-fill-color 0.5s ease !important;
-                }
-
-                /* Active line progress-text should also be white */
-                .active-line .progress-text,
+                /* ── Karaoke gradient on active line words ── */
                 .lyrics-line.active-line .progress-text {
-                    color: #ffffff !important;
+                    background: linear-gradient(
+                        to right,
+                        #ffffff 0%,
+                        #ffffff max(0%, calc(var(--line-progress, 0%) - 3%)),
+                        rgba(255, 255, 255, 0.38) calc(var(--line-progress, 0%) + 4%),
+                        rgba(255, 255, 255, 0.38) 100%
+                    ) !important;
+                    -webkit-background-clip: text !important;
+                    background-clip: text !important;
                     -webkit-text-fill-color: transparent !important;
+                    color: #ffffff !important;
+                    opacity: 1 !important;
+                    transition: --line-progress 0.12s linear !important;
+                    will-change: background !important;
                 }
 
-                /* === SUNG LINES: data-sung dims back to default === */
-                [data-sung],
-                .line[data-sung],
-                .synced-line[data-sung],
-                .lyrics-line[data-sung],
-                [class*="line"][data-sung],
-                p[data-sung] {
-                    opacity: 0.35 !important;
-                    color: rgba(255,255,255,0.4) !important;
-                    filter: none !important;
-                    text-shadow: none !important;
+                /* ── Words that are fully sung inside the active line ── */
+                .lyrics-line.active-line .progress-text[style*="--line-progress: 100%"],
+                .lyrics-line.active-line .progress-text[style*="--line-progress:100%"] {
+                    -webkit-text-fill-color: #ffffff !important;
+                    background: none !important;
                 }
-                [data-sung] *,
-                .line[data-sung] *,
-                .synced-line[data-sung] *,
+
+                /* ── Sung / past lines — dim back elegantly ── */
+                .lyrics-line[data-sung] {
+                    opacity: 0.28 !important;
+                    color: rgba(255, 255, 255, 0.35) !important;
+                    filter: blur(0.4px) !important;
+                    text-shadow: none !important;
+                    transform: scale(0.975) translateZ(0) !important;
+                    animation: none !important;
+                    transition:
+                        opacity 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
+                        transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
+                        filter 0.4s ease !important;
+                }
                 .lyrics-line[data-sung] *,
-                [class*="line"][data-sung] *,
-                p[data-sung] * {
-                    color: rgba(255,255,255,0.4) !important;
-                    -webkit-text-fill-color: rgba(255,255,255,0.4) !important;
+                .lyrics-line[data-sung] .progress-text {
+                    color: rgba(255, 255, 255, 0.35) !important;
+                    -webkit-text-fill-color: rgba(255, 255, 255, 0.35) !important;
                     background: none !important;
+                    transition: none !important;
                 }
 
-                /* Past lines also dimmed via class */
-                .line.past, .synced-line.past, .lyrics-line.past, [class*="line"].past {
-                    opacity: 0.35 !important;
-                    color: rgba(255,255,255,0.4) !important;
-                    filter: none !important;
-                    text-shadow: none !important;
-                }
-                .line.past *, .synced-line.past *, .lyrics-line.past *, [class*="line"].past * {
-                    color: rgba(255,255,255,0.4) !important;
-                    -webkit-text-fill-color: rgba(255,255,255,0.4) !important;
-                    background: none !important;
+                /* ── Instrumental indicator ── */
+                .instrumental-line {
+                    opacity: 0.45 !important;
+                    color: rgba(255, 255, 255, 0.5) !important;
                 }
 
-                /* Hide scrollbar inside component */
+                /* ── Background / romanization text ── */
+                .background-text {
+                    color: rgba(255, 255, 255, 0.4) !important;
+                    font-size: 0.75em !important;
+                }
+
+                /* ── Hide scrollbar ── */
                 :host {
                     scrollbar-width: none !important;
                     -ms-overflow-style: none !important;
                 }
-                :host::-webkit-scrollbar {
-                    display: none !important;
-                }
+                :host::-webkit-scrollbar { display: none !important; }
                 *, div, section, main {
                     scrollbar-width: none !important;
                     -ms-overflow-style: none !important;
                 }
-                *::-webkit-scrollbar {
-                    display: none !important;
-                }
+                *::-webkit-scrollbar { display: none !important; }
             `;
             root.appendChild(style);
         };
@@ -1419,26 +1340,22 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             await lyricsManager.loadKuroshiro();
         }
 
-        // Genius annotations — load after lyrics are ready (the override handles lyrics injection)
-        (async () => {
-            // Wait for lyrics to settle
-            let waited = 0;
-            while (amLyrics.isLoading && waited < 10000) {
-                await new Promise((r) => setTimeout(r, 250));
-                waited += 250;
-            }
-            if (lyricsManager.isGeniusMode) {
-                try {
-                    const data = await lyricsManager.geniusManager.getDataForTrack(track);
-                    if (data) {
-                        lyricsManager.currentGeniusData = data;
-                        lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
+        lyricsManager
+            .fetchLyrics(track.id, track)
+            .then(async () => {
+                if (lyricsManager.isGeniusMode) {
+                    try {
+                        const data = await lyricsManager.geniusManager.getDataForTrack(track);
+                        if (data) {
+                            lyricsManager.currentGeniusData = data;
+                            lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
+                        }
+                    } catch (e) {
+                        console.warn('Genius auto-load failed', e);
                     }
-                } catch (e) {
-                    console.warn('Genius auto-load failed', e);
                 }
-            }
-        })().catch((e) => console.warn('Genius load failed', e));
+            })
+            .catch((e) => console.warn('Background lyrics fetch failed', e));
 
         // Wait for lyrics to appear, then do an immediate conversion
         const waitForLyrics = () => {
@@ -1533,7 +1450,7 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
     wrapper.className = 'fallback-lyrics-wrapper';
     wrapper.style.cssText = `
         font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
-        padding: 20vh 1.5rem 80vh;
+        padding: 8vh 1.5rem 88vh;
         overflow-y: auto;
         height: 100%;
         scrollbar-width: none;
@@ -1547,18 +1464,22 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
         el.dataset.time = line.time;
         el.dataset.idx = idx;
         el.style.cssText = `
-            font-size: 2rem;
-            line-height: 1.6;
+            font-size: 1.9rem;
+            line-height: 1.55;
             font-weight: 700;
-            letter-spacing: -0.01em;
-            padding: 0.5rem 0;
+            letter-spacing: -0.015em;
+            padding: 0.35rem 0;
             margin: 0;
-            color: rgba(255,255,255,0.4);
-            opacity: 0.35;
+            color: rgba(255,255,255,0.35);
+            opacity: 0.28;
             cursor: pointer;
-            transition: opacity 0.4s ease, text-shadow 0.4s ease;
+            transform: scale(0.975);
+            transform-origin: left center;
+            filter: blur(0.4px);
+            transition: opacity 0.55s cubic-bezier(0.25,0.1,0.25,1), transform 0.55s cubic-bezier(0.25,0.1,0.25,1), color 0.55s ease, text-shadow 0.6s ease, filter 0.55s ease;
             -webkit-user-select: none;
             user-select: none;
+            will-change: opacity, transform, filter;
         `;
         el.addEventListener('click', () => {
             audioPlayer.currentTime = line.time;
@@ -1575,42 +1496,43 @@ async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager
     let animId = null;
 
     const updateActive = () => {
-        // Apply timing offset from lyrics manager
-        const offsetMs = lyricsManager?.timingOffset || 0;
-        const offsetSeconds = offsetMs / 1000;
-        const t = audioPlayer.currentTime - offsetSeconds; // Apply offset (positive = delay, negative = advance)
+        const t = audioPlayer.currentTime;
         let newIdx = -1;
         for (let i = 0; i < parsed.length; i++) {
             if (t >= parsed[i].time) newIdx = i;
             else break;
         }
         if (newIdx !== activeIdx) {
-            // Dim old line back to default
+            // Dim old line back — Apple Music style
             if (activeIdx >= 0 && activeIdx < lineEls.length) {
-                lineEls[activeIdx].style.opacity = '0.35';
-                lineEls[activeIdx].style.fontSize = '2rem';
-                lineEls[activeIdx].style.fontWeight = '700';
-                lineEls[activeIdx].style.color = 'rgba(255,255,255,0.4)';
-                lineEls[activeIdx].style.textShadow = 'none';
+                const old = lineEls[activeIdx];
+                old.style.opacity = '0.28';
+                old.style.fontWeight = '700';
+                old.style.color = 'rgba(255,255,255,0.35)';
+                old.style.textShadow = 'none';
+                old.style.transform = 'scale(0.975)';
+                old.style.filter = 'blur(0.4px)';
             }
             activeIdx = newIdx;
-            // Highlight new line
+            // Highlight new line — bright white with glow
             if (activeIdx >= 0 && activeIdx < lineEls.length) {
-                lineEls[activeIdx].style.opacity = '1';
-                lineEls[activeIdx].style.fontSize = '2rem';
-                lineEls[activeIdx].style.fontWeight = '800';
-                lineEls[activeIdx].style.color = '#ffffff';
-                lineEls[activeIdx].style.textShadow = 'none';
-                // Auto-scroll to ~20% from top (30% above center)
+                const el = lineEls[activeIdx];
+                el.style.opacity = '1';
+                el.style.fontWeight = '800';
+                el.style.color = '#ffffff';
+                el.style.textShadow = '0 0 20px rgba(255,255,255,0.2), 0 0 50px rgba(255,255,255,0.07)';
+                el.style.transform = 'scale(1)';
+                el.style.filter = 'none';
+                // Scroll to 8% from top
                 const sc = wrapper;
                 if (sc && sc.scrollTo) {
                     const cRect = sc.getBoundingClientRect();
-                    const lRect = lineEls[activeIdx].getBoundingClientRect();
+                    const lRect = el.getBoundingClientRect();
                     const relTop = lRect.top - cRect.top + sc.scrollTop;
-                    const tgt = relTop - (sc.clientHeight * 0.2);
+                    const tgt = relTop - (sc.clientHeight * 0.08);
                     sc.scrollTo({ top: Math.max(0, tgt), behavior: 'smooth' });
                 } else {
-                    lineEls[activeIdx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             }
         }
@@ -1633,7 +1555,6 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     let baseTimeMs = 0;
     let lastTimestamp = performance.now();
     let animationFrameId = null;
-    let lastSyncTime = 0;
 
     // Get timing offset from lyrics manager (in milliseconds)
     const getTimingOffset = () => {
@@ -1644,30 +1565,17 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
         const currentMs = audioPlayer.currentTime * 1000;
         baseTimeMs = currentMs;
         lastTimestamp = performance.now();
-        lastSyncTime = currentMs;
         // Apply timing offset: positive offset delays lyrics, negative advances them
-        const offsetMs = getTimingOffset();
-        const syncedTime = currentMs - offsetMs;
-        if (amLyrics && typeof amLyrics.currentTime !== 'undefined') {
-            amLyrics.currentTime = Math.max(0, syncedTime);
-        }
+        amLyrics.currentTime = currentMs - getTimingOffset();
     };
 
     const tick = () => {
-        if (!audioPlayer.paused && amLyrics) {
+        if (!audioPlayer.paused) {
             const now = performance.now();
             const elapsed = now - lastTimestamp;
             const nextMs = baseTimeMs + elapsed;
-            lastSyncTime = nextMs;
-            
             // Apply timing offset: positive offset delays lyrics, negative advances them
-            const offsetMs = getTimingOffset();
-            const syncedTime = nextMs - offsetMs;
-            
-            if (typeof amLyrics.currentTime !== 'undefined') {
-                amLyrics.currentTime = Math.max(0, syncedTime);
-            }
-            
+            amLyrics.currentTime = nextMs - getTimingOffset();
             animationFrameId = requestAnimationFrame(tick);
         }
     };
@@ -1675,12 +1583,6 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     const onPlay = () => {
         baseTimeMs = audioPlayer.currentTime * 1000;
         lastTimestamp = performance.now();
-        lastSyncTime = baseTimeMs;
-        // Immediate sync on play
-        const offsetMs = getTimingOffset();
-        if (amLyrics && typeof amLyrics.currentTime !== 'undefined') {
-            amLyrics.currentTime = Math.max(0, baseTimeMs - offsetMs);
-        }
         tick();
     };
 
@@ -1688,12 +1590,6 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
-        }
-        // Sync one final time on pause
-        if (amLyrics && typeof amLyrics.currentTime !== 'undefined') {
-            const currentMs = audioPlayer.currentTime * 1000;
-            const offsetMs = getTimingOffset();
-            amLyrics.currentTime = Math.max(0, currentMs - offsetMs);
         }
     };
 

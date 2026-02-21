@@ -8,6 +8,7 @@
 import { gsap } from 'gsap';
 import html2canvas from 'html2canvas';
 import { supabase } from './accounts/config.js';
+import { apiUrl } from './platform.js';
 import { getAvatarUrl } from './accounts/profile.js';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -96,8 +97,8 @@ export async function initWrapped(api) {
     if (!token) { container.innerHTML = '<p class="wr-err">Please sign in to view your Wrapped.</p>'; return; }
 
     const [compRes, lbRes] = await Promise.all([
-      fetch('/api/wrapped/compute', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }),
-      fetch('/api/wrapped/leaderboard', { headers: { 'Authorization': `Bearer ${token}` } }),
+      fetch(apiUrl('/api/wrapped/compute'), { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }),
+      fetch(apiUrl('/api/wrapped/leaderboard'), { headers: { 'Authorization': `Bearer ${token}` } }),
     ]);
     data = await compRes.json();
     const lbJson = await lbRes.json();

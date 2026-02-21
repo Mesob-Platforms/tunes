@@ -8,16 +8,25 @@
 import { db } from './db.js';
 import { supabase } from './accounts/config.js';
 import { authManager } from './accounts/auth.js';
+import { apiUrl } from './platform.js';
+import { onNetworkChange, isOnline as getNetworkOnline } from './networkMonitor.js';
 
 class OfflineSyncManager {
     constructor() {
-        this.isOnline = navigator.onLine;
+        this.isOnline = getNetworkOnline(); // Use unified monitor (reliable on native)
         this.isSyncing = false;
         this.syncInterval = null;
         this._setupNetworkListeners();
     }
 
     _setupNetworkListeners() {
+        // Use the unified networkMonitor (works on native + web)
+        onNetworkChange((online) => {
+            this.isOnline = online;
+            if (online) this.syncPendingEvents();
+        });
+
+        // Also listen to browser events as a fallback
         window.addEventListener('online', () => {
             this.isOnline = true;
             this.syncPendingEvents();
@@ -28,15 +37,21 @@ class OfflineSyncManager {
     }
 
     /**
-     * Check if we're online (with fallback check)
+     * Check if we're online (with fallback check).
+     * Uses apiUrl() so the fetch works on native Capacitor (where '/' is localhost).
      */
     async checkOnline() {
-        if (!navigator.onLine) return false;
-        // Try a lightweight fetch to confirm (gracefully handle 404)
+        // Use unified networkMonitor (reliable on native Capacitor)
+        if (!getNetworkOnline()) return false;
+        // Try a lightweight fetch to confirm connectivity
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const res = await fetch('/', { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+            const res = await fetch(apiUrl('/api/ping'), {
+                method: 'HEAD',
+                cache: 'no-store',
+                signal: controller.signal,
+            });
             clearTimeout(timeoutId);
             return res.status < 500; // Any non-server-error means we're online
         } catch {
@@ -157,7 +172,7 @@ class OfflineSyncManager {
      * Sync a track event to the API
      */
     async _syncTrackEvent(eventData) {
-        const res = await fetch('/api/track-event', {
+        const res = await fetch(apiUrl('/api/track-event'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(eventData),

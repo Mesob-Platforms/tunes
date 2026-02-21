@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.tunes.app',
-  appName: 'Tunes',
+  appId: 'com.mesob.tunes',
+  appName: 'Tunes by Mesob',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
@@ -14,8 +14,13 @@ const config: CapacitorConfig = {
     SplashScreen: {
       backgroundColor: '#000000',
       launchAutoHide: true,
-      launchShowDuration: 1500,
+      launchShowDuration: 0,
       showSpinner: false,
+    },
+    StatusBar: {
+      overlaysWebView: false,
+      style: 'DARK',          // white icons on dark app
+      backgroundColor: '#000000',
     },
   },
 };

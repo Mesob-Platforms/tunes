@@ -365,7 +365,7 @@ export const nowPlayingSettings = {
 };
 
 export const lyricsSettings = {
-    shouldDownloadLyrics() { return false; },
+    shouldDownloadLyrics() { return true; },
     setDownloadLyrics() {},
 };
 
@@ -410,6 +410,39 @@ export const downloadQualitySettings = {
     // Downloads ALWAYS use lowest quality — hardcoded, no setting
     getQuality() { return 'LOW'; },
     setQuality() {},
+};
+
+export const crossfadeSettings = {
+    STORAGE_KEY_ENABLED: 'tunes-crossfade-enabled',
+    STORAGE_KEY_DURATION: 'tunes-crossfade-duration',
+    getEnabled() {
+        try {
+            return localStorage.getItem(this.STORAGE_KEY_ENABLED) === 'true';
+        } catch {
+            return false;
+        }
+    },
+    setEnabled(enabled) {
+        try {
+            localStorage.setItem(this.STORAGE_KEY_ENABLED, enabled ? 'true' : 'false');
+        } catch (e) {
+            console.error('Failed to save crossfade enabled setting:', e);
+        }
+    },
+    getDuration() {
+        try {
+            return parseInt(localStorage.getItem(this.STORAGE_KEY_DURATION) || '3', 10);
+        } catch {
+            return 3;
+        }
+    },
+    setDuration(duration) {
+        try {
+            localStorage.setItem(this.STORAGE_KEY_DURATION, duration.toString());
+        } catch (e) {
+            console.error('Failed to save crossfade duration setting:', e);
+        }
+    },
 };
 
 export const coverArtSizeSettings = {

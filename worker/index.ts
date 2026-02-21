@@ -1,6 +1,7 @@
 import { getAssetFromKV } from '@cloudflare/kv-asset-handler';
 // @ts-expect-error - wrangler injects this module
 import manifestJSON from '__STATIC_CONTENT_MANIFEST';
+import md5 from 'md5';
 
 const assetManifest = JSON.parse(manifestJSON);
 
@@ -14,6 +15,8 @@ interface Env {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
   AI: any; // Workers AI binding
+  GENIUS_TOKEN: string;       // Genius API bearer token (secret)
+  LASTFM_API_SECRET: string;  // Last.fm API shared secret (secret)
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -829,6 +832,45 @@ From these 4 categories, determine which has the MOST POPULAR result and should 
 }
 
 /* ══════════════════════════════════════════════════════════════
+   PROXY ENDPOINTS — shield secrets from client JS
+   ══════════════════════════════════════════════════════════════ */
+
+/** GET /api/proxy/genius-token — return Genius bearer token (stored server-side) */
+function handleGeniusToken(env: Env): Response {
+  if (!env.GENIUS_TOKEN) {
+    return Response.json({ error: 'Genius token not configured' }, { status: 500, headers: CORS_HEADERS });
+  }
+  return Response.json({ token: env.GENIUS_TOKEN }, { headers: CORS_HEADERS });
+}
+
+/** POST /api/proxy/lastfm-sign — compute Last.fm API signature server-side.
+ *  Body: JSON object of all params to sign (method, api_key, sk, etc.)
+ *  Returns: { signature: "<md5 hex>" }                                    */
+async function handleLastfmSign(request: Request, env: Env): Promise<Response> {
+  if (!env.LASTFM_API_SECRET) {
+    return Response.json({ error: 'Last.fm secret not configured' }, { status: 500, headers: CORS_HEADERS });
+  }
+  try {
+    const body: Record<string, string> = await request.json();
+    // Remove format and callback before signing (per Last.fm spec)
+    const filtered = { ...body };
+    delete filtered.format;
+    delete filtered.callback;
+
+    const sortedKeys = Object.keys(filtered).sort();
+    const sigString = sortedKeys.map(k => `${k}${filtered[k]}`).join('') + env.LASTFM_API_SECRET;
+    const signature = md5(sigString);
+
+    return Response.json({ signature }, { headers: CORS_HEADERS });
+  } catch (err: any) {
+    return Response.json(
+      { error: err.message || 'Failed to compute signature' },
+      { status: 400, headers: CORS_HEADERS }
+    );
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
    PUBLIC ENDPOINTS — updates/check, announcements/active
    ══════════════════════════════════════════════════════════════ */
 
@@ -1305,6 +1347,19 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // ── Dynamic CORS origin for Capacitor & localhost ──
+    const origin = request.headers.get('Origin') || '';
+    if (
+      origin.startsWith('capacitor://') ||
+      origin.startsWith('https://localhost') ||
+      origin.startsWith('http://localhost') ||
+      origin === 'https://tunes.mesob.app'
+    ) {
+      CORS_HEADERS['Access-Control-Allow-Origin'] = origin;
+    } else {
+      CORS_HEADERS['Access-Control-Allow-Origin'] = '*';
+    }
+
     // ── Admin API routes ──
     if (url.pathname.startsWith('/api/admin/')) {
       // CORS preflight
@@ -1365,6 +1420,17 @@ export default {
         return Response.json({ error: err.message || 'Internal error' }, { status: 500, headers: CORS_HEADERS });
       }
       return Response.json({ error: 'Unknown endpoint' }, { status: 404, headers: CORS_HEADERS });
+    }
+
+    // ── Proxy routes (secrets shielding — no auth, but secrets never leave server) ──
+    if (url.pathname === '/api/proxy/genius-token') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return handleGeniusToken(env);
+    }
+    if (url.pathname === '/api/proxy/lastfm-sign') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      if (request.method === 'POST') return await handleLastfmSign(request, env);
+      return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
     }
 
     // ── Public API routes (no auth required) ──

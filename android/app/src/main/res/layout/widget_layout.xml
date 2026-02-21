@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="8dp"
+    android:background="@drawable/widget_background">
+
+    <!-- Album art -->
+    <ImageView
+        android:id="@+id/widget_album_art"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:scaleType="centerCrop"
+        android:src="@mipmap/ic_launcher"
+        android:contentDescription="Album art"
+        android:layout_marginEnd="10dp" />
+
+    <!-- Track info: title + artist -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:layout_marginEnd="8dp">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Not Playing"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:ellipsize="marquee"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tunes"
+            android:textColor="#AAAAAA"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- Previous button -->
+    <ImageButton
+        android:id="@+id/widget_prev"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:src="@android:drawable/ic_media_previous"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="Previous"
+        android:scaleType="centerInside"
+        android:tint="#FFFFFF"
+        android:layout_marginEnd="4dp" />
+
+    <!-- Play/Pause button -->
+    <ImageButton
+        android:id="@+id/widget_play_pause"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@android:drawable/ic_media_play"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="Play or Pause"
+        android:scaleType="centerInside"
+        android:tint="#FFFFFF"
+        android:layout_marginEnd="4dp" />
+
+    <!-- Next button -->
+    <ImageButton
+        android:id="@+id/widget_next"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:src="@android:drawable/ic_media_next"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="Next"
+        android:scaleType="centerInside"
+        android:tint="#FFFFFF" />
+
+</LinearLayout>
+
+

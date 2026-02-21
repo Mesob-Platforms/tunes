@@ -249,11 +249,11 @@ export function createProjectCardHTML(era, artist, sheetId, trackCount) {
     return `
         <div class="card" data-tracker-project-id="${encodeURIComponent(era.name)}" data-sheet-id="${sheetId}" style="cursor: pointer;">
             <div class="card-image-wrapper">
-                <img src="${era.image || 'assets/logo.svg'}" 
+                <img src="${era.image || 'assets/everywhere.png'}" 
                      alt="${escapeHtml(era.name)}" 
                      class="card-image" 
                      loading="lazy"
-                     onerror="this.src='assets/logo.svg'">
+                     onerror="this.src='assets/everywhere.png'">
             </div>
             <div class="card-info">
                 <h4 class="card-title">${escapeHtml(era.name)}</h4>
@@ -299,7 +299,7 @@ export async function renderTrackerArtistPage(sheetId, container) {
     const normalizedName = normalizeArtistName(artist.name);
     imageEl.src = `https://assets.artistgrid.cx/${normalizedName}.webp`;
     imageEl.onerror = function () {
-        this.src = 'assets/logo.svg';
+        this.src = 'assets/everywhere.png';
     };
     nameEl.textContent = artist.name;
     metaEl.innerHTML = `<span>${eras.length} unreleased projects</span>`;
@@ -537,10 +537,10 @@ export async function renderTrackerProjectPage(sheetId, projectName, container, 
     const addToPlaylistBtn = document.getElementById('add-album-to-playlist-btn');
 
     // Set album page content
-    imageEl.src = era.image || 'assets/logo.svg';
+    imageEl.src = era.image || 'assets/everywhere.png';
     imageEl.style.backgroundColor = '';
     imageEl.onerror = function () {
-        this.src = 'assets/logo.svg';
+        this.src = 'assets/everywhere.png';
     };
 
     titleEl.textContent = era.name;
@@ -731,7 +731,7 @@ export async function renderUnreleasedPage(container) {
 
         artistCard.innerHTML = `
             <div class="card-image-wrapper">
-                <img class="card-image" src="${coverImage}" alt="${artist.name}" loading="lazy" onerror="this.src='assets/logo.svg'">
+                <img class="card-image" src="${coverImage}" alt="${artist.name}" loading="lazy" onerror="this.src='assets/everywhere.png'">
             </div>
             <div class="card-info">
                 <h4 class="card-title">${artist.name}</h4>
@@ -841,10 +841,10 @@ export async function renderTrackerTrackPage(trackId, container, _ui) {
     const tracklistContainer = document.getElementById('album-detail-tracklist');
     const playBtn = document.getElementById('play-album-btn');
 
-    imageEl.src = era.image || 'assets/logo.svg';
+    imageEl.src = era.image || 'assets/everywhere.png';
     imageEl.style.backgroundColor = '';
     imageEl.onerror = function () {
-        this.src = 'assets/logo.svg';
+        this.src = 'assets/everywhere.png';
     };
 
     titleEl.textContent = currentTrack.title;

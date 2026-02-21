@@ -2,6 +2,7 @@
 // Shared Audio Context Manager - handles EQ and provides context for visualizer
 
 import { equalizerSettings } from './storage.js';
+import { isNative } from './platform.js';
 
 // Standard 16-band ISO center frequencies (Hz)
 const EQ_FREQUENCIES = [25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000, 20000];
@@ -106,6 +107,14 @@ class AudioContextManager {
         if (isIOS) {
             console.log('[AudioContext] Skipping Web Audio initialization on iOS for lock screen compatibility');
             this.isInitialized = true; // Mark as initialized to prevent repeated attempts
+            return;
+        }
+
+        // Skip Web Audio on native Android — crossorigin is removed to allow CDN playback,
+        // but createMediaElementSource would silence cross-origin audio without CORS headers.
+        if (isNative) {
+            console.log('[AudioContext] Skipping Web Audio initialization on native Android for CDN compatibility');
+            this.isInitialized = true;
             return;
         }
 

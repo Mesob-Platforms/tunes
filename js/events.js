@@ -10,7 +10,7 @@ import {
     SVG_BIN,
     getTrackArtists,
 } from './utils.js';
-import { lastFMStorage, libreFmSettings, waveformSettings } from './storage.js';
+import { lastFMStorage, libreFmSettings, waveformSettings, crossfadeSettings } from './storage.js';
 import { showNotification, downloadTrackWithMetadata, downloadAlbumAsZip, downloadPlaylistAsZip } from './downloads.js';
 import { downloadQualitySettings } from './storage.js';
 import { updateTabTitle, navigate } from './router.js';
@@ -81,6 +81,11 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
         player.updateMediaSessionPlaybackState();
         player.updateMediaSessionPositionState();
         updateTabTitle(player);
+
+        // If a crossfade was in progress, start fading in the new track
+        if (player._isCrossfading) {
+            player.startCrossfadeIn();
+        }
     });
 
     audioPlayer.addEventListener('playing', () => {
@@ -92,10 +97,10 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
         playPauseBtn.innerHTML = SVG_PLAY;
         player.updateMediaSessionPlaybackState();
         player.updateMediaSessionPositionState();
+        player.cancelCrossfade(); // Cancel any crossfade if paused manually
     });
 
     audioPlayer.addEventListener('ended', () => {
-        // (reserved for future crossfade logic)
         player.playNext();
     });
 
@@ -106,6 +111,15 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
             const currentTimeEl = document.getElementById('current-time');
             progressFill.style.width = `${(currentTime / duration) * 100}%`;
             currentTimeEl.textContent = formatTime(currentTime);
+
+            // Crossfade: start fading out volume when approaching end of track
+            if (crossfadeSettings.getEnabled() && !player._isCrossfading && player.repeatMode !== REPEAT_MODE.ONE) {
+                const cfDuration = crossfadeSettings.getDuration();
+                const remaining = duration - currentTime;
+                if (cfDuration > 0 && remaining <= cfDuration && remaining > 0.5) {
+                    player.startCrossfadeOut(remaining);
+                }
+            }
 
             // Log to history after 10 seconds of playback
             if (currentTime >= 10 && player.currentTrack && player.currentTrack.id !== historyLoggedTrackId) {
@@ -142,6 +156,7 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     audioPlayer.addEventListener('error', async (e) => {
         console.error('Audio playback error:', e);
         playPauseBtn.innerHTML = SVG_PLAY;
+        player.cancelCrossfade(); // Cancel crossfade on error
 
         const currentQuality = player.quality;
 

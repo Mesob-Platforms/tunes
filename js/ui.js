@@ -35,6 +35,7 @@ import { getVibrantColorFromImage } from './vibrant-color.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { Visualizer } from './visualizer.js';
 import { navigate } from './router.js';
+import { apiUrl, isNative } from './platform.js';
 import {
     renderUnreleasedPage as renderUnreleasedTrackerPage,
     renderTrackerArtistPage as renderTrackerArtistContent,
@@ -1059,7 +1060,11 @@ export class UIRenderer {
             fsDownloadBtn.onclick = () => document.getElementById('download-current-btn')?.click();
         }
         if (fsCastBtn) {
-            fsCastBtn.onclick = () => document.getElementById('cast-btn')?.click();
+            if (isNative) {
+                fsCastBtn.style.display = 'none'; // Casting unavailable on native
+            } else {
+                fsCastBtn.onclick = () => document.getElementById('cast-btn')?.click();
+            }
         }
         if (fsQueueBtn) {
             fsQueueBtn.onclick = () => {
@@ -1396,7 +1401,7 @@ export class UIRenderer {
     }
 
     async renderLocalFiles(container) {
-        if (!container) return;
+        if (!container || isNative) return; // Local files not supported on native Android
 
         const introDiv = document.getElementById('local-files-intro');
         const headerDiv = document.getElementById('local-files-header');
@@ -1978,7 +1983,7 @@ export class UIRenderer {
                             const artist = match.item;
                             const name = artist.name || 'Unknown';
                             const picture = artist.picture || null;
-                            const pictureUrl = picture ? this.api.getArtistPictureUrl(picture) : 'assets/logo.svg';
+                            const pictureUrl = picture ? this.api.getArtistPictureUrl(picture) : 'assets/everywhere.png';
                             html += `
                                 <div class="library-row library-row--search-result" data-artist-id="${artist.id}" data-source="${match.source}">
                                     <img src="${pictureUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
@@ -2261,7 +2266,7 @@ export class UIRenderer {
         // Sort by downloadedAt descending (newest first)
         const sorted = [...catalog].sort((a, b) => (b.downloadedAt || 0) - (a.downloadedAt || 0));
         container.innerHTML = sorted.map((t) => {
-            const coverUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+            const coverUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/everywhere.png';
             const dur = t.duration ? formatTime(t.duration) : '';
             return `
                 <div class="dl-track-item" data-track-id="${t.id}">
@@ -2362,7 +2367,7 @@ export class UIRenderer {
         }
 
         container.innerHTML = `<div class="dl-albums-grid">${albums.map((a) => {
-            const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg';
+            const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-album-id="${a.id}">
                     <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
@@ -2400,7 +2405,7 @@ export class UIRenderer {
         }
         detailEl.style.display = 'block';
 
-        const coverUrl = albumInfo?.cover ? this.api.getCoverUrl(albumInfo.cover, '320') : 'assets/logo.svg';
+        const coverUrl = albumInfo?.cover ? this.api.getCoverUrl(albumInfo.cover, '320') : 'assets/everywhere.png';
         detailEl.innerHTML = `
             <div class="dl-detail-nav">
                 <button class="dl-detail-nav-back" id="dl-album-detail-back">
@@ -2424,7 +2429,7 @@ export class UIRenderer {
             <div class="dl-detail-divider"></div>
             <div class="dl-detail-tracks">
                 ${tracks.map((t, i) => {
-                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/everywhere.png';
                     const dur = t.duration ? formatTime(t.duration) : '';
                     const trackNum = t.trackNumber !== null && t.trackNumber !== undefined ? t.trackNumber : '';
                     return `
@@ -2514,7 +2519,7 @@ export class UIRenderer {
         container.innerHTML = `<div class="dl-artists-grid">${artists.map((a) => {
             const avatarUrl = a.picture 
                 ? this.api.getArtistPictureUrl(a.picture, '160')
-                : (a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg');
+                : (a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png');
             return `
                 <div class="dl-artist-card" data-artist-id="${a.id}">
                     <img class="dl-artist-card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
@@ -2569,7 +2574,7 @@ export class UIRenderer {
 
         const artistPictureUrl = artistInfo?.picture 
             ? this.api.getArtistPictureUrl(artistInfo.picture, '320')
-            : (artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/logo.svg');
+            : (artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/everywhere.png');
         detailEl.innerHTML = `
             <div class="dl-detail-nav">
                 <button class="dl-detail-nav-back" id="dl-artist-detail-back">
@@ -2598,7 +2603,7 @@ export class UIRenderer {
             <div class="search-tab-content" id="dl-artist-tab-tracks">
                 <div class="dl-detail-tracks">
                     ${tracks.map((t, i) => {
-                        const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                        const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/everywhere.png';
                         const dur = t.duration ? formatTime(t.duration) : '';
                         return `
                         <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
@@ -2620,7 +2625,7 @@ export class UIRenderer {
         if (albumsGrid) {
             if (albums.length) {
                 albumsGrid.innerHTML = albums.map((a) => {
-                    const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/logo.svg';
+                    const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-album-id="${a.id}">
                             <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
@@ -2709,7 +2714,7 @@ export class UIRenderer {
         }
 
         container.innerHTML = `<div class="dl-albums-grid">${playlists.map((p) => {
-            const coverUrl = p.cover ? this.api.getCoverUrl(p.cover) : 'assets/logo.svg';
+            const coverUrl = p.cover ? this.api.getCoverUrl(p.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-playlist-id="${p.id}">
                     <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
@@ -2746,7 +2751,7 @@ export class UIRenderer {
         }
         detailEl.style.display = 'block';
 
-        const coverUrl = playlistInfo?.cover ? this.api.getCoverUrl(playlistInfo.cover, '320') : 'assets/logo.svg';
+        const coverUrl = playlistInfo?.cover ? this.api.getCoverUrl(playlistInfo.cover, '320') : 'assets/everywhere.png';
         detailEl.innerHTML = `
             <div class="dl-detail-nav">
                 <button class="dl-detail-nav-back" id="dl-playlist-detail-back">
@@ -2767,7 +2772,7 @@ export class UIRenderer {
             <div class="dl-detail-divider"></div>
             <div class="dl-detail-tracks">
                 ${tracks.map((t, i) => {
-                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/logo.svg';
+                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/everywhere.png';
                     const dur = t.duration ? formatTime(t.duration) : '';
                     const trackNum = t.trackNumber !== null && t.trackNumber !== undefined ? t.trackNumber : '';
                     return `
@@ -3501,14 +3506,18 @@ export class UIRenderer {
                 });
             });
 
-            // 3) Fire AI with candidates (AI runs WITHOUT abort signal so it survives fast typing)
-            const aiSearchPromise = fetch('/api/ai-search', {
+            // 3) Fire AI with candidates (uses abort signal so it cancels with new searches)
+            const aiSearchPromise = fetch(apiUrl('/api/ai-search'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query, candidates }),
+                signal,
             }).then(r => r.ok ? r.json() : null).catch(() => null);
 
             const aiResult = await aiSearchPromise;
+
+            // Guard: if a newer search started while we awaited AI, bail out
+            if (signal.aborted) return;
 
             const aiIntent = aiResult?.intent || null;
 
@@ -3596,6 +3605,9 @@ export class UIRenderer {
                     finalArtists.unshift(aiMatch);
                 }
             }
+
+            // Guard: if a newer search started while we did secondary searches, bail out
+            if (signal.aborted) return;
 
             // 5) Render each tab - wait until ALL searches complete before showing results
             // This prevents the "boom changes itself" issue where results update after initial render
@@ -5755,7 +5767,7 @@ export class UIRenderer {
 
         /** Authenticated fetch helper for admin API endpoints */
         const adminFetch = async (path, opts = {}) => {
-            const res = await fetch(path, {
+            const res = await fetch(apiUrl(path), {
                 ...opts,
                 headers: {
                     'Authorization': `Bearer ${token}`,

@@ -24,6 +24,17 @@ allprojects {
     }
 }
 
+// Force all subprojects to use the same compileSdk
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                compileSdk rootProject.ext.compileSdkVersion
+            }
+        }
+    }
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }

@@ -1,10 +1,11 @@
 //js/lastfm.js
 import { lastFMStorage } from './storage.js';
+import { apiUrl } from './platform.js';
 
 export class LastFMScrobbler {
     constructor() {
         this.API_KEY = '0ecf01914957b40c17030db822845a76';
-        this.API_SECRET = 'bd37e61e0b16b8c7bf8de2862de5493c';
+        // API_SECRET removed — signature computed server-side via Worker proxy
         this.API_URL = 'https://ws.audioscrobbler.com/2.0/';
 
         this.sessionKey = null;
@@ -80,22 +81,19 @@ export class LastFMScrobbler {
     }
 
     async generateSignature(params) {
-        const filteredParams = { ...params };
-        delete filteredParams.format;
-        delete filteredParams.callback;
-
-        const sortedKeys = Object.keys(filteredParams).sort();
-
-        const signatureString = sortedKeys.map((key) => `${key}${filteredParams[key]}`).join('') + this.API_SECRET;
-
-        console.log('Signature string:', signatureString);
-
+        // Signature computed server-side via Worker proxy — secret never in client
         try {
-            const { default: md5 } = await import('md5');
-            return md5(signatureString);
-        } catch {
-            console.error('MD5 library not available');
-            throw new Error('MD5 library required for Last.fm');
+            const res = await fetch(apiUrl('/api/proxy/lastfm-sign'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params),
+            });
+            if (!res.ok) throw new Error(`Signature proxy ${res.status}`);
+            const data = await res.json();
+            return data.signature;
+        } catch (err) {
+            console.error('Last.fm signature proxy failed:', err);
+            throw err;
         }
     }
 

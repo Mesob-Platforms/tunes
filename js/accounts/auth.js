@@ -1,5 +1,7 @@
 // js/accounts/auth.js
-import { supabase, isAdminEmail } from './config.js';
+import { supabase, isAdminEmail, GOOGLE_WEB_CLIENT_ID } from './config.js';
+import { isNative } from '../platform.js';
+import { GoogleOneTapAuth } from 'capacitor-native-google-one-tap-signin';
 
 // Helper: show an inline message in the gate
 function showGateMessage(elementId, text, type = 'error') {
@@ -50,6 +52,7 @@ export class AuthManager {
         this._pendingEmail = null;   // email being worked with
         this._otpPurpose = null;     // 'signup' or 'reset'
         this._skipGateHide = false;  // after OTP verify during signup, don't hide gate yet
+        this._googleOneTapReady = false; // Google One Tap plugin initialized
     }
 
     init() {
@@ -118,18 +121,112 @@ export class AuthManager {
 
     // ===== AUTH METHODS =====
 
+    // ===== GOOGLE ONE TAP (Native) =====
+
+    /**
+     * Initialize the Google One Tap plugin on native platforms.
+     * Safe to call multiple times — no-ops after first successful init.
+     */
+    async _initGoogleOneTap() {
+        if (this._googleOneTapReady || !GOOGLE_WEB_CLIENT_ID) return false;
+        try {
+            await GoogleOneTapAuth.initialize({ clientId: GOOGLE_WEB_CLIENT_ID });
+            this._googleOneTapReady = true;
+            return true;
+        } catch (e) {
+            console.warn('[auth] Google One Tap init failed:', e);
+            return false;
+        }
+    }
+
+    /**
+     * Attempt automatic / One Tap sign-in (native only).
+     * Returns the Google ID token on success, null otherwise.
+     */
+    async _tryGoogleOneTap() {
+        if (!this._googleOneTapReady) return null;
+        try {
+            const result = await GoogleOneTapAuth.tryAutoOrOneTapSignIn();
+            if (result.isSuccess && result.success?.idToken) {
+                return result.success.idToken;
+            }
+            return null;
+        } catch (e) {
+            console.warn('[auth] Google One Tap auto sign-in failed:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Sign in with a Google ID token via Supabase's signInWithIdToken.
+     */
+    async _signInWithGoogleIdToken(idToken) {
+        const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: idToken,
+        });
+        if (error) throw error;
+        return data;
+    }
+
+    /**
+     * Auto-trigger Google One Tap when the auth gate loads on native platforms.
+     * Runs silently in the background — if it succeeds the gate hides automatically.
+     */
+    async _autoTriggerGoogleOneTap() {
+        try {
+            await this._initGoogleOneTap();
+            const idToken = await this._tryGoogleOneTap();
+            if (idToken) {
+                await this._signInWithGoogleIdToken(idToken);
+                // Success — onAuthStateChange will hide the gate
+            }
+        } catch (e) {
+            // Silent fail — user can still use the manual Google button or email/OTP
+            console.warn('[auth] Auto Google One Tap failed:', e);
+        }
+    }
+
     async signInWithGoogle() {
         if (!supabase) {
             showGateMessage('gate-email-message', 'Supabase is not configured.');
             return;
         }
         try {
-            const { data, error } = await supabase.auth.signInWithOAuth({
-                provider: 'google',
-                options: { redirectTo: window.location.origin },
-            });
-            if (error) throw error;
-            return data;
+            // Native path: use Google One Tap / Credential Manager for a native-feeling UX
+            if (isNative && GOOGLE_WEB_CLIENT_ID) {
+                await this._initGoogleOneTap();
+
+                if (this._googleOneTapReady) {
+                    // Show full account picker (button-flow) for manual taps
+                    const result = await GoogleOneTapAuth.signInWithGoogleButtonFlowForNativePlatform();
+                    if (result.isSuccess && result.success?.idToken) {
+                        return await this._signInWithGoogleIdToken(result.success.idToken);
+                    }
+                    // User cancelled or native flow failed — do NOT fall through to browser
+                    if (result.noSuccess) {
+                        const reason = result.noSuccess.noSuccessReasonCode || 'unknown';
+                        console.log('[auth] Google One Tap dismissed:', reason);
+                        if (reason === 'USER_CANCELED' || reason === 'CANCELLED') {
+                            // User deliberately dismissed — just return silently
+                            return;
+                        }
+                        showGateMessage('gate-email-message', 'Google sign-in failed. Please try again.');
+                    }
+                    // On native, never fall through to browser OAuth
+                    return;
+                }
+            }
+
+            // Web-only path: use Supabase OAuth redirect (browser)
+            if (!isNative) {
+                const { data, error } = await supabase.auth.signInWithOAuth({
+                    provider: 'google',
+                    options: { redirectTo: window.location.origin },
+                });
+                if (error) throw error;
+                return data;
+            }
         } catch (error) {
             console.error('Google login failed:', error);
             showGateMessage('gate-email-message', `Google login failed: ${error.message || JSON.stringify(error)}`);
@@ -204,6 +301,10 @@ export class AuthManager {
         if (!supabase) return;
         try {
             await supabase.auth.signOut();
+            // Also sign out from Google One Tap to prevent auto-sign-in on next gate load
+            if (this._googleOneTapReady) {
+                try { await GoogleOneTapAuth.signOut(); } catch { /* ignore */ }
+            }
         } catch (error) {
             console.error('Logout failed:', error);
             throw error;
@@ -276,6 +377,11 @@ export class AuthManager {
     }
 
     initAuthGate() {
+        // ===== NATIVE: Auto-trigger Google One Tap on gate load =====
+        if (isNative && GOOGLE_WEB_CLIENT_ID) {
+            this._autoTriggerGoogleOneTap();
+        }
+
         // ===== SCREEN 1: Email entry =====
         const gateGoogleBtn = document.getElementById('gate-google-btn');
         if (gateGoogleBtn) {
