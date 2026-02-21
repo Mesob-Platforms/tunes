@@ -3405,8 +3405,12 @@ export class UIRenderer {
         return items.filter((item) => !favoriteIds.has(item.id));
     }
 
-    async renderSearchPage(query) {
-        this.showPage('search');
+    async renderSearchPage(query, isLiveTyping = false) {
+        // Only call showPage (which scrolls to top) when first entering the search page
+        const isAlreadyOnSearch = document.getElementById('page-search')?.classList.contains('active');
+        if (!isAlreadyOnSearch) {
+            this.showPage('search');
+        }
 
         const exploreLanding = document.getElementById('explore-landing');
         const searchResultsTitle = document.getElementById('search-results-title');
@@ -3442,10 +3446,16 @@ export class UIRenderer {
         const albumsContainer = document.getElementById('search-albums-container');
         const playlistsContainer = document.getElementById('search-playlists-container');
 
-        tracksContainer.innerHTML = this.createSkeletonTracks(8, true);
-        artistsContainer.innerHTML = this.createSkeletonCards(6, true);
-        albumsContainer.innerHTML = this.createSkeletonCards(6, false);
-        playlistsContainer.innerHTML = this.createSkeletonCards(6, false);
+        // Only show skeletons on the FIRST search (containers empty).
+        // During live typing, keep previous results visible while loading new ones.
+        const hasExistingResults = tracksContainer.children.length > 0 &&
+            !tracksContainer.querySelector('.skeleton');
+        if (!hasExistingResults) {
+            tracksContainer.innerHTML = this.createSkeletonTracks(8, true);
+            artistsContainer.innerHTML = this.createSkeletonCards(6, true);
+            albumsContainer.innerHTML = this.createSkeletonCards(6, false);
+            playlistsContainer.innerHTML = this.createSkeletonCards(6, false);
+        }
 
         if (this.searchAbortController) {
             this.searchAbortController.abort();
@@ -3454,12 +3464,7 @@ export class UIRenderer {
         const signal = this.searchAbortController.signal;
 
         try {
-            // ══════════════════════════════════════════════════════
-            //  CLEAN SEARCH: AI corrects query → search corrected
-            //  query → sort by raw popularity. That's it.
-            // ══════════════════════════════════════════════════════
-
-            // 1) Fire original query searches first to get candidates
+            // 1) Fire the 4 main searches in parallel
             const [tracksResult, artistsResult, albumsResult, playlistsResult] = await Promise.all([
                 this.api.searchTracks(query, { signal }),
                 this.api.searchArtists(query, { signal }),
@@ -3467,61 +3472,9 @@ export class UIRenderer {
                 this.api.searchPlaylists(query, { signal }),
             ]);
 
-            // 2) Build candidates list with popularity for AI
-            const candidates = [];
-            // Top 5 tracks with popularity
-            tracksResult.items.slice(0, 5).forEach(t => {
-                candidates.push({
-                    name: t.title,
-                    artist: t.artist?.name || (t.artists?.[0]?.name),
-                    type: 'track',
-                    popularity: t.popularity || 0
-                });
-            });
-            // Top 3 albums with popularity
-            albumsResult.items.slice(0, 3).forEach(a => {
-                candidates.push({
-                    name: a.title,
-                    artist: a.artist?.name,
-                    type: 'album',
-                    popularity: a.popularity || 0
-                });
-            });
-            // Top 3 artists with popularity
-            artistsResult.items.slice(0, 3).forEach(a => {
-                candidates.push({
-                    name: a.name,
-                    artist: null,
-                    type: 'artist',
-                    popularity: a.popularity || 0
-                });
-            });
-            // Top 2 playlists
-            playlistsResult.items.slice(0, 2).forEach(p => {
-                candidates.push({
-                    name: p.title,
-                    artist: null,
-                    type: 'playlist',
-                    popularity: p.numberOfTracks || 0
-                });
-            });
-
-            // 3) Fire AI with candidates (uses abort signal so it cancels with new searches)
-            const aiSearchPromise = fetch(apiUrl('/api/ai-search'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, candidates }),
-                signal,
-            }).then(r => r.ok ? r.json() : null).catch(() => null);
-
-            const aiResult = await aiSearchPromise;
-
-            // Guard: if a newer search started while we awaited AI, bail out
             if (signal.aborted) return;
 
-            const aiIntent = aiResult?.intent || null;
-
-            // 4) Collect original results into maps for dedup
+            // 2) Collect results into maps for dedup
             const trackMap = new Map();
             const artistMap = new Map();
             const albumMap = new Map();
@@ -3537,14 +3490,133 @@ export class UIRenderer {
                 if (t.album && !albumMap.has(t.album.id)) albumMap.set(t.album.id, t.album);
             }
 
-            // 5) If AI identified a DIFFERENT query, do a SECONDARY search
-            //    e.g. user typed "justn" → AI says "Justin Bieber" → search "Justin Bieber"
-            //    e.g. user typed "graduation" → AI says artist:"Kanye West" title:"Graduation" → search "Kanye West Graduation"
-            let aiQuery = '';
-            if (aiIntent && aiIntent.confidence >= 50) {
-                const parts = [aiIntent.artist, aiIntent.title].filter(Boolean);
-                aiQuery = parts.join(' ').trim();
+            let finalTracks = Array.from(trackMap.values());
+            let finalArtists = Array.from(artistMap.values());
+            let finalAlbums = Array.from(albumMap.values());
+            let finalPlaylists = playlistsResult.items;
+
+            // 3) Sort by raw popularity
+            finalTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            finalArtists.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            finalAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            finalPlaylists.sort((a, b) => (b.numberOfTracks || 0) - (a.numberOfTracks || 0));
+
+            if (signal.aborted) return;
+
+            // 4) Render results IMMEDIATELY (no waiting for AI during live typing)
+            this._renderSearchResults(tracksContainer, artistsContainer, albumsContainer, playlistsContainer,
+                finalTracks, finalArtists, finalAlbums, finalPlaylists);
+
+            const _popScore = (item, type) => {
+                return (type === 'playlist') ? (item.numberOfTracks || 0) : (item.popularity || 0);
+            };
+
+            // Show "All" tab right away with raw results
+            requestAnimationFrame(() => {
+                if (!signal.aborted) {
+                    this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, null);
+                }
+            });
+
+            // 5) Fire AI refinement in the background (only if user stopped typing, i.e. not live-typing)
+            //    On submit (Enter), isLiveTyping=false → AI runs normally
+            //    On live typing, skip AI entirely → instant results, no flicker
+            if (!isLiveTyping) {
+                this._refineSearchWithAI(query, signal, tracksResult, artistsResult, albumsResult, playlistsResult,
+                    trackMap, artistMap, albumMap,
+                    tracksContainer, artistsContainer, albumsContainer, playlistsContainer, _popScore);
+            } else {
+                // Schedule a delayed AI refinement: if user stops typing for 1.5s, run AI
+                clearTimeout(this._aiRefinementTimer);
+                this._aiRefinementTimer = setTimeout(() => {
+                    if (!signal.aborted) {
+                        this._refineSearchWithAI(query, signal, tracksResult, artistsResult, albumsResult, playlistsResult,
+                            trackMap, artistMap, albumMap,
+                            tracksContainer, artistsContainer, albumsContainer, playlistsContainer, _popScore);
+                    }
+                }, 1500);
             }
+        } catch (error) {
+            if (error.name === 'AbortError') return;
+            console.error('Search failed:', error);
+            const errorMsg = createPlaceholder(`Error during search. ${error.message}`);
+            tracksContainer.innerHTML = errorMsg;
+            artistsContainer.innerHTML = errorMsg;
+            albumsContainer.innerHTML = errorMsg;
+            playlistsContainer.innerHTML = errorMsg;
+        }
+    }
+
+    // Renders search results into the tab containers
+    _renderSearchResults(tracksContainer, artistsContainer, albumsContainer, playlistsContainer,
+        finalTracks, finalArtists, finalAlbums, finalPlaylists) {
+
+        if (finalTracks.length) {
+            this.renderListWithTracks(tracksContainer, finalTracks, true);
+        } else {
+            tracksContainer.innerHTML = createPlaceholder('No tracks found.');
+        }
+
+        artistsContainer.innerHTML = finalArtists.length
+            ? finalArtists.map((artist) => this.createArtistCardHTML(artist)).join('')
+            : createPlaceholder('No artists found.');
+        finalArtists.forEach((artist) => {
+            const el = artistsContainer.querySelector(`[data-artist-id="${artist.id}"]`);
+            if (el) { trackDataStore.set(el, artist); this.updateLikeState(el, 'artist', artist.id); }
+        });
+
+        albumsContainer.innerHTML = finalAlbums.length
+            ? finalAlbums.map((album) => this.createAlbumCardHTML(album)).join('')
+            : createPlaceholder('No albums found.');
+        finalAlbums.forEach((album) => {
+            const el = albumsContainer.querySelector(`[data-album-id="${album.id}"]`);
+            if (el) { trackDataStore.set(el, album); this.updateLikeState(el, 'album', album.id); }
+        });
+
+        playlistsContainer.innerHTML = finalPlaylists.length
+            ? finalPlaylists.map((playlist) => this.createPlaylistCardHTML(playlist, true)).join('')
+            : createPlaceholder('No playlists found.');
+        finalPlaylists.forEach((playlist) => {
+            const el = playlistsContainer.querySelector(`[data-playlist-id="${playlist.uuid}"]`);
+            if (el) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
+        });
+    }
+
+    // AI refinement: runs AFTER initial results are shown, updates in-place if AI finds better results
+    async _refineSearchWithAI(query, signal, tracksResult, artistsResult, albumsResult, playlistsResult,
+        trackMap, artistMap, albumMap,
+        tracksContainer, artistsContainer, albumsContainer, playlistsContainer, _popScore) {
+        try {
+            // Build candidates list for AI
+            const candidates = [];
+            tracksResult.items.slice(0, 5).forEach(t => {
+                candidates.push({ name: t.title, artist: t.artist?.name || (t.artists?.[0]?.name), type: 'track', popularity: t.popularity || 0 });
+            });
+            albumsResult.items.slice(0, 3).forEach(a => {
+                candidates.push({ name: a.title, artist: a.artist?.name, type: 'album', popularity: a.popularity || 0 });
+            });
+            artistsResult.items.slice(0, 3).forEach(a => {
+                candidates.push({ name: a.name, artist: null, type: 'artist', popularity: a.popularity || 0 });
+            });
+            playlistsResult.items.slice(0, 2).forEach(p => {
+                candidates.push({ name: p.title, artist: null, type: 'playlist', popularity: p.numberOfTracks || 0 });
+            });
+
+            const aiResult = await fetch(apiUrl('/api/ai-search'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, candidates }),
+                signal,
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+            if (signal.aborted) return;
+
+            const aiIntent = aiResult?.intent || null;
+            if (!aiIntent || aiIntent.confidence < 50) return;
+
+            // If AI identified a DIFFERENT query, do a secondary search
+            const parts = [aiIntent.artist, aiIntent.title].filter(Boolean);
+            const aiQuery = parts.join(' ').trim();
 
             if (aiQuery && aiQuery.toLowerCase() !== query.toLowerCase()) {
                 try {
@@ -3556,7 +3628,6 @@ export class UIRenderer {
                     for (const t of (aiTracks.items || [])) { if (!trackMap.has(t.id)) trackMap.set(t.id, t); }
                     for (const a of (aiArtists.items || [])) { if (!artistMap.has(a.id)) artistMap.set(a.id, a); }
                     for (const a of (aiAlbums.items || [])) { if (!albumMap.has(a.id)) albumMap.set(a.id, a); }
-                    // Extract artists/albums from AI tracks too
                     for (const t of (aiTracks.items || [])) {
                         if (t.artist && !artistMap.has(t.artist.id)) artistMap.set(t.artist.id, t.artist);
                         if (t.artists) t.artists.forEach(a => { if (a && !artistMap.has(a.id)) artistMap.set(a.id, a); });
@@ -3565,99 +3636,49 @@ export class UIRenderer {
                 } catch (e) { /* secondary search failed, continue */ }
             }
 
+            if (signal.aborted) return;
+
             let finalTracks = Array.from(trackMap.values());
             let finalArtists = Array.from(artistMap.values());
             let finalAlbums = Array.from(albumMap.values());
             let finalPlaylists = playlistsResult.items;
 
-            // 6) Sort EVERYTHING by raw popularity. Nothing else.
             finalTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
             finalArtists.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
             finalAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
             finalPlaylists.sort((a, b) => (b.numberOfTracks || 0) - (a.numberOfTracks || 0));
 
-            // 7) If AI identified a specific match, boost it to the top
-            if (aiIntent && aiIntent.confidence >= 70 && aiIntent.type === 'track' && aiIntent.artist && aiIntent.title) {
-                const aiMatch = finalTracks.find(t => 
+            // Boost AI's pick to the top
+            if (aiIntent.confidence >= 70 && aiIntent.type === 'track' && aiIntent.artist && aiIntent.title) {
+                const aiMatch = finalTracks.find(t =>
                     t.artist?.name?.toLowerCase().includes(aiIntent.artist.toLowerCase()) &&
-                    t.title?.toLowerCase().includes(aiIntent.title.toLowerCase())
-                );
-                if (aiMatch) {
-                    // Remove from current position and add to top
-                    finalTracks = finalTracks.filter(t => t.id !== aiMatch.id);
-                    finalTracks.unshift(aiMatch);
-                }
-            } else if (aiIntent && aiIntent.confidence >= 70 && aiIntent.type === 'album' && aiIntent.artist && aiIntent.title) {
-                const aiMatch = finalAlbums.find(a => 
+                    t.title?.toLowerCase().includes(aiIntent.title.toLowerCase()));
+                if (aiMatch) { finalTracks = finalTracks.filter(t => t.id !== aiMatch.id); finalTracks.unshift(aiMatch); }
+            } else if (aiIntent.confidence >= 70 && aiIntent.type === 'album' && aiIntent.artist && aiIntent.title) {
+                const aiMatch = finalAlbums.find(a =>
                     a.artist?.name?.toLowerCase().includes(aiIntent.artist.toLowerCase()) &&
-                    a.title?.toLowerCase().includes(aiIntent.title.toLowerCase())
-                );
-                if (aiMatch) {
-                    finalAlbums = finalAlbums.filter(a => a.id !== aiMatch.id);
-                    finalAlbums.unshift(aiMatch);
-                }
-            } else if (aiIntent && aiIntent.confidence >= 70 && aiIntent.type === 'artist' && aiIntent.artist) {
-                const aiMatch = finalArtists.find(a => 
-                    a.name?.toLowerCase().includes(aiIntent.artist.toLowerCase())
-                );
-                if (aiMatch) {
-                    finalArtists = finalArtists.filter(a => a.id !== aiMatch.id);
-                    finalArtists.unshift(aiMatch);
-                }
+                    a.title?.toLowerCase().includes(aiIntent.title.toLowerCase()));
+                if (aiMatch) { finalAlbums = finalAlbums.filter(a => a.id !== aiMatch.id); finalAlbums.unshift(aiMatch); }
+            } else if (aiIntent.confidence >= 70 && aiIntent.type === 'artist' && aiIntent.artist) {
+                const aiMatch = finalArtists.find(a =>
+                    a.name?.toLowerCase().includes(aiIntent.artist.toLowerCase()));
+                if (aiMatch) { finalArtists = finalArtists.filter(a => a.id !== aiMatch.id); finalArtists.unshift(aiMatch); }
             }
 
-            // Guard: if a newer search started while we did secondary searches, bail out
             if (signal.aborted) return;
 
-            // 5) Render each tab - wait until ALL searches complete before showing results
-            // This prevents the "boom changes itself" issue where results update after initial render
-            if (finalTracks.length) {
-                this.renderListWithTracks(tracksContainer, finalTracks, true);
-            } else {
-                tracksContainer.innerHTML = createPlaceholder('No tracks found.');
-            }
+            // Update results in-place with AI-refined data
+            this._renderSearchResults(tracksContainer, artistsContainer, albumsContainer, playlistsContainer,
+                finalTracks, finalArtists, finalAlbums, finalPlaylists);
 
-            artistsContainer.innerHTML = finalArtists.length
-                ? finalArtists.map((artist) => this.createArtistCardHTML(artist)).join('')
-                : createPlaceholder('No artists found.');
-            finalArtists.forEach((artist) => {
-                const el = artistsContainer.querySelector(`[data-artist-id="${artist.id}"]`);
-                if (el) { trackDataStore.set(el, artist); this.updateLikeState(el, 'artist', artist.id); }
-            });
-
-            albumsContainer.innerHTML = finalAlbums.length
-                ? finalAlbums.map((album) => this.createAlbumCardHTML(album)).join('')
-                : createPlaceholder('No albums found.');
-            finalAlbums.forEach((album) => {
-                const el = albumsContainer.querySelector(`[data-album-id="${album.id}"]`);
-                if (el) { trackDataStore.set(el, album); this.updateLikeState(el, 'album', album.id); }
-            });
-
-            playlistsContainer.innerHTML = finalPlaylists.length
-                ? finalPlaylists.map((playlist) => this.createPlaylistCardHTML(playlist, true)).join('')
-                : createPlaceholder('No playlists found.');
-            finalPlaylists.forEach((playlist) => {
-                const el = playlistsContainer.querySelector(`[data-playlist-id="${playlist.uuid}"]`);
-                if (el) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
-            });
-
-            // 6) "All" tab: populate AFTER individual tabs to ensure final results are used
-            const _popScore = (item, type) => {
-                return (type === 'playlist') ? (item.numberOfTracks || 0) : (item.popularity || 0);
-            };
-
-            // Use requestAnimationFrame to ensure DOM is ready before populating All tab
             requestAnimationFrame(() => {
-                this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, aiIntent);
+                if (!signal.aborted) {
+                    this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, aiIntent);
+                }
             });
         } catch (error) {
             if (error.name === 'AbortError') return;
-            console.error('Search failed:', error);
-            const errorMsg = createPlaceholder(`Error during search. ${error.message}`);
-            tracksContainer.innerHTML = errorMsg;
-            artistsContainer.innerHTML = errorMsg;
-            albumsContainer.innerHTML = errorMsg;
-            playlistsContainer.innerHTML = errorMsg;
+            console.warn('AI search refinement failed:', error);
         }
     }
 

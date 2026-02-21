@@ -1702,15 +1702,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Setup clear button for search bar
     ui.setupSearchClearButton(searchInput);
 
+    // Live-typing search: update results without skeleton flash
     const performSearch = debounce((query) => {
         if (query) {
-            navigate(`/search/${encodeURIComponent(query)}`);
+            // Silently update URL (replaceState avoids history spam while typing)
+            const newPath = `/search/${encodeURIComponent(query)}`;
+            if (newPath !== window.location.pathname) {
+                window.history.replaceState({}, '', newPath);
+            }
+            // Render directly — skip the navigate→router→showPage chain that causes skeleton flash
+            ui.renderSearchPage(query, true);
         }
-    }, 300);
+    }, 500);
 
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value.trim();
         if (query.length > 2) {
+            // Ensure we're on the search page (once), then let performSearch handle updates
+            const searchPageEl = document.getElementById('page-search');
+            if (searchPageEl && !searchPageEl.classList.contains('active')) {
+                ui.showPage('search');
+            }
             performSearch(query);
         } else if (query.length === 0) {
             // When input is cleared, show explore landing

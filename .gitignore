@@ -27,3 +27,12 @@ Desktop.ini
 # Wrangler
 .wrangler/
 
+# Build artifacts / temp debug files
+*.apk
+android/tunes-release.keystore
+generate-icons.js
+_*.js
+_*.css
+_*.html
+_*.txt
+
