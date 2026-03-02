@@ -18,34 +18,25 @@ import {
     calculateTotalDuration,
     formatDuration,
     escapeHtml,
+    showConfirmDialog,
+    copyToClipboard,
 } from './utils.js';
 import { openLyricsPanel } from './lyrics.js';
 import {
     recentActivityManager,
     backgroundSettings,
     cardSettings,
-    visualizerSettings,
     homePageSettings,
     streamingQualitySettings,
+    crossfadeSettings,
 } from './storage.js';
 import { authManager } from './accounts/auth.js';
 import { buildAccountPageData, getAvatarUrl } from './accounts/profile.js';
 import { db } from './db.js';
 import { getVibrantColorFromImage } from './vibrant-color.js';
 import { syncManager } from './accounts/supabaseSync.js';
-import { Visualizer } from './visualizer.js';
 import { navigate } from './router.js';
 import { apiUrl, isNative } from './platform.js';
-import {
-    renderUnreleasedPage as renderUnreleasedTrackerPage,
-    renderTrackerArtistPage as renderTrackerArtistContent,
-    renderTrackerProjectPage as renderTrackerProjectContent,
-    renderTrackerTrackPage as renderTrackerTrackContent,
-    findTrackerArtistByName,
-    getArtistUnreleasedProjects,
-    createProjectCardHTML,
-    createTrackFromSong,
-} from './tracker.js';
 
 function sortTracks(tracks, sortType) {
     if (sortType === 'custom') return [...tracks];
@@ -86,6 +77,11 @@ export class UIRenderer {
         this.searchAbortController = null;
         this.vibrantColorCache = new Map();
         this.visualizer = null;
+        this._pageHtmlCache = new Map();
+        this._homeDataCache = { songs: null, albums: null, artists: null, songsTime: 0, albumsTime: 0, artistsTime: 0 };
+        this._scrollPositions = {};
+        this._currentPageId = null;
+        this._activeRootTab = 'home';
     }
 
     // Helper for Heart Icon
@@ -573,6 +569,20 @@ export class UIRenderer {
             .join('')}</div>`;
     }
 
+    /** Skeletons for horizontal scroll rows (home albums/artists) — no grid wrapper */
+    createSkeletonScrollCards(count = 6, isArtist = false) {
+        return Array(count)
+            .fill(0)
+            .map(() => `
+                <div class="skeleton-scroll-card ${isArtist ? 'artist' : ''}">
+                    <div class="skeleton skeleton-card-image"></div>
+                    <div class="skeleton skeleton-card-title"></div>
+                    ${!isArtist ? '<div class="skeleton skeleton-card-subtitle"></div>' : ''}
+                </div>
+            `)
+            .join('');
+    }
+
     setupSearchClearButton(inputElement, clearBtnSelector = '.search-clear-btn') {
         if (!inputElement) return;
 
@@ -593,6 +603,8 @@ export class UIRenderer {
             inputElement.value = '';
             inputElement.dispatchEvent(new Event('input'));
             inputElement.focus();
+            const historyEl = document.getElementById('search-history');
+            if (historyEl) historyEl.style.display = 'block';
         };
 
         inputElement.addEventListener('input', toggleVisibility);
@@ -774,7 +786,7 @@ export class UIRenderer {
         root.style.removeProperty('--track-hover-bg');
     }
 
-    updateFullscreenMetadata(track, nextTrack) {
+    async updateFullscreenMetadata(track, nextTrack) {
         if (!track) return;
         const overlay = document.getElementById('fullscreen-cover-overlay');
         const image = document.getElementById('fullscreen-cover-image');
@@ -782,17 +794,62 @@ export class UIRenderer {
         const artist = document.getElementById('fullscreen-track-artist');
         const nextTrackEl = document.getElementById('fullscreen-next-track');
 
-        const coverUrl = this.api.getCoverUrl(track.album?.cover, '1280');
+        const coverId = track.album?.cover || track.cover;
+        const coverUrl = coverId ? this.api.getCoverUrl(coverId, '1280') : '';
+        const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
         const fsLikeBtn = document.getElementById('fs-like-btn');
         if (fsLikeBtn) {
+            const shouldHide = track.isLocal || track.isTracker || (track.id && String(track.id).startsWith('tracker-'));
+            fsLikeBtn.style.display = shouldHide ? 'none' : 'flex';
             this.updateLikeState(fsLikeBtn.parentElement, 'track', track.id);
         }
 
-        if (image.src !== coverUrl) {
-            image.src = coverUrl;
-            overlay.style.setProperty('--bg-image', `url('${coverUrl}')`);
-            this.extractAndApplyColor(coverUrl);
+        const coverCacheKey = (id) => (id ? `cover-${String(id).replace(/\//g, '-')}` : null);
+
+        let resolvedUrl = null;
+        if (coverId) {
+            try {
+                await db.open();
+                let cached = await db.getCachedImage(coverCacheKey(coverId));
+                if (!cached && String(coverId).includes('-')) {
+                    cached = await db.getCachedImage(`cover-${coverId}`);
+                }
+                if (cached) {
+                    resolvedUrl = URL.createObjectURL(cached);
+                }
+            } catch (e) { /* ignore */ }
+        }
+        if (!resolvedUrl && !isOffline && coverUrl) {
+            resolvedUrl = coverUrl;
+        }
+        if (!resolvedUrl) {
+            resolvedUrl = '/assets/everywhere.png';
+        }
+
+        if (image.src !== resolvedUrl) {
+            image.src = resolvedUrl;
+            overlay.style.setProperty('--bg-image', `url('${resolvedUrl}')`);
+            this.extractAndApplyColor(resolvedUrl);
+            if (resolvedUrl === coverUrl) {
+                image.onerror = async () => {
+                    try {
+                        if (!coverId) return;
+                        await db.open();
+                        let cached = await db.getCachedImage(coverCacheKey(coverId));
+                        if (!cached) cached = await db.getCachedImage(`cover-${coverId}`);
+                        if (cached) {
+                            const blobUrl = URL.createObjectURL(cached);
+                            image.src = blobUrl;
+                            overlay.style.setProperty('--bg-image', `url('${blobUrl}')`);
+                            return;
+                        }
+                        const proxyUrl = apiUrl(`/api/image-proxy?url=${encodeURIComponent(coverUrl)}`);
+                        image.src = proxyUrl;
+                        overlay.style.setProperty('--bg-image', `url('${proxyUrl}')`);
+                    } catch (e) { /* ignore */ }
+                };
+            }
         }
 
         const qualityBadge = createQualityBadgeHTML(track);
@@ -816,7 +873,7 @@ export class UIRenderer {
         const nextTrackEl = document.getElementById('fullscreen-next-track');
         const lyricsToggleBtn = document.getElementById('toggle-fullscreen-lyrics-btn');
 
-        this.updateFullscreenMetadata(track, nextTrack);
+        await this.updateFullscreenMetadata(track, nextTrack);
 
         if (nextTrack) {
             nextTrackEl.classList.remove('animate-in');
@@ -830,61 +887,55 @@ export class UIRenderer {
             lyricsToggleBtn.style.display = 'flex';
             lyricsToggleBtn.classList.remove('active');
 
-            const toggleLyrics = () => {
+            if (this._fsLyricsToggleHandler) {
+                lyricsToggleBtn.removeEventListener('click', this._fsLyricsToggleHandler);
+            }
+            this._fsLyricsToggleHandler = () => {
                 openLyricsPanel(track, audioPlayer, lyricsManager);
                 lyricsToggleBtn.classList.toggle('active');
             };
-
-            const newToggleBtn = lyricsToggleBtn.cloneNode(true);
-            lyricsToggleBtn.parentNode.replaceChild(newToggleBtn, lyricsToggleBtn);
-            newToggleBtn.addEventListener('click', toggleLyrics);
+            lyricsToggleBtn.addEventListener('click', this._fsLyricsToggleHandler);
         } else {
             lyricsToggleBtn.style.display = 'none';
         }
 
-        const playerBar = document.querySelector('.now-playing-bar');
-        if (playerBar) playerBar.style.display = 'none';
-
-        // Add fullscreen-open class to body so CSS hides tab bar + now-playing bar
         document.body.classList.add('fullscreen-open');
+        this._fsOverlayVisible = true;
+
+        const backBtn = document.getElementById('mobile-back-btn');
+        if (backBtn && backBtn.classList.contains('inline-back')) {
+            this._backBtnWasInline = true;
+            document.body.insertBefore(backBtn, document.querySelector('.app-container'));
+            backBtn.classList.remove('inline-back');
+        }
 
         this.setupFullscreenControls(audioPlayer);
 
+        overlay.classList.remove('fs-closing');
         overlay.style.display = 'flex';
-
-        const startVisualizer = () => {
-            if (!visualizerSettings.isEnabled()) {
-                if (this.visualizer) this.visualizer.stop();
-                return;
-            }
-
-            if (!this.visualizer && audioPlayer) {
-                const canvas = document.getElementById('visualizer-canvas');
-                if (canvas) {
-                    this.visualizer = new Visualizer(canvas, audioPlayer);
-                }
-            }
-            if (this.visualizer) {
-                this.visualizer.start();
-            }
-        };
-
-        startVisualizer();
+        overlay.classList.add('fs-opening');
+        overlay.addEventListener('animationend', () => overlay.classList.remove('fs-opening'), { once: true });
     }
 
     closeFullscreenCover() {
-        const overlay = document.getElementById('fullscreen-cover-overlay');
-        overlay.style.display = 'none';
+        if (!this._fsOverlayVisible) return;
+        this._fsOverlayVisible = false;
 
-        // Remove fullscreen-open class so tab bar + now-playing bar restore
+        const overlay = document.getElementById('fullscreen-cover-overlay');
         document.body.classList.remove('fullscreen-open');
 
-        // Only restore now-playing bar if a track has been played
-        const playerBar = document.querySelector('.now-playing-bar');
-        if (playerBar && playerBar.dataset.hasTrack === 'true') {
-            playerBar.style.removeProperty('display');
-            if (!playerBar.classList.contains('npb-visible')) playerBar.classList.add('npb-visible');
+        if (this._backBtnWasInline) {
+            this._backBtnWasInline = false;
+            const backBtn = document.getElementById('mobile-back-btn');
+            const mainHdr = document.querySelector('.main-header');
+            if (backBtn && mainHdr && document.body.classList.contains('on-explore-page')) {
+                mainHdr.appendChild(backBtn);
+                backBtn.classList.add('inline-back');
+            }
         }
+
+        const lyricsToggleBtn = document.getElementById('toggle-fullscreen-lyrics-btn');
+        if (lyricsToggleBtn) lyricsToggleBtn.classList.remove('active');
 
         if (this.fullscreenUpdateInterval) {
             cancelAnimationFrame(this.fullscreenUpdateInterval);
@@ -894,6 +945,17 @@ export class UIRenderer {
         if (this.visualizer) {
             this.visualizer.stop();
         }
+
+        overlay.classList.remove('fs-opening');
+        overlay.classList.add('fs-closing');
+        overlay.addEventListener('animationend', () => {
+            if (!this._fsOverlayVisible) {
+                overlay.style.display = 'none';
+                overlay.classList.remove('fs-closing');
+                overlay.style.transform = '';
+                overlay.style.opacity = '';
+            }
+        }, { once: true });
     }
 
     setupFullscreenControls(audioPlayer) {
@@ -1071,6 +1133,12 @@ export class UIRenderer {
                 document.getElementById('queue-btn')?.click();
             };
         }
+        const fsQueueInlineBtn = document.getElementById('fs-queue-inline-btn');
+        if (fsQueueInlineBtn) {
+            fsQueueInlineBtn.onclick = () => {
+                document.getElementById('queue-btn')?.click();
+            };
+        }
 
         shuffleBtn.classList.toggle('active', this.player.shuffleActive);
         const mode = this.player.repeatMode;
@@ -1162,13 +1230,12 @@ export class UIRenderer {
         }
 
         const update = () => {
-            if (document.getElementById('fullscreen-cover-overlay').style.display === 'none') return;
+            if (!this._fsOverlayVisible) return;
 
             const duration = audioPlayer.duration || 0;
             const current = audioPlayer.currentTime || 0;
 
             if (duration > 0) {
-                // Only update progress if not currently seeking (user is dragging)
                 if (!isFsSeeking) {
                     const percent = (current / duration) * 100;
                     progressFill.style.width = `${percent}%`;
@@ -1186,8 +1253,15 @@ export class UIRenderer {
     }
 
     showPage(pageId) {
+        const targetEl = document.getElementById(`page-${pageId}`);
+        if (!targetEl) { pageId = 'home'; }
         document.querySelectorAll('.page').forEach((page) => {
-            page.classList.toggle('active', page.id === `page-${pageId}`);
+            const shouldBeActive = page.id === `page-${pageId}`;
+            if (shouldBeActive) {
+                page.classList.add('active');
+            } else {
+                page.classList.remove('active');
+            }
         });
 
         document.querySelectorAll('.sidebar-nav a').forEach((link) => {
@@ -1197,7 +1271,17 @@ export class UIRenderer {
             );
         });
 
-        document.querySelector('.main-content').scrollTop = 0;
+        const mainContent = document.querySelector('.main-content');
+        if (this._currentPageId) {
+            this._scrollPositions[this._currentPageId] = mainContent.scrollTop;
+        }
+        this._currentPageId = pageId;
+        const saved = this._scrollPositions[pageId];
+        if (saved != null) {
+            requestAnimationFrame(() => { mainContent.scrollTop = saved; });
+        } else {
+            mainContent.scrollTop = 0;
+        }
 
         // Toggle search bar visibility — only show on explore/search page
         const mainHeader = document.querySelector('.main-header');
@@ -1206,18 +1290,41 @@ export class UIRenderer {
             mainHeader.classList.toggle('on-home', pageId === 'home');
         }
 
+        // Keep the last root tab active while visiting detail pages to avoid visual flicker.
+        const rootTabs = new Set(['home', 'search', 'library', 'account']);
+        if (rootTabs.has(pageId)) {
+            this._activeRootTab = pageId;
+        }
+        const mobileActiveTab = rootTabs.has(pageId) ? pageId : this._activeRootTab;
+
         // Update active tab in mobile tab bar
         document.querySelectorAll('.mobile-tab-bar .tab-item').forEach((tab) => {
             const tabId = tab.dataset.tab;
-            tab.classList.toggle('active',
-                tabId === pageId ||
-                (tabId === 'search' && pageId === 'search') ||
-                (tabId === 'home' && pageId === 'home')
-            );
+            tab.classList.toggle('active', tabId === mobileActiveTab);
         });
 
         // Hide mobile tab bar on admin page (slide-down)
         document.body.classList.toggle('hide-tab-bar', pageId === 'admin');
+
+        // Track explore page for back button repositioning
+        document.body.classList.toggle('on-explore-page', pageId === 'search');
+
+        // Update back button: hide on home, show everywhere else
+        const backBtn = document.getElementById('mobile-back-btn');
+        const mainHdr = document.querySelector('.main-header');
+        if (backBtn) {
+            backBtn.classList.toggle('on-home', pageId === 'home');
+
+            if (pageId === 'search' && window.innerWidth <= 768) {
+                if (!backBtn.classList.contains('inline-back')) {
+                    mainHdr.appendChild(backBtn);
+                    backBtn.classList.add('inline-back');
+                }
+            } else if (backBtn.classList.contains('inline-back')) {
+                document.body.insertBefore(backBtn, document.querySelector('.app-container'));
+                backBtn.classList.remove('inline-back');
+            }
+        }
 
         // (no special page overrides needed)
 
@@ -1370,7 +1477,7 @@ export class UIRenderer {
         } else {
             if (shuffleBtn) shuffleBtn.style.display = 'none';
             if (downloadBtn) downloadBtn.style.display = 'none';
-            if (tracksContainer) tracksContainer.innerHTML = createPlaceholder('No liked tracks yet.');
+            if (tracksContainer) tracksContainer.innerHTML = createPlaceholder('No liked tracks yet.', false, { icon: 'favorite', cta: 'Explore music', ctaHref: '#/search' });
         }
 
         const likedCount = document.getElementById('liked-songs-count');
@@ -1539,7 +1646,7 @@ export class UIRenderer {
         if (deduped.length) {
             this.renderListWithTracks(list, deduped, true); // Changed to true to show covers instead of numbers
         } else {
-            list.innerHTML = createPlaceholder('No recently played tracks yet.');
+            list.innerHTML = createPlaceholder('No recently played tracks yet.', false, { icon: 'history', cta: 'Find something to play', ctaHref: '#/search' });
         }
     }
 
@@ -1573,7 +1680,7 @@ export class UIRenderer {
                 }
             });
             } else {
-                albumsGrid.innerHTML = createPlaceholder('No liked albums yet.');
+                albumsGrid.innerHTML = createPlaceholder('No liked albums yet.', false, { icon: 'album', cta: 'Explore albums', ctaHref: '#/search' });
             }
         }
 
@@ -1639,7 +1746,7 @@ export class UIRenderer {
                 }
                 });
             } else {
-                playlistsGrid.innerHTML = createPlaceholder('No liked playlists yet.');
+                playlistsGrid.innerHTML = createPlaceholder('No liked playlists yet.', false, { icon: 'queue_music', cta: 'Explore playlists', ctaHref: '#/search' });
             }
         }
 
@@ -1690,7 +1797,7 @@ export class UIRenderer {
                     }
                 });
             } else {
-                playlistsGrid.innerHTML = createPlaceholder('No playlists yet. Create one to get started!');
+                playlistsGrid.innerHTML = createPlaceholder('No playlists yet. Create one to get started!', false, { icon: 'playlist_add', cta: 'Create playlist', ctaHref: '#/library' });
             }
         }
 
@@ -2093,7 +2200,19 @@ export class UIRenderer {
         if (createPlaylistBtn) {
             createPlaylistBtn.addEventListener('click', async () => {
                 if (createDropdown) createDropdown.style.display = 'none';
-                const name = prompt('Playlist name:');
+                const createModal = document.getElementById('playlist-modal');
+                if (createModal) {
+                    document.getElementById('playlist-modal-title').textContent = 'Create Playlist';
+                    document.getElementById('playlist-name-input').value = '';
+                    createModal.dataset.editingId = '';
+                    const csvSection = document.getElementById('csv-import-section');
+                    if (csvSection) csvSection.style.display = 'none';
+                    createModal.classList.add('active');
+                    document.getElementById('playlist-name-input').focus();
+                }
+                return;
+                /* legacy prompt path kept for reference */
+                const name = null;
                 if (!name || !name.trim()) return;
                 try {
                     await db.createPlaylist(name.trim());
@@ -2232,10 +2351,27 @@ export class UIRenderer {
         if (statAlbums) statAlbums.textContent = `${albums.size} album${albums.size !== 1 ? 's' : ''}`;
         if (statDuration) statDuration.textContent = totalDuration > 0 ? formatDuration(totalDuration) : '—';
 
-        // Clear all button
         if (clearBtn) {
+            clearBtn._confirmPending = false;
             clearBtn.onclick = async () => {
-                if (!confirm('Remove all downloads from your catalog?')) return;
+                if (!clearBtn._confirmPending) {
+                    clearBtn._confirmPending = true;
+                    clearBtn.title = 'Tap again to confirm';
+                    clearBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+                    clearBtn.style.color = '#ef4444';
+                    clearBtn._resetTimer = setTimeout(() => {
+                        clearBtn._confirmPending = false;
+                        clearBtn.title = 'Clear all downloads';
+                        clearBtn.style.background = '';
+                        clearBtn.style.color = '';
+                    }, 3000);
+                    return;
+                }
+                clearTimeout(clearBtn._resetTimer);
+                clearBtn._confirmPending = false;
+                clearBtn.title = 'Clear all downloads';
+                clearBtn.style.background = '';
+                clearBtn.style.color = '';
                 const ids = catalog.map((t) => t.id);
                 for (const id of ids) {
                     removeFromDownloadedCatalog(id);
@@ -2279,7 +2415,6 @@ export class UIRenderer {
                         </div>
                     </div>
                     <div class="dl-track-item-actions">
-                        <span class="dl-lyrics-badge" data-lyrics-badge="${t.id}" style="display:none;font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.05em;background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);padding:2px 5px;border-radius:4px;margin-right:6px;text-transform:uppercase;">lrc</span>
                         <span class="dl-track-item-duration">${dur}</span>
                         <button class="dl-remove-btn" data-remove-id="${t.id}" title="Remove">
                             <span class="material-symbols-rounded" style="font-size:16px;">close</span>
@@ -2288,24 +2423,27 @@ export class UIRenderer {
                 </div>`;
         }).join('');
 
-        // Asynchronously show lyrics badges for tracks that have cached lyrics
-        (async () => {
-            try {
-                await db.open();
-                for (const t of sorted) {
-                    const has = await db.hasLyrics(t.id);
-                    if (has) {
-                        const badge = container.querySelector(`[data-lyrics-badge="${t.id}"]`);
-                        if (badge) badge.style.display = '';
-                    }
-                }
-            } catch (e) { /* ignore */ }
-        })();
-
-        // Wire remove buttons
         container.querySelectorAll('.dl-remove-btn').forEach((btn) => {
+            btn._confirmPending = false;
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
+                if (!btn._confirmPending) {
+                    btn._confirmPending = true;
+                    const icon = btn.querySelector('.material-symbols-rounded');
+                    if (icon) icon.textContent = 'check';
+                    btn.style.background = 'rgba(239, 68, 68, 0.2)';
+                    btn.style.color = '#ef4444';
+                    btn.style.opacity = '1';
+                    btn._resetTimer = setTimeout(() => {
+                        btn._confirmPending = false;
+                        if (icon) icon.textContent = 'close';
+                        btn.style.background = '';
+                        btn.style.color = '';
+                        btn.style.opacity = '';
+                    }, 3000);
+                    return;
+                }
+                clearTimeout(btn._resetTimer);
                 const id = btn.dataset.removeId;
                 removeFromDownloadedCatalog(id);
                 try { await db.removeCachedTrack(id); } catch (_) { /* skip */ }
@@ -2521,12 +2659,27 @@ export class UIRenderer {
                 ? this.api.getArtistPictureUrl(a.picture, '160')
                 : (a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png');
             return `
-                <div class="dl-artist-card" data-artist-id="${a.id}">
+                <div class="dl-artist-card" data-artist-id="${a.id}" data-artist-picture="${a.picture || ''}">
                     <img class="dl-artist-card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                     <div class="dl-artist-card-name">${escapeHtml(a.name || 'Unknown')}</div>
                     <div class="dl-artist-card-count">${a.count} track${a.count !== 1 ? 's' : ''}</div>
                 </div>`;
         }).join('')}</div>`;
+
+        // Load cached artist images from IndexedDB for offline
+        container.querySelectorAll('.dl-artist-card').forEach(async (card) => {
+            const picId = card.dataset.artistPicture;
+            if (!picId) return;
+            const img = card.querySelector('.dl-artist-card-avatar');
+            if (!img || (img.complete && img.naturalWidth > 0)) return;
+            try {
+                await db.open();
+                const cached = await db.getCachedImage(`artist-${picId}`);
+                if (cached) {
+                    img.src = URL.createObjectURL(cached);
+                }
+            } catch (e) { /* ignore */ }
+        });
 
         // Click → show only downloaded tracks from this artist (offline view)
         container.querySelectorAll('.dl-artist-card').forEach((card) => {
@@ -2902,57 +3055,161 @@ export class UIRenderer {
 
     async renderHomePage() {
         this.showPage('home');
-
-        // Show Wrapped banner if available
         this._showWrappedBannerIfAvailable();
 
         const welcomeEl = document.getElementById('home-welcome');
         const contentEl = document.getElementById('home-content');
 
-        const history = await db.getHistory();
-        const favorites = await db.getFavorites('track');
-        const playlists = await db.getPlaylists(true);
-
-        if (history.length === 0 && favorites.length === 0 && playlists.length === 0) {
-            if (welcomeEl) welcomeEl.style.display = 'block';
-            if (contentEl) contentEl.style.display = 'none';
-            return;
-        }
-
         if (welcomeEl) welcomeEl.style.display = 'none';
         if (contentEl) contentEl.style.display = 'block';
 
+        const hasActualData = contentEl && contentEl.querySelector('.album-card, .track-item, .artist-card, .trending-card') !== null;
+        if (hasActualData && !contentEl.querySelector('.skeleton')) {
+            this._bindHomeRefreshButtons();
+            return;
+        }
+
+        const memCached = this._pageHtmlCache.get('home');
+        if (memCached && contentEl) {
+            contentEl.innerHTML = memCached;
+            this._bindHomeRefreshButtons();
+            this._refreshHomeInBackground();
+            return;
+        }
+
+        let dbCached = null;
+        try { dbCached = await db.getHomeCache(); } catch {}
+        if (dbCached && contentEl) {
+            contentEl.innerHTML = dbCached;
+            this._pageHtmlCache.set('home', dbCached);
+            this._bindHomeRefreshButtons();
+            this._refreshHomeInBackground();
+            return;
+        }
+
+        this._renderHomeShortcuts();
+        this._bindHomeRefreshButtons();
+        await Promise.all([
+            this.renderHomeSongs(),
+            this.renderHomeAlbums(),
+            this.renderHomeArtists(),
+            this.renderHomeTrending()
+        ]);
+
+        this._saveHomeCache(contentEl);
+    }
+
+    _bindHomeRefreshButtons() {
         const refreshSongsBtn = document.getElementById('refresh-songs-btn');
         const refreshAlbumsBtn = document.getElementById('refresh-albums-btn');
         const refreshArtistsBtn = document.getElementById('refresh-artists-btn');
-        const clearRecentBtn = document.getElementById('clear-recent-btn');
 
         if (refreshSongsBtn) refreshSongsBtn.onclick = () => this.renderHomeSongs(true);
         if (refreshAlbumsBtn) refreshAlbumsBtn.onclick = () => this.renderHomeAlbums(true);
         if (refreshArtistsBtn) refreshArtistsBtn.onclick = () => this.renderHomeArtists(true);
-        if (clearRecentBtn)
-            clearRecentBtn.onclick = () => {
-                if (confirm('Clear recent activity?')) {
-                    recentActivityManager.clear();
-                    this.renderHomeRecent();
-                }
-            };
+    }
 
-        this.renderHomeSongs();
-        this.renderHomeAlbums();
-        this.renderHomeArtists();
-            this.renderHomeRecent();
-        this.renderHomeTrending();
+    async _refreshHomeInBackground() {
+        const contentEl = document.getElementById('home-content');
+        this._invalidateHomeDataCache();
+        this._renderHomeShortcuts();
+        await Promise.all([
+            this.renderHomeSongs(true),
+            this.renderHomeAlbums(true),
+            this.renderHomeArtists(true),
+            this.renderHomeTrending()
+        ]);
+        this._saveHomeCache(contentEl);
+    }
+
+    _invalidateHomeDataCache() {
+        this._homeDataCache = { songs: null, albums: null, artists: null, songsTime: 0, albumsTime: 0, artistsTime: 0 };
+        this._seedsCache = null;
+        this._seedsCacheTime = 0;
+    }
+
+    _saveHomeCache(contentEl) {
+        setTimeout(() => {
+            if (contentEl) {
+                const clone = contentEl.cloneNode(true);
+                const annBanner = clone.querySelector('#home-announcement-banner');
+                if (annBanner) { annBanner.innerHTML = ''; annBanner.style.display = 'none'; }
+                const html = clone.innerHTML;
+                this._pageHtmlCache.set('home', html);
+                try { db.saveHomeCache(html); } catch {}
+            }
+        }, 5000);
+    }
+
+    async _renderHomeShortcuts() {
+        const grid = document.getElementById('home-shortcuts-grid');
+        if (!grid) return;
+
+        const items = [];
+        items.push({ label: 'Liked Songs', icon: 'favorite', iconClass: 'liked', action: 'liked' });
+        items.push({ label: 'Recently Played', icon: 'history', iconClass: 'recent', action: 'history' });
+
+        const { getDownloadedCatalog } = await import('./downloads.js');
+        const dlCount = getDownloadedCatalog().length;
+        if (dlCount > 0) items.push({ label: 'Downloads', icon: 'download', iconClass: 'downloads', action: 'downloads' });
+
+        const history = await db.getHistory();
+        const albumCounts = {};
+        history.forEach(t => {
+            if (t.album?.id) albumCounts[t.album.id] = (albumCounts[t.album.id] || 0) + 1;
+        });
+        const topAlbumIds = Object.entries(albumCounts).sort((a, b) => b[1] - a[1]).slice(0, 8 - items.length).map(e => e[0]);
+
+        for (const aid of topAlbumIds) {
+            const t = history.find(h => String(h.album?.id) === String(aid));
+            if (t) {
+                const coverUrl = t.album.cover ? this.api.getCoverUrl(t.album.cover, '80') : 'assets/everywhere.png';
+                items.push({ label: t.album.title || 'Album', art: coverUrl, action: 'album', id: aid });
+            }
+        }
+
+        grid.innerHTML = items.slice(0, 8).map(item => {
+            const artHtml = item.art
+                ? `<img class="home-shortcut-art" src="${item.art}" alt="">`
+                : `<div class="home-shortcut-icon ${item.iconClass}"><span class="material-symbols-rounded">${item.icon}</span></div>`;
+            return `<div class="home-shortcut-card" data-shortcut-action="${item.action}" data-shortcut-id="${item.id || ''}">${artHtml}<span class="home-shortcut-label">${escapeHtml(item.label)}</span></div>`;
+        }).join('');
+
+        if (!grid._shortcutHandlerAttached) {
+        grid.addEventListener('click', async (e) => {
+            const card = e.target.closest('.home-shortcut-card');
+            if (!card) return;
+            const action = card.dataset.shortcutAction;
+            if (action === 'liked') {
+                window.history.pushState({}, '', '/library');
+                await this.renderLibraryPage();
+                this._showSubview('library-liked-detail');
+            } else if (action === 'history') {
+                window.history.pushState({}, '', '/library');
+                await this.renderLibraryPage();
+                this._showSubview('library-recent-detail');
+                this._populateRecentSubview();
+            } else if (action === 'downloads') {
+                window.history.pushState({}, '', '/library');
+                await this.renderLibraryPage();
+                this.showLibraryDownloads();
+            } else if (action === 'album') {
+                navigate('/album/' + card.dataset.shortcutId);
+            }
+        });
+        grid._shortcutHandlerAttached = true;
+        }
     }
 
     async getSeeds() {
+        if (this._seedsCache && Date.now() - this._seedsCacheTime < 30000) {
+            return this._seedsCache;
+        }
         const history = await db.getHistory();
         const favorites = await db.getFavorites('track');
         const playlists = await db.getPlaylists(true);
         const playlistTracks = playlists.flatMap((p) => p.tracks || []);
 
-        // Prioritize: Playlists > Favorites > History
-        // Take random samples from each to form seeds
         const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
 
         const seeds = [
@@ -2961,11 +3218,13 @@ export class UIRenderer {
             ...shuffle(history).slice(0, 10),
         ];
 
-        return shuffle(seeds);
+        this._seedsCache = shuffle(seeds);
+        this._seedsCacheTime = Date.now();
+        return this._seedsCache;
     }
 
     async renderHomeSongs(forceRefresh = false) {
-            const songsContainer = document.getElementById('home-recommended-songs');
+        const songsContainer = document.getElementById('home-recommended-songs');
         const section = songsContainer?.closest('.content-section');
 
         if (!homePageSettings.shouldShowRecommendedSongs()) {
@@ -2976,25 +3235,29 @@ export class UIRenderer {
         if (section) section.style.display = '';
 
         if (songsContainer) {
-            if (forceRefresh) songsContainer.innerHTML = this.createSkeletonTracks(5, true);
-            else if (songsContainer.children.length > 0 && !songsContainer.querySelector('.skeleton')) return; // Already loaded
+            if (!forceRefresh && songsContainer.children.length > 0 && !songsContainer.querySelector('.skeleton')) return;
+
+            const CACHE_TTL = 30 * 60 * 1000;
+            if (forceRefresh && this._homeDataCache.songs && (Date.now() - this._homeDataCache.songsTime < CACHE_TTL)) {
+                this.renderListWithTracks(songsContainer, this._homeDataCache.songs, true);
+                return;
+            }
+
+            if (songsContainer.children.length === 0 || forceRefresh) {
+                songsContainer.innerHTML = this.createSkeletonTracks(5, true);
+            }
 
             try {
                 const seeds = await this.getSeeds();
-                
-                // If no seeds (new user), show Billboard Hot 100 top songs
+
                 if (seeds.length === 0) {
                     try {
-                        // Get Billboard Hot 100 - using popular tracks
-                        // Try to get popular tracks by searching for common terms or using charts
                         let billboardTracks = { items: [] };
                         try {
-                            // Try multiple popular search terms to get diverse results
                             const popularSearches = ['pop', 'hip hop', 'rock', 'r&b', 'country'];
                             const searchPromises = popularSearches.map(term => this.api.searchTracks(term, { limit: 20 }));
                             const results = await Promise.all(searchPromises);
                             const allTracks = results.flatMap(r => r.items || []);
-                            // Deduplicate and take top 10 by popularity
                             const uniqueTracks = Array.from(new Map(allTracks.map(t => [t.id, t])).values());
                             billboardTracks.items = uniqueTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 10);
                         } catch (e) {
@@ -3002,6 +3265,8 @@ export class UIRenderer {
                         }
                         const topSongs = billboardTracks.items.slice(0, 10);
                         if (topSongs.length > 0) {
+                            this._homeDataCache.songs = topSongs;
+                            this._homeDataCache.songsTime = Date.now();
                             this.renderListWithTracks(songsContainer, topSongs, true);
                         } else {
                             songsContainer.innerHTML = createPlaceholder('No songs found.');
@@ -3015,14 +3280,14 @@ export class UIRenderer {
 
                 const trackSeeds = seeds.slice(0, 5);
                 const recommendedTracks = await this.api.getRecommendedTracksForPlaylist(trackSeeds, 20);
-
                 const filteredTracks = await this.filterUserContent(recommendedTracks, 'track');
 
                 if (filteredTracks.length > 0) {
-                    // Limit to 10 items
                     const limitedTracks = filteredTracks.slice(0, 10);
+                    this._homeDataCache.songs = limitedTracks;
+                    this._homeDataCache.songsTime = Date.now();
                     this.renderListWithTracks(songsContainer, limitedTracks, true);
-                    } else {
+                } else {
                     songsContainer.innerHTML = createPlaceholder('No song recommendations found.');
                 }
             } catch (e) {
@@ -3044,24 +3309,34 @@ export class UIRenderer {
         if (section) section.style.display = '';
 
         if (albumsContainer) {
-            if (forceRefresh) albumsContainer.innerHTML = this.createSkeletonCards(6);
-            else if (albumsContainer.children.length > 0 && !albumsContainer.querySelector('.skeleton')) return;
+            if (!forceRefresh && albumsContainer.children.length > 0 && !albumsContainer.querySelector('.skeleton')) return;
+
+            const CACHE_TTL = 30 * 60 * 1000;
+            if (forceRefresh && this._homeDataCache.albums && (Date.now() - this._homeDataCache.albumsTime < CACHE_TTL)) {
+                const cached = this._homeDataCache.albums;
+                albumsContainer.innerHTML = cached.map((a) => this.createAlbumCardHTML(a)).join('');
+                cached.forEach((a) => {
+                    const el = albumsContainer.querySelector(`[data-album-id="${a.id}"]`);
+                    if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
+                });
+                return;
+            }
+
+            if (albumsContainer.children.length === 0 || forceRefresh) {
+                albumsContainer.innerHTML = this.createSkeletonScrollCards(6, false);
+            }
 
             try {
                 const seeds = await this.getSeeds();
                 
-                // If no seeds (new user), show Billboard 200 top albums
                 if (seeds.length === 0) {
                     try {
-                        // Get Billboard 200 - using popular albums
                         let billboardAlbums = { items: [] };
                         try {
-                            // Try to get popular albums by searching for common terms
                             const popularSearches = ['pop', 'hip hop', 'rock', 'r&b', 'country'];
                             const searchPromises = popularSearches.map(term => this.api.searchAlbums(term, { limit: 20 }));
                             const results = await Promise.all(searchPromises);
                             const allAlbums = results.flatMap(r => r.items || []);
-                            // Deduplicate and take top 8 by popularity
                             const uniqueAlbums = Array.from(new Map(allAlbums.map(a => [a.id, a])).values());
                             billboardAlbums.items = uniqueAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 8);
                         } catch (e) {
@@ -3069,6 +3344,8 @@ export class UIRenderer {
                         }
                         const topAlbums = billboardAlbums.items.slice(0, 8);
                         if (topAlbums.length > 0) {
+                            this._homeDataCache.albums = topAlbums;
+                            this._homeDataCache.albumsTime = Date.now();
                             albumsContainer.innerHTML = topAlbums
                                 .map((a) => this.createAlbumCardHTML(a))
                                 .join('');
@@ -3089,18 +3366,37 @@ export class UIRenderer {
                     return;
                 }
 
-                const albumSeed = seeds.find((t) => t.album && t.album.id);
-                let rendered = false;
-                if (albumSeed) {
-                    const similarAlbums = await this.api.getSimilarAlbums(albumSeed.album.id);
-                    const filteredAlbums = await this.filterUserContent(similarAlbums, 'album');
+                const albumIds = [];
+                for (const t of seeds) {
+                    const id = t.album?.id;
+                    if (id && !albumIds.includes(id)) albumIds.push(id);
+                    if (albumIds.length >= 4) break;
+                }
 
+                let allSimilar = [];
+                let rendered = false;
+                if (albumIds.length > 0) {
+                    const results = await Promise.all(
+                        albumIds.map(id => this.api.getSimilarAlbums(id).catch(() => []))
+                    );
+                    const seen = new Set(albumIds);
+                    for (const list of results) {
+                        for (const a of (list || [])) {
+                            if (!seen.has(a.id)) { seen.add(a.id); allSimilar.push(a); }
+                        }
+                    }
+                }
+
+                if (allSimilar.length > 0) {
+                    const filteredAlbums = await this.filterUserContent(allSimilar, 'album');
                     if (filteredAlbums.length > 0) {
-                        albumsContainer.innerHTML = filteredAlbums
-                            .slice(0, 12)
+                        const sliced = filteredAlbums.slice(0, 12);
+                        this._homeDataCache.albums = sliced;
+                        this._homeDataCache.albumsTime = Date.now();
+                        albumsContainer.innerHTML = sliced
                             .map((a) => this.createAlbumCardHTML(a))
                             .join('');
-                        filteredAlbums.slice(0, 12).forEach((a) => {
+                        sliced.forEach((a) => {
                             const el = albumsContainer.querySelector(`[data-album-id="${a.id}"]`);
                             if (el) {
                                 trackDataStore.set(el, a);
@@ -3111,7 +3407,6 @@ export class UIRenderer {
                     }
                 }
 
-                // Fallback: show popular albums when recommendations are empty
                 if (!rendered) {
                     try {
                         const popularSearches = ['pop', 'hip hop', 'rock', 'r&b', 'country'];
@@ -3121,6 +3416,8 @@ export class UIRenderer {
                         const uniqueAlbums = Array.from(new Map(allAlbums.map(a => [a.id, a])).values());
                         const topAlbums = uniqueAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 8);
                         if (topAlbums.length > 0) {
+                            this._homeDataCache.albums = topAlbums;
+                            this._homeDataCache.albumsTime = Date.now();
                             albumsContainer.innerHTML = topAlbums.map((a) => this.createAlbumCardHTML(a)).join('');
                             topAlbums.forEach((a) => {
                                 const el = albumsContainer.querySelector(`[data-album-id="${a.id}"]`);
@@ -3143,7 +3440,7 @@ export class UIRenderer {
 
     async renderHomeArtists(forceRefresh = false) {
         const artistsContainer = document.getElementById('home-recommended-artists');
-        const section = artistsContainer?.closest('.content-section');
+        const section = artistsContainer?.closest('.home-section') || artistsContainer?.closest('.content-section') || document.getElementById('home-artists-section');
 
         if (!homePageSettings.shouldShowRecommendedArtists()) {
             if (section) section.style.display = 'none';
@@ -3153,116 +3450,105 @@ export class UIRenderer {
         if (section) section.style.display = '';
 
         if (artistsContainer) {
-            if (forceRefresh) artistsContainer.innerHTML = this.createSkeletonCards(6, true);
-            else if (artistsContainer.children.length > 0 && !artistsContainer.querySelector('.skeleton')) return;
+            if (!forceRefresh && artistsContainer.children.length > 0 && !artistsContainer.querySelector('.skeleton')) return;
 
-            try {
-                const seeds = await this.getSeeds();
-                const artistSeed = seeds.find((t) => (t.artist && t.artist.id) || (t.artists && t.artists.length > 0));
-                const artistId = artistSeed ? artistSeed.artist?.id || artistSeed.artists?.[0]?.id : null;
-
-                if (artistId) {
-                    const similarArtists = await this.api.getSimilarArtists(artistId);
-                    const filteredArtists = await this.filterUserContent(similarArtists, 'artist');
-
-                    if (filteredArtists.length > 0) {
-                        artistsContainer.innerHTML = filteredArtists
-                            .slice(0, 12)
-                            .map((a) => this.createArtistCardHTML(a))
-                            .join('');
-                        filteredArtists.slice(0, 12).forEach((a) => {
-                            const el = artistsContainer.querySelector(`[data-artist-id="${a.id}"]`);
-                            if (el) {
-                                trackDataStore.set(el, a);
-                                this.updateLikeState(el, 'artist', a.id);
-                            }
+            const CACHE_TTL = 30 * 60 * 1000;
+            if (forceRefresh && this._homeDataCache.artists && (Date.now() - this._homeDataCache.artistsTime < CACHE_TTL)) {
+                const cached = this._homeDataCache.artists;
+                artistsContainer.innerHTML = cached.map((a) => this.createArtistCardHTML(a)).join('');
+                cached.forEach((a) => {
+                    const el = artistsContainer.querySelector(`[data-artist-id="${a.id}"]`);
+                    if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
                 });
-                } else {
-                        artistsContainer.innerHTML = createPlaceholder('No artist recommendations found.');
-                    }
-                } else {
-                    artistsContainer.innerHTML = createPlaceholder(
-                        'Listen to more music to get artist recommendations.'
-                    );
-                }
-            } catch (e) {
-                console.error(e);
-                artistsContainer.innerHTML = createPlaceholder('Failed to load artist recommendations.');
-            }
-        }
-    }
-
-    renderHomeRecent() {
-        const recentContainer = document.getElementById('home-recent-mixed');
-        const section = recentContainer?.closest('.home-section') || recentContainer?.closest('.content-section');
-
-        if (!homePageSettings.shouldShowJumpBackIn()) {
-            if (section) section.style.display = 'none';
-            return;
-        }
-
-        if (recentContainer) {
-            const recents = recentActivityManager.getRecents();
-            const items = [];
-
-            if (recents.albums) items.push(...recents.albums.slice(0, 4).map((i) => ({ ...i, _kind: 'album' })));
-            if (recents.playlists) {
-                // Filter out playlists with 0 tracks
-                const validPlaylists = recents.playlists.filter(p => p.numberOfTracks > 0 || (p.tracks && p.tracks.length > 0));
-                items.push(...validPlaylists.slice(0, 4).map((i) => ({ ...i, _kind: 'playlist' })));
-            }
-            if (recents.mixes) items.push(...recents.mixes.slice(0, 4).map((i) => ({ ...i, _kind: 'mix' })));
-
-            items.sort(() => Math.random() - 0.5);
-            const displayItems = items.slice(0, 6);
-
-            // Hide section if no items
-            if (displayItems.length === 0) {
-                if (section) section.style.display = 'none';
                 return;
             }
 
-            if (section) section.style.display = '';
+            if (artistsContainer.children.length === 0 || forceRefresh) {
+                artistsContainer.innerHTML = this.createSkeletonScrollCards(6, true);
+            }
 
-            if (displayItems.length > 0) {
-                recentContainer.innerHTML = displayItems
-                    .map((item) => {
-                        if (item._kind === 'album') return this.createAlbumCardHTML(item);
-                        if (item._kind === 'playlist') {
-                            if (item.isUserPlaylist) return this.createUserPlaylistCardHTML(item);
-                            return this.createPlaylistCardHTML(item);
+            try {
+                const seeds = await this.getSeeds();
+                const seen = new Set();
+                let allArtists = [];
+
+                for (const t of seeds) {
+                    const id = t.artist?.id || t.artists?.[0]?.id;
+                    if (id) seen.add(id);
+                }
+
+                if (seeds.length > 0) {
+                    const trackSeeds = seeds.slice(0, 5);
+                    const recTracks = await this.api.getRecommendedTracksForPlaylist(trackSeeds, 30).catch(() => []);
+                    for (const t of recTracks) {
+                        const artist = t.artist || t.artists?.[0];
+                        if (artist?.id && !seen.has(artist.id)) {
+                            seen.add(artist.id);
+                            allArtists.push(artist);
                         }
-                        if (item._kind === 'mix') return this.createMixCardHTML(item);
-                        return '';
-                    })
-                    .join('');
-
-                displayItems.forEach((item) => {
-                    let selector = '';
-                    if (item._kind === 'album') selector = `[data-album-id="${item.id}"]`;
-                    else if (item._kind === 'playlist')
-                        selector = item.isUserPlaylist
-                            ? `[data-user-playlist-id="${item.id}"]`
-                            : `[data-playlist-id="${item.uuid}"]`;
-                    else if (item._kind === 'mix') selector = `[data-mix-id="${item.id}"]`;
-
-                    const el = recentContainer.querySelector(selector);
-                    if (el) {
-                        trackDataStore.set(el, item);
-                        if (item._kind === 'album') this.updateLikeState(el, 'album', item.id);
-                        if (item._kind === 'playlist' && !item.isUserPlaylist)
-                            this.updateLikeState(el, 'playlist', item.uuid);
-                        if (item._kind === 'mix') this.updateLikeState(el, 'mix', item.id);
                     }
-                });
-            } else {
-                recentContainer.innerHTML = createPlaceholder('No recent items yet...');
+                } else {
+                    const genres = ['pop', 'hip hop', 'r&b', 'rock', 'afrobeats'];
+                    const searchResults = await Promise.all(
+                        genres.map(g => this.api.searchArtists(g, { limit: 10 }).catch(() => ({ items: [] })))
+                    );
+                    for (const result of searchResults) {
+                        for (const a of (result?.items || [])) {
+                            if (!seen.has(a.id)) { seen.add(a.id); allArtists.push(a); }
+                        }
+                    }
+                }
+
+                if (allArtists.length < 6 && seeds.length > 0) {
+                    const artistIds = [];
+                    for (const t of seeds) {
+                        const id = t.artist?.id || t.artists?.[0]?.id;
+                        if (id && !artistIds.includes(id)) artistIds.push(id);
+                        if (artistIds.length >= 4) break;
+                    }
+                    const results = await Promise.all(
+                        artistIds.map(id => this.api.getSimilarArtists(id).catch(() => []))
+                    );
+                    for (const list of results) {
+                        for (const a of (list || [])) {
+                            if (!seen.has(a.id)) {
+                                seen.add(a.id);
+                                allArtists.push(a);
+                            }
+                        }
+                    }
+                }
+
+                allArtists.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+
+                const filteredArtists = await this.filterUserContent(allArtists, 'artist');
+
+                if (filteredArtists.length > 0) {
+                    const sliced = filteredArtists.slice(0, 12);
+                    this._homeDataCache.artists = sliced;
+                    this._homeDataCache.artistsTime = Date.now();
+                    artistsContainer.innerHTML = sliced
+                        .map((a) => this.createArtistCardHTML(a))
+                        .join('');
+                    sliced.forEach((a) => {
+                        const el = artistsContainer.querySelector(`[data-artist-id="${a.id}"]`);
+                        if (el) {
+                            trackDataStore.set(el, a);
+                            this.updateLikeState(el, 'artist', a.id);
+                        }
+                    });
+                } else {
+                    if (section) section.style.display = 'none';
+                }
+            } catch (e) {
+                console.error(e);
+                if (section) section.style.display = 'none';
             }
         }
     }
 
+
     async renderHomeTrending() {
-        // Render trending albums and tracks from Tunes app data
         const trendingAlbumsSection = document.getElementById('home-trending-albums-section');
         const trendingAlbumsContainer = document.getElementById('home-trending-albums');
         const trendingTracksSection = document.getElementById('home-trending-tracks-section');
@@ -3271,92 +3557,80 @@ export class UIRenderer {
         if (!trendingAlbumsSection || !trendingTracksSection) return;
 
         try {
-            // Get trending data from syncManager (based on listening_events)
             const trending = await syncManager.getGlobalTrending(15);
 
-            // Only show if we have meaningful data (at least 3 items with count > 1)
-            const validTrendingAlbums = trending.albums.filter(a => a.count > 1).slice(0, 12);
-            const validTrendingTracks = trending.tracks.filter(t => t.count > 1).slice(0, 10);
+            const validTrendingAlbums = (trending.albums || []).filter(a => a.count >= 1).slice(0, 12);
+            const validTrendingTracks = (trending.tracks || []).filter(t => t.count >= 1).slice(0, 10);
+            const trendingArtistsSection = document.getElementById('home-trending-artists-section');
+            const trendingArtistsContainer = document.getElementById('home-trending-artists');
+            const validTrendingArtists = (trending.artists || []).filter(a => a.count >= 1).slice(0, 12);
 
-            if (validTrendingAlbums.length >= 3 && trendingAlbumsContainer) {
+            const albumsTask = (async () => {
+                if (validTrendingAlbums.length < 1 || !trendingAlbumsContainer) {
+                    if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
+                    return;
+                }
                 trendingAlbumsSection.style.display = '';
-                // Fetch full album data for each trending album
-                const albumPromises = validTrendingAlbums.map(async (trend) => {
-                    try {
-                        const albumData = await this.api.getAlbum(trend.id);
-                        return albumData?.album || null;
-                    } catch {
-                        return null;
-                    }
-                });
-                const albums = (await Promise.all(albumPromises)).filter(Boolean);
-                
+                const albums = (await Promise.all(
+                    validTrendingAlbums.map(t => this.api.getAlbum(t.id).then(d => d?.album || null).catch(() => null))
+                )).filter(Boolean);
                 if (albums.length > 0) {
-                    trendingAlbumsContainer.innerHTML = albums
-                        .map((a) => this.createAlbumCardHTML(a))
-                        .join('');
-                    albums.forEach((a) => {
+                    trendingAlbumsContainer.innerHTML = albums.map(a => this.createAlbumCardHTML(a)).join('');
+                    albums.forEach(a => {
                         const el = trendingAlbumsContainer.querySelector(`[data-album-id="${a.id}"]`);
-                        if (el) {
-                            trackDataStore.set(el, a);
-                            this.updateLikeState(el, 'album', a.id);
-                        }
+                        if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
                     });
                 } else {
                     trendingAlbumsSection.style.display = 'none';
                 }
-            } else {
-                trendingAlbumsSection.style.display = 'none';
-            }
+            })();
 
-            if (validTrendingTracks.length >= 3 && trendingTracksContainer) {
+            const tracksTask = (async () => {
+                if (validTrendingTracks.length < 1 || !trendingTracksContainer) {
+                    if (trendingTracksSection) trendingTracksSection.style.display = 'none';
+                    return;
+                }
                 trendingTracksSection.style.display = '';
-                // Fetch full track METADATA for each trending track
-                // Use getTrackMetadata (not getTrack) because getTrack returns streaming info, not album/artist metadata
-                const trackPromises = validTrendingTracks.map(async (trend) => {
-                    try {
-                        const track = await this.api.getTrackMetadata(trend.id);
-                        if (track && track.title) return track;
-
-                        // Fallback: create minimal track object from trending data
-                        if (trend.id && trend.title) {
-                            return {
-                                id: trend.id,
-                                title: trend.title,
-                                artist: { name: trend.artist || 'Unknown Artist' },
-                                album: null,
-                                duration: 0
-                            };
-                        }
-                        return null;
-                    } catch {
-                        // Fallback: create minimal track object from trending data
-                        if (trend.id && trend.title) {
-                            return {
-                                id: trend.id,
-                                title: trend.title,
-                                artist: { name: trend.artist || 'Unknown Artist' },
-                                album: null,
-                                duration: 0
-                            };
-                        }
-                        return null;
-                    }
-                });
-                const tracks = (await Promise.all(trackPromises)).filter(Boolean);
-
+                const fallback = (t) => t.id && t.title ? { id: t.id, title: t.title, artist: { name: t.artist || 'Unknown Artist' }, album: null, duration: 0 } : null;
+                const tracks = (await Promise.all(
+                    validTrendingTracks.map(t => this.api.getTrackMetadata(t.id).then(m => (m?.title ? m : fallback(t))).catch(() => fallback(t)))
+                )).filter(Boolean);
                 if (tracks.length > 0) {
                     this.renderListWithTracks(trendingTracksContainer, tracks, true);
                 } else {
                     trendingTracksSection.style.display = 'none';
                 }
-            } else {
-                trendingTracksSection.style.display = 'none';
-            }
+            })();
+
+            const artistsTask = (async () => {
+                if (validTrendingArtists.length < 1 || !trendingArtistsContainer || !trendingArtistsSection) {
+                    if (trendingArtistsSection) trendingArtistsSection.style.display = 'none';
+                    return;
+                }
+                trendingArtistsSection.style.display = '';
+                const artists = (await Promise.all(
+                    validTrendingArtists.map(t =>
+                        this.api.searchArtists(t.name).then(r => r?.items?.[0] || null).catch(() => null)
+                    )
+                )).filter(Boolean);
+                if (artists.length > 0) {
+                    trendingArtistsContainer.innerHTML = artists.map(a => this.createArtistCardHTML(a)).join('');
+                    artists.forEach(a => {
+                        const el = trendingArtistsContainer.querySelector(`[data-artist-id="${a.id}"]`);
+                        if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
+                    });
+                } else {
+                    trendingArtistsSection.style.display = 'none';
+                }
+            })();
+
+            await Promise.all([albumsTask, tracksTask, artistsTask]);
         } catch (e) {
             console.error('Failed to load trending data:', e);
             if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
             if (trendingTracksSection) trendingTracksSection.style.display = 'none';
+            const tas = document.getElementById('home-trending-artists-section');
+            if (tas) tas.style.display = 'none';
         }
     }
 
@@ -3411,6 +3685,7 @@ export class UIRenderer {
         if (!isAlreadyOnSearch) {
             this.showPage('search');
         }
+        document.body.classList.add('on-explore-page');
 
         const exploreLanding = document.getElementById('explore-landing');
         const searchResultsTitle = document.getElementById('search-results-title');
@@ -3428,6 +3703,9 @@ export class UIRenderer {
             this._renderExploreLanding();
             return;
         }
+
+        const chipsRow = document.getElementById('search-recent-chips');
+        if (chipsRow) chipsRow.style.display = 'none';
 
         // Has query — hide explore landing, show search results
         if (exploreLanding) exploreLanding.style.display = 'none';
@@ -3518,23 +3796,20 @@ export class UIRenderer {
                 }
             });
 
-            // 5) Fire AI refinement in the background (only if user stopped typing, i.e. not live-typing)
-            //    On submit (Enter), isLiveTyping=false → AI runs normally
-            //    On live typing, skip AI entirely → instant results, no flicker
+            // 5) Always fire AI refinement in the background to improve results
+            clearTimeout(this._aiRefinementTimer);
             if (!isLiveTyping) {
                 this._refineSearchWithAI(query, signal, tracksResult, artistsResult, albumsResult, playlistsResult,
                     trackMap, artistMap, albumMap,
                     tracksContainer, artistsContainer, albumsContainer, playlistsContainer, _popScore);
             } else {
-                // Schedule a delayed AI refinement: if user stops typing for 1.5s, run AI
-                clearTimeout(this._aiRefinementTimer);
                 this._aiRefinementTimer = setTimeout(() => {
                     if (!signal.aborted) {
                         this._refineSearchWithAI(query, signal, tracksResult, artistsResult, albumsResult, playlistsResult,
                             trackMap, artistMap, albumMap,
                             tracksContainer, artistsContainer, albumsContainer, playlistsContainer, _popScore);
                     }
-                }, 1500);
+                }, 400);
             }
         } catch (error) {
             if (error.name === 'AbortError') return;
@@ -3861,11 +4136,7 @@ export class UIRenderer {
                 else if (t === 'album') navigate(`/album/${id}`);
                 else if (t === 'track') {
                     const track = tracks.find(tr => String(tr.id) === String(id));
-                    if (track) {
-                        const startIndex = tracks.findIndex(tr => String(tr.id) === String(id));
-                        this.player.setQueue(tracks, startIndex >= 0 ? startIndex : 0);
-                        this.player.playTrackFromQueue();
-                    }
+                    if (track) this.player.playWithMix(track);
                 }
             });
         }
@@ -3878,11 +4149,7 @@ export class UIRenderer {
                 else if (t === 'playlist') navigate(`/playlist/${id}`);
                 else if (t === 'track') {
                     const track = tracks.find(tr => String(tr.id) === String(id));
-                    if (track) {
-                        const startIndex = tracks.findIndex(tr => String(tr.id) === String(id));
-                        this.player.setQueue(tracks, startIndex >= 0 ? startIndex : 0);
-                        this.player.playTrackFromQueue();
-                    }
+                    if (track) this.player.playWithMix(track);
                 }
             });
         });
@@ -3912,7 +4179,7 @@ export class UIRenderer {
             <div class="track-list-header">
                 <span style="width: 40px; text-align: center;">#</span>
                 <span>Title</span>
-                <span class="duration-header">Duration</span>
+                <span class="duration-header"></span>
                 <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
             </div>
             ${this.createSkeletonTracks(10, false)}
@@ -3966,7 +4233,7 @@ export class UIRenderer {
                 <div class="track-list-header">
                     <span style="width: 40px; text-align: center;">#</span>
                     <span>Title</span>
-                    <span class="duration-header">Duration</span>
+                    <span class="duration-header"></span>
                     <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
                 </div>
             `;
@@ -4144,7 +4411,7 @@ export class UIRenderer {
                                                                                                                                                 <div class="track-list-header">
                                                                                                                                                     <span style="width: 40px; text-align: center;">#</span>
                                                                                                                                                     <span>Title</span>
-                                                                                                                                                    <span class="duration-header">Duration</span>
+                                                                                                                                                    <span class="duration-header"></span>
                                                                                                                                                     <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
                                                                                                                                                 </div>                                            `;
                                             this.renderListWithTracks(tracklistContainer, updatedPlaylist.tracks, true);
@@ -4220,7 +4487,7 @@ export class UIRenderer {
             <div class="track-list-header">
                 <span style="width: 40px; text-align: center;">#</span>
                 <span>Title</span>
-                <span class="duration-header">Duration</span>
+                <span class="duration-header"></span>
                 <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
             </div>
             ${this.createSkeletonTracks(10, true)}
@@ -4282,7 +4549,7 @@ export class UIRenderer {
                         <div class="track-list-header">
                             <span style="width: 40px; text-align: center;">#</span>
                             <span>Title</span>
-                            <span class="duration-header">Duration</span>
+                            <span class="duration-header"></span>
                             <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
                         </div>
                     `;
@@ -4415,7 +4682,7 @@ export class UIRenderer {
                         <div class="track-list-header">
                             <span style="width: 40px; text-align: center;">#</span>
                             <span>Title</span>
-                            <span class="duration-header">Duration</span>
+                            <span class="duration-header"></span>
                             <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
                         </div>
                     `;
@@ -4545,7 +4812,7 @@ export class UIRenderer {
             <div class="track-list-header">
                 <span style="width: 40px; text-align: center;">#</span>
                 <span>Title</span>
-                <span class="duration-header">Duration</span>
+                <span class="duration-header"></span>
                 <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
             </div>
             ${this.createSkeletonTracks(10, true)}
@@ -4586,7 +4853,7 @@ export class UIRenderer {
                 <div class="track-list-header">
                     <span style="width: 40px; text-align: center;">#</span>
                     <span>Title</span>
-                    <span class="duration-header">Duration</span>
+                    <span class="duration-header"></span>
                     <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
                 </div>
             `;
@@ -4812,86 +5079,8 @@ export class UIRenderer {
                 unreleasedSection.style.display = 'none';
                 loadUnreleasedSection.style.display = 'none';
 
-                // Check if artist has unreleased projects
-                const trackerArtist = findTrackerArtistByName(artist.name);
-                if (trackerArtist) {
-                    // Show the load button section
-                    loadUnreleasedSection.style.display = 'block';
 
-                    // Add click handler to load and display unreleased projects
-                    loadUnreleasedBtn.onclick = async () => {
-                        loadUnreleasedBtn.disabled = true;
-                        loadUnreleasedBtn.textContent = 'Loading...';
 
-                        try {
-                            const unreleasedData = await getArtistUnreleasedProjects(artist.name);
-                            if (unreleasedData && unreleasedData.eras.length > 0) {
-                                const { artist: trackerArtistData, sheetId, eras } = unreleasedData;
-
-                                unreleasedContainer.innerHTML = eras
-                                    .map((e) => {
-                                        let trackCount = 0;
-                                        if (e.data) {
-                                            Object.values(e.data).forEach((songs) => {
-                                                if (songs && songs.length) trackCount += songs.length;
-                                            });
-                                        }
-                                        return createProjectCardHTML(e, trackerArtistData, sheetId, trackCount);
-                                    })
-                                    .join('');
-
-                                unreleasedSection.style.display = 'block';
-                                loadUnreleasedBtn.style.display = 'none';
-
-                                // Add click handlers
-                                const player = this.player;
-                                unreleasedContainer.querySelectorAll('.card').forEach((card) => {
-                                    const eraName = decodeURIComponent(card.dataset.trackerProjectId);
-                                    const era = eras.find((e) => e.name === eraName);
-                                    if (!era) return;
-
-                                    card.onclick = (e) => {
-                                        if (e.target.closest('.card-play-btn')) {
-                                            e.stopPropagation();
-                                            let eraTracks = [];
-                                            if (era.data) {
-                                                Object.values(era.data).forEach((songs) => {
-                                                    if (songs && songs.length) {
-                                                        songs.forEach((song) => {
-                                                            const track = createTrackFromSong(
-                                                                song,
-                                                                era,
-                                                                trackerArtistData.name,
-                                                                eraTracks.length,
-                                                                sheetId
-                                                            );
-                                                            eraTracks.push(track);
-                                                        });
-                                                    }
-                                                });
-                                            }
-                                            const availableTracks = eraTracks.filter((t) => !t.unavailable);
-                                            if (availableTracks.length > 0) {
-                                                player.setQueue(availableTracks, 0);
-                                                player.playTrackFromQueue();
-                                            }
-                                        } else if (e.target.closest('.card-menu-btn')) {
-                                            e.stopPropagation();
-                                        } else {
-                                            navigate(`/unreleased/${sheetId}/${encodeURIComponent(era.name)}`);
-                                        }
-                                    };
-                                });
-                            } else {
-                                loadUnreleasedBtn.textContent = 'No unreleased projects';
-                            }
-                        } catch (error) {
-                            console.error('Failed to load unreleased projects:', error);
-                            loadUnreleasedBtn.textContent = 'Failed to load';
-                            loadUnreleasedBtn.disabled = false;
-                        }
-                    };
-                }
             }
 
             recentActivityManager.addArtist(artist);
@@ -4975,14 +5164,14 @@ export class UIRenderer {
             // Setup clear button handler
             if (clearBtn) {
                 clearBtn.onclick = async () => {
-                    if (confirm('Clear all recently played tracks? This cannot be undone.')) {
+                    if (await showConfirmDialog('Clear history?', 'All recently played tracks will be removed.')) {
                         try {
                             await db.clearHistory();
                             container.innerHTML = createPlaceholder("You haven't played any tracks yet.");
                             clearBtn.style.display = 'none';
                         } catch (err) {
                             console.error('Failed to clear history:', err);
-                            alert('Failed to clear history');
+                            showNotification('Failed to clear history.');
                         }
                     }
                 };
@@ -4994,29 +5183,10 @@ export class UIRenderer {
         }
     }
 
-    async renderUnreleasedPage() {
-        this.showPage('unreleased');
-        const container = document.getElementById('unreleased-content');
-        await renderUnreleasedTrackerPage(container);
-    }
-
-    async renderTrackerArtistPage(sheetId) {
-        this.showPage('tracker-artist');
-        const container = document.getElementById('tracker-artist-projects-container');
-        await renderTrackerArtistContent(sheetId, container);
-    }
-
-    async renderTrackerProjectPage(sheetId, projectName) {
-        this.showPage('album'); // Use album page template
-        const container = document.getElementById('album-detail-tracklist');
-        await renderTrackerProjectContent(sheetId, projectName, container, this);
-    }
-
-    async renderTrackerTrackPage(trackId) {
-        this.showPage('album'); // Use album page template
-        const container = document.getElementById('album-detail-tracklist');
-        await renderTrackerTrackContent(trackId, container, this);
-    }
+    async renderUnreleasedPage() { this.showPage('home'); }
+    async renderTrackerArtistPage() { this.showPage('home'); }
+    async renderTrackerProjectPage() { this.showPage('home'); }
+    async renderTrackerTrackPage() { this.showPage('home'); }
 
     updatePlaylistHeaderActions(playlist, isOwned, tracks, showShare = false, onSort = null, getCurrentSort = null) {
         const actionsDiv = document.getElementById('page-playlist').querySelector('.detail-header-actions');
@@ -5453,9 +5623,7 @@ export class UIRenderer {
 
             shareBtn.onclick = () => {
                 const url = `${window.location.origin}/track/${track.id}`;
-                navigator.clipboard.writeText(url).then(() => {
-                    showNotification('Link copied to clipboard!');
-                });
+                copyToClipboard(url).then(ok => showNotification(ok ? 'Link copied!' : 'Could not copy'));
             };
 
             this.updateLikeState(likeBtn, 'track', track.id);
@@ -5581,31 +5749,28 @@ export class UIRenderer {
 
     // ===== Explore Landing =====
     _renderExploreLanding() {
-        // Recent Searches
-        const recentList = document.getElementById('explore-recent-list');
         const recentSection = document.getElementById('explore-recent-section');
-        if (recentList) {
-            const history = JSON.parse(localStorage.getItem('search-history') || '[]');
-            if (history.length > 0) {
-                if (recentSection) recentSection.style.display = '';
-                recentList.innerHTML = history.map(q =>
-                    `<button class="explore-chip" data-query="${escapeHtml(q)}" style="
-                        padding:0.45rem 0.9rem;border-radius:20px;border:1px solid rgba(255,255,255,0.1);
-                        background:rgba(255,255,255,0.05);color:#fff;cursor:pointer;font-size:0.82rem;
-                        font-family:'DM Sans',sans-serif;transition:all 0.2s;white-space:nowrap;
-                    ">${escapeHtml(q)}</button>`
-                ).join('');
-                recentList.querySelectorAll('.explore-chip').forEach(chip => {
-                    chip.addEventListener('click', () => {
-                        const q = chip.dataset.query;
-                        const searchInput = document.getElementById('search-input');
-                        if (searchInput) searchInput.value = q;
-                        navigate(`/search/${encodeURIComponent(q)}`);
-                    });
+        if (recentSection) recentSection.style.display = 'none';
+
+        const browseList = document.getElementById('explore-browse-list');
+        if (browseList && !browseList.dataset.populated) {
+            const genres = ['Hip Hop', 'R&B', 'Pop', 'Rock', 'Afrobeats', 'Latin', 'Country', 'Electronic', 'Jazz', 'Classical', 'Reggae', 'Indie'];
+            browseList.innerHTML = genres.map(g =>
+                `<button class="explore-chip" data-query="${escapeHtml(g)}" style="
+                    padding:0.45rem 0.9rem;border-radius:20px;border:1px solid rgba(255,255,255,0.1);
+                    background:rgba(255,255,255,0.05);color:#fff;cursor:pointer;font-size:0.82rem;
+                    font-family:'DM Sans',sans-serif;transition:all 0.2s;white-space:nowrap;
+                ">${escapeHtml(g)}</button>`
+            ).join('');
+            browseList.querySelectorAll('.explore-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    const q = chip.dataset.query;
+                    const searchInput = document.getElementById('search-input');
+                    if (searchInput) searchInput.value = q;
+                    navigate(`/search/${encodeURIComponent(q)}`);
                 });
-            } else {
-                if (recentSection) recentSection.style.display = 'none';
-            }
+            });
+            browseList.dataset.populated = '1';
         }
 
         // Trending on Tunes
@@ -5749,6 +5914,7 @@ export class UIRenderer {
 
         // Streaming Quality options — always wire up regardless of data fetch
         this._initQualityButtons();
+        this._initCrossfadeSettings();
     }
 
     _initQualityButtons() {
@@ -5772,6 +5938,41 @@ export class UIRenderer {
                 });
             });
             btn.parentNode.replaceChild(newBtn, btn);
+        });
+    }
+
+    _initCrossfadeSettings() {
+        const toggle = document.getElementById('crossfade-toggle');
+        const durationRow = document.getElementById('crossfade-duration-row');
+        const slider = document.getElementById('crossfade-duration-slider');
+        const valueLabel = document.getElementById('crossfade-duration-value');
+        if (!toggle || !slider) return;
+
+        const enabled = crossfadeSettings.getEnabled();
+        const duration = crossfadeSettings.getDuration();
+        toggle.checked = enabled;
+        slider.value = duration;
+        valueLabel.textContent = duration + 's';
+        durationRow.style.display = enabled ? 'block' : 'none';
+
+        const updateSliderStyle = () => {
+            const parent = toggle.parentElement;
+            const sliderEl = parent.querySelector('.toggle-slider');
+            if (sliderEl) {
+                sliderEl.style.background = toggle.checked ? 'var(--highlight, #6366f1)' : 'rgba(255,255,255,0.12)';
+            }
+        };
+        updateSliderStyle();
+
+        toggle.addEventListener('change', () => {
+            crossfadeSettings.setEnabled(toggle.checked);
+            durationRow.style.display = toggle.checked ? 'block' : 'none';
+            updateSliderStyle();
+        });
+
+        slider.addEventListener('input', () => {
+            valueLabel.textContent = slider.value + 's';
+            crossfadeSettings.setDuration(parseInt(slider.value, 10));
         });
     }
 
@@ -5829,7 +6030,7 @@ export class UIRenderer {
         try {
             const [users, stats] = await Promise.all([
                 adminFetch('/api/admin/users'),
-                adminFetch('/api/admin/dashboard-stats').catch(() => null),
+                adminFetch('/api/admin/dashboard-stats').catch(e => { console.error('[Admin] dashboard-stats failed:', e); return null; }),
             ]);
             if (!Array.isArray(users)) throw new Error(users.error || 'Failed to load users');
 
@@ -5867,13 +6068,18 @@ export class UIRenderer {
             }
 
             // ── Daily Sparkline ──
+            const sparkContainer = document.getElementById('admin-sparkline-bars');
+            const dailyLabel = document.getElementById('admin-daily-activity-label');
             if (stats?.daily_plays_30d?.length) {
-                const sparkContainer = document.getElementById('admin-sparkline-bars');
+                const days = stats.daily_plays_30d.length;
+                if (dailyLabel) dailyLabel.textContent = `Daily Activity (${days} days)`;
                 const maxDaily = Math.max(...stats.daily_plays_30d.map(d => d.count), 1);
                 sparkContainer.innerHTML = stats.daily_plays_30d.map(d => {
                     const pct = Math.max(3, Math.round((d.count / maxDaily) * 100));
                     return `<div title="${d.date}: ${d.count} plays" style="flex:1;height:${pct}%;background:linear-gradient(180deg,rgba(168,85,247,0.7),rgba(236,72,153,0.4));border-radius:2px;min-width:2px;transition:height 0.3s;"></div>`;
                 }).join('');
+            } else if (sparkContainer) {
+                sparkContainer.innerHTML = '<p style="font-size:0.75rem;opacity:0.3;text-align:center;width:100%;padding:1rem 0;">No listening data yet</p>';
             }
 
             // ── Peak Hours Heatmap ──
@@ -5905,9 +6111,16 @@ export class UIRenderer {
                 }).join('');
             }
 
-            // ── Trending Artists (48h) ──
+            // ── Trending labels ──
+            const trendPeriod = stats?.trending_period === 'all_time' ? 'All Time' : 'Last 48h';
+            const tArtistLabel = document.getElementById('admin-trending-artists-label');
+            if (tArtistLabel) tArtistLabel.textContent = `🔥 Trending Artists (${trendPeriod})`;
+            const tTrackLabel = document.getElementById('admin-trending-tracks-label');
+            if (tTrackLabel) tTrackLabel.textContent = `🎵 Trending Tracks (${trendPeriod})`;
+
+            // ── Trending Artists ──
+            const tArtistList = document.getElementById('admin-trending-artists-list');
             if (stats?.trending_artists_48h?.length) {
-                const tArtistList = document.getElementById('admin-trending-artists-list');
                 const maxA = stats.trending_artists_48h[0]?.plays || 1;
                 tArtistList.innerHTML = stats.trending_artists_48h.map((a, i) => {
                     const pct = Math.round((a.plays / maxA) * 100);
@@ -5924,11 +6137,13 @@ export class UIRenderer {
                         </div>
                     </div>`;
                 }).join('');
+            } else if (tArtistList) {
+                tArtistList.innerHTML = '<p style="font-size:0.75rem;opacity:0.3;text-align:center;padding:0.5rem 0;">No artist data yet</p>';
             }
 
             // ── Trending Tracks (48h) ──
+            const tTrackList = document.getElementById('admin-trending-tracks-list');
             if (stats?.trending_tracks_48h?.length) {
-                const tTrackList = document.getElementById('admin-trending-tracks-list');
                 const maxT = stats.trending_tracks_48h[0]?.plays || 1;
                 tTrackList.innerHTML = stats.trending_tracks_48h.map((t, i) => {
                     const pct = Math.round((t.plays / maxT) * 100);
@@ -5945,6 +6160,8 @@ export class UIRenderer {
                         </div>
                     </div>`;
                 }).join('');
+            } else if (tTrackList) {
+                tTrackList.innerHTML = '<p style="font-size:0.75rem;opacity:0.3;text-align:center;padding:0.5rem 0;">No track data yet</p>';
             }
 
             // ── User List Panel ──
@@ -6790,7 +7007,7 @@ export class UIRenderer {
             try {
                 const result = await adminFetch('/api/admin/archive/trigger', { method: 'POST' });
                 if (result && result.success) {
-                    btn.textContent = `Archived ${result.rows} rows!`;
+                    btn.textContent = `Archived ${result.rows} rows, purged ${result.purged || 0}!`;
                     setTimeout(() => {
                         btn.textContent = originalText;
                         btn.disabled = false;

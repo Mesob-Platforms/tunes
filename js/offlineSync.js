@@ -84,6 +84,7 @@ class OfflineSyncManager {
         };
 
         await db.queueOfflineEvent('listening_event', eventData);
+        if (!this._hasPending) this.startPeriodicSync();
     }
 
     /**
@@ -101,6 +102,7 @@ class OfflineSyncManager {
         };
 
         await db.queueOfflineEvent('track_event', eventData);
+        if (!this._hasPending) this.startPeriodicSync();
     }
 
     /**
@@ -172,12 +174,11 @@ class OfflineSyncManager {
      * Sync a track event to the API
      */
     async _syncTrackEvent(eventData) {
-        const res = await fetch(apiUrl('/api/track-event'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(eventData),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { error } = await supabase.from('admin_tracking').upsert(
+            eventData,
+            { onConflict: 'item_type,item_id,user_id,event_type', ignoreDuplicates: true }
+        );
+        if (error) throw error;
     }
 
     /**
@@ -217,15 +218,21 @@ class OfflineSyncManager {
     }
 
     /**
-     * Start periodic sync (every 30 seconds when online)
+     * Start periodic sync -- only runs while there are pending events
      */
     startPeriodicSync() {
         if (this.syncInterval) return;
-        this.syncInterval = setInterval(() => {
-            if (this.isOnline && !this.isSyncing) {
-                this.syncPendingEvents();
+        this._hasPending = true;
+        this.syncInterval = setInterval(async () => {
+            if (!this.isOnline || this.isSyncing) return;
+            const events = await db.getUnsyncedEvents();
+            if (events.length === 0) {
+                this._hasPending = false;
+                this.stopPeriodicSync();
+                return;
             }
-        }, 30000); // Every 30 seconds
+            this.syncPendingEvents();
+        }, 30000);
     }
 
     /**

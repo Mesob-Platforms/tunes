@@ -90,13 +90,14 @@ export class LosslessAPI {
     constructor(settings) {
         this.settings = settings;
         this.cache = new APICache({
-            maxSize: 200,
-            ttl: 1000 * 60 * 30,
+            maxSize: 500,
+            ttl: 1000 * 60 * 60,
         });
         this.streamCache = new Map();
 
-        setInterval(
+        this._cacheCleanupInterval = setInterval(
             () => {
+                if (document.hidden) return;
                 this.cache.clearExpired();
                 this.pruneStreamCache();
             },
@@ -137,7 +138,14 @@ export class LosslessAPI {
             const url = baseUrl.endsWith('/') ? `${baseUrl}${relativePath.substring(1)}` : `${baseUrl}${relativePath}`;
 
             try {
-                const response = await fetch(url, { signal: options.signal });
+                let signal = options.signal;
+                let timeoutId;
+                if (!signal && type !== 'streaming') {
+                    const controller = new AbortController();
+                    signal = controller.signal;
+                    timeoutId = setTimeout(() => controller.abort(), 15000);
+                }
+                const response = await fetch(url, { signal }).finally(() => { if (timeoutId) clearTimeout(timeoutId); });
 
                 if (response.status === 429) {
                     console.warn(`Rate limit hit on ${baseUrl}. Trying next instance...`);

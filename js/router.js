@@ -11,6 +11,11 @@ export function navigate(path) {
 
 export function createRouter(ui) {
     const router = async () => {
+        const { authManager } = window.__tunesRefs || {};
+        if (authManager && authManager._sessionRestored && !authManager.user) {
+            return;
+        }
+
         if (window.location.hash && window.location.hash.length > 1) {
             const hash = window.location.hash.substring(1);
             if (hash.includes('/')) {
@@ -45,21 +50,12 @@ export function createRouter(ui) {
             case 'userplaylist':
                 await ui.renderPlaylistPage(param, 'user');
                 break;
-            case 'folder':
-                await ui.renderFolderPage(param);
-                break;
             case 'mix':
                 await ui.renderMixPage(param);
                 break;
             case 'track':
-                if (param.startsWith('tracker-')) {
-                    await ui.renderTrackerTrackPage(param);
-                } else {
-                    // Track pages removed - just play the track directly
-                    // If someone navigates to /track/id, redirect to home
-                    window.history.replaceState(null, '', '/');
-                    await ui.renderHomePage();
-                }
+                window.history.replaceState(null, '', '/');
+                await ui.renderHomePage();
                 break;
             case 'library':
                 await ui.renderLibraryPage();
@@ -68,22 +64,6 @@ export function createRouter(ui) {
                 // Redirect /recent to /library (recent is now a tab inside library)
                 window.history.replaceState(null, '', '/library');
                 await ui.renderLibraryPage();
-                break;
-            case 'unreleased':
-                if (param) {
-                    const parts = param.split('/');
-                    const sheetId = parts[0];
-                    const projectName = parts[1] ? decodeURIComponent(parts[1]) : null;
-                    if (projectName) {
-                        await ui.renderTrackerProjectPage(sheetId, projectName);
-                    } else {
-                        await ui.renderTrackerArtistPage(sheetId);
-                    }
-                } else {
-                    // Redirect /unreleased to /library (unreleased is now a tab inside library)
-                    window.history.replaceState(null, '', '/library');
-                    await ui.renderLibraryPage();
-                }
                 break;
             case 'wrapped':
                 await ui.renderWrappedPage();

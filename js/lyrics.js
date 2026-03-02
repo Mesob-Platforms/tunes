@@ -1,29 +1,8 @@
 //js/lyrics.js
 import { getTrackTitle, getTrackArtists, buildTrackFilename, SVG_CLOSE } from './utils.js';
 import { sidePanelManager } from './side-panel.js';
-import { getVibrantColorFromImage } from './vibrant-color.js';
 import { db as musicDB } from './db.js';
-
-const SVG_GENIUS_ACTIVE = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 24c6.627 0 12-5.373 12-12S18.627 0 12 0 0 5.373 0 12s5.373 12 12 12z" fill="#ffff64"/><path d="M6.3 6.3h11.4v11.4H6.3z" fill="#000"/></svg>`;
-
-// Check if text contains Japanese, Chinese, or Korean characters
-function containsAsianText(text) {
-    if (!text) return false;
-    // Japanese: Hiragana (3040-309F), Katakana (30A0-30FF), Kanji (4E00-9FFF, 3400-4DBF)
-    // Chinese: CJK Unified Ideographs (4E00-9FFF, 3400-4DBF)
-    // Korean: Hangul (AC00-D7AF, 1100-11FF, 3130-318F)
-    const asianRegex = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
-    return asianRegex.test(text);
-}
-
-// Check if track has Asian text in title or artist names
-function trackHasAsianText(track) {
-    if (!track) return false;
-    const title = track.title || '';
-    const artist = getTrackArtists(track) || '';
-    return containsAsianText(title) || containsAsianText(artist);
-}
-const SVG_GENIUS_INACTIVE = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.7;"><path d="M12 24c6.627 0 12-5.373 12-12S18.627 0 12 0 0 5.373 0 12s5.373 12 12 12z" /><path d="M6.3 6.3h11.4v11.4H6.3z" fill="var(--card)"/></svg>`;
+import { apiUrl } from './platform.js';
 
 class LyricsStorageCache {
     constructor(storageKey = 'lyricsCache', maxEntries = 200) {
@@ -38,10 +17,7 @@ class LyricsStorageCache {
             const raw = localStorage.getItem(this.storageKey);
             if (raw) {
                 const entries = JSON.parse(raw);
-                // entries is [[key, value], ...]
-                for (const [k, v] of entries) {
-                    this._mem.set(k, v);
-                }
+                for (const [k, v] of entries) this._mem.set(k, v);
             }
         } catch { /* ignore corrupt data */ }
     }
@@ -49,10 +25,9 @@ class LyricsStorageCache {
     _saveToStorage() {
         try {
             const entries = Array.from(this._mem.entries());
-            // Trim to max
             while (entries.length > this.maxEntries) entries.shift();
             localStorage.setItem(this.storageKey, JSON.stringify(entries));
-        } catch { /* storage full, ignore */ }
+        } catch { /* storage full */ }
     }
 
     has(key) { return this._mem.has(key); }
@@ -60,119 +35,11 @@ class LyricsStorageCache {
 
     set(key, value) {
         this._mem.set(key, value);
-        // Evict oldest if over limit
         if (this._mem.size > this.maxEntries) {
             const firstKey = this._mem.keys().next().value;
             this._mem.delete(firstKey);
         }
         this._saveToStorage();
-    }
-}
-
-class GeniusManager {
-    constructor() {
-        this.cache = new Map();
-        this.loading = false;
-    }
-
-    getToken() {
-        return 'QmS9OvsS-7ifRBKx_ochIPQU7oejIS9Eo_z5iWHmCPyhwLVQID3pYTHJmJTa6z8z'; // idgaf anymore im js hardcoding this lmaooo
-    }
-
-    async searchTrack(title, artist) {
-        const cleanTitle = title.split('(')[0].split('-')[0].trim();
-        const query = encodeURIComponent(`${cleanTitle} ${artist}`);
-
-        const url = `https://api.genius.com/search?q=${query}`;
-        const token = this.getToken();
-        const response = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!response.ok) throw new Error('Failed to search Genius');
-
-        const data = await response.json();
-        if (data.response.hits.length === 0) return null;
-
-        const normalize = (str) => str.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-        const targetArtist = normalize(artist);
-
-        const hit = data.response.hits.find((h) => {
-            const hitArtist = normalize(h.result.primary_artist.name);
-            return hitArtist.includes(targetArtist) || targetArtist.includes(hitArtist);
-        });
-
-        return hit ? hit.result : data.response.hits[0].result;
-    }
-
-    async getReferents(songId) {
-        const token = this.getToken();
-        const url = `https://api.genius.com/referents?song_id=${songId}&text_format=plain&per_page=50`;
-        const response = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!response.ok) throw new Error('Failed to fetch annotations');
-
-        const data = await response.json();
-        return data.response.referents;
-    }
-
-    async getDataForTrack(track) {
-        if (this.cache.has(track.id)) return this.cache.get(track.id);
-
-        try {
-            this.loading = true;
-            const artist = Array.isArray(track.artists) ? track.artists[0].name : track.artist.name;
-            const song = await this.searchTrack(track.title, artist);
-
-            if (!song) {
-                this.loading = false;
-                return null;
-            }
-
-            const referents = await this.getReferents(song.id);
-            const result = { song, referents };
-
-            this.cache.set(track.id, result);
-            this.loading = false;
-            return result;
-        } catch (error) {
-            console.error('Genius Error:', error);
-            this.loading = false;
-            throw error;
-        }
-    }
-
-    findAnnotations(lineText, referents) {
-        if (!referents || !lineText) return [];
-
-        const normalize = (str) =>
-            str
-                .toLowerCase()
-                .replace(/[^\p{L}\p{N}\s]/gu, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-        const normLine = normalize(lineText);
-
-        const getWordSet = (str) => new Set(str.split(' ').filter((w) => w.length > 0));
-        const lineWords = getWordSet(normLine);
-
-        return referents.filter((ref) => {
-            const normFragment = normalize(ref.fragment);
-
-            if (normLine.includes(normFragment) || normFragment.includes(normLine)) return true;
-
-            const fragmentWords = getWordSet(normFragment);
-            if (fragmentWords.size === 0 || lineWords.size === 0) return false;
-
-            let matchCount = 0;
-            fragmentWords.forEach((w) => {
-                if (lineWords.has(w)) matchCount++;
-            });
-
-            return matchCount / Math.min(fragmentWords.size, lineWords.size) > 0.6;
-        });
     }
 }
 
@@ -183,398 +50,155 @@ export class LyricsManager {
         this.syncedLyrics = [];
         this.lyricsCache = new LyricsStorageCache('lyricsCache', 200);
         this.componentLoaded = false;
-        this.amLyricsElement = null;
-        this.animationFrameId = null;
         this.currentTrackId = null;
-        this.mutationObserver = null;
-        this.romajiObserver = null;
-        this.isRomajiMode = false;
-        this.originalLyricsData = null;
-        this.kuroshiroLoaded = false;
-        this.kuroshiroLoading = false;
-        this.romajiTextCache = new Map(); // Cache: originalText -> convertedRomaji
-        this.convertedTracksCache = new Set(); // Track IDs that have been fully converted
-        this.geniusManager = new GeniusManager();
-        this.isGeniusMode = false;
-        this.currentGeniusData = null;
-        this.timingOffset = 0; // Offset in milliseconds (positive = delay lyrics, negative = advance lyrics)
+        this.timingOffset = 0;
     }
 
-    // Get timing offset for current track
     getTimingOffset(trackId) {
         try {
-            const key = `lyrics-offset-${trackId}`;
-            const stored = localStorage.getItem(key);
+            const stored = localStorage.getItem(`lyrics-offset-${trackId}`);
             return stored ? parseInt(stored, 10) : 0;
-        } catch {
-            return 0;
-        }
+        } catch { return 0; }
     }
 
-    // Set timing offset for current track
     setTimingOffset(trackId, offsetMs) {
-        try {
-            const key = `lyrics-offset-${trackId}`;
-            localStorage.setItem(key, offsetMs.toString());
-        } catch (e) {
-            console.warn('Failed to save lyrics timing offset:', e);
-        }
+        try { localStorage.setItem(`lyrics-offset-${trackId}`, offsetMs.toString()); }
+        catch (e) { console.warn('Failed to save lyrics timing offset:', e); }
     }
 
-    // Reset timing offset for current track
-    resetTimingOffset(trackId) {
-        this.setTimingOffset(trackId, 0);
-    }
+    resetTimingOffset(trackId) { this.setTimingOffset(trackId, 0); }
 
-    // Get formatted offset display string
     getOffsetDisplayString(offsetMs) {
         const sign = offsetMs >= 0 ? '+' : '';
-        const seconds = Math.abs(offsetMs) / 1000;
-        return `${sign}${seconds.toFixed(1)}s`;
+        return `${sign}${(Math.abs(offsetMs) / 1000).toFixed(1)}s`;
     }
 
-    // Load Kuroshiro from CDN (npm package uses Node.js path which doesn't work in browser)
-    async loadKuroshiro() {
-        if (this.kuroshiroLoaded) return true;
-        if (this.kuroshiroLoading) {
-            // Wait for existing load to complete
-            return new Promise((resolve) => {
-                const checkLoad = setInterval(() => {
-                    if (!this.kuroshiroLoading) {
-                        clearInterval(checkLoad);
-                        resolve(this.kuroshiroLoaded);
-                    }
-                }, 100);
-            });
-        }
+    wordSyncedToLRC(wordSynced) {
+        if (!Array.isArray(wordSynced) || wordSynced.length === 0) return '';
+        return wordSynced.map(line => {
+            const ms = (typeof line.start === 'number' ? line.start : 0) * 1000;
+            const m = Math.floor(ms / 60000);
+            const s = Math.floor((ms % 60000) / 1000);
+            const c = Math.floor((ms % 1000) / 10);
+            const tag = `[${m}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}]`;
+            return `${tag} ${(line.text || '').trim()}`;
+        }).join('\n');
+    }
 
-        this.kuroshiroLoading = true;
+    async fetchWordSyncedLyrics(track) {
+        const artist = Array.isArray(track.artists)
+            ? track.artists.map(a => a.name || a).join(', ')
+            : track.artist?.name || '';
+        const title = track.title || '';
+        const album = track.album?.title || '';
+        if (!title || !artist) return null;
         try {
-            // Bug on kuromoji@0.1.2 where it mangles absolute URLs
-            // Using self-hosted dict files is failed, so we use CDN with monkey-patch
-            // Monkey-patch XMLHttpRequest to redirect dictionary requests to CDN
-            // Kuromoji uses XHR, not fetch, for loading dictionary files
-            if (!window._originalXHROpen) {
-                window._originalXHROpen = XMLHttpRequest.prototype.open;
-                XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-                    const urlStr = url.toString();
-                    if (urlStr.includes('/dict/') && urlStr.includes('.dat.gz')) {
-                        // Extract just the filename
-                        const filename = urlStr.split('/').pop();
-                        // Redirect to CDN
-                        const cdnUrl = `https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/${filename}`;
-                        return window._originalXHROpen.call(this, method, cdnUrl, ...rest);
-                    }
-                    return window._originalXHROpen.call(this, method, url, ...rest);
-                };
-            }
-
-            // Also patch fetch just in case
-            if (!window._originalFetch) {
-                window._originalFetch = window.fetch;
-                window.fetch = async (url, options) => {
-                    const urlStr = url.toString();
-                    if (urlStr.includes('/dict/') && urlStr.includes('.dat.gz')) {
-                        const filename = urlStr.split('/').pop();
-                        const cdnUrl = `https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/${filename}`;
-                        console.log(`Redirecting dict fetch: ${filename} -> CDN`);
-                        return window._originalFetch(cdnUrl, options);
-                    }
-                    return window._originalFetch(url, options);
-                };
-            }
-
-            // Load Kuroshiro from CDN
-            if (!window.Kuroshiro) {
-                await this.loadScript('https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js');
-            }
-
-            // Load Kuromoji analyzer from CDN
-            if (!window.KuromojiAnalyzer) {
-                await this.loadScript(
-                    'https://unpkg.com/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js'
-                );
-            }
-
-            // Initialize Kuroshiro (CDN version exports as .default)
-            const Kuroshiro = window.Kuroshiro.default || window.Kuroshiro;
-            const KuromojiAnalyzer = window.KuromojiAnalyzer.default || window.KuromojiAnalyzer;
-
-            this.kuroshiro = new Kuroshiro();
-
-            // Initialize with a dummy path - our fetch interceptor will redirect to CDN
-            await this.kuroshiro.init(
-                new KuromojiAnalyzer({
-                    dictPath: '/dict/', // This gets mangled but our interceptor fixes it
-                })
-            );
-
-            this.kuroshiroLoaded = true;
-            this.kuroshiroLoading = false;
-            console.log('✓ Kuroshiro loaded and initialized successfully');
-            return true;
-        } catch (error) {
-            console.error('✗ Failed to load Kuroshiro:', error);
-            this.kuroshiroLoaded = false;
-            this.kuroshiroLoading = false;
-            return false;
-        }
-    }
-
-    // Helper to load external scripts
-    loadScript(src) {
-        return new Promise((resolve, reject) => {
-            // Check if script already exists
-            if (document.querySelector(`script[src="${src}"]`)) {
-                resolve();
-                return;
-            }
-            const script = document.createElement('script');
-            script.src = src;
-            script.onload = resolve;
-            script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
-            document.head.appendChild(script);
-        });
-    }
-
-    // Check if text contains Japanese characters
-    containsJapanese(text) {
-        if (!text) return false;
-        // Match any Japanese character (Hiragana, Katakana, Kanji)
-        return /[\u3040-\u30FF\u31F0-\u9FFF]/.test(text);
-    }
-
-    // Convert Japanese text to Romaji (including Kanji) with caching
-    async convertToRomaji(text) {
-        if (!text) return text;
-
-        // Check cache first
-        if (this.romajiTextCache.has(text)) {
-            return this.romajiTextCache.get(text);
-        }
-
-        // Only process if text contains Asian characters
-        if (!containsAsianText(text)) {
-            return text;
-        }
-
-        // Make sure Kuroshiro is loaded
-        if (!this.kuroshiroLoaded) {
-            const success = await this.loadKuroshiro();
-            if (!success) {
-                console.warn('Kuroshiro not available, skipping conversion');
-                return text;
-            }
-        }
-
-        if (!this.kuroshiro) {
-            console.warn('Kuroshiro not available, skipping conversion');
-            return text;
-        }
-
-        try {
-            // Convert to Romaji using Kuroshiro (handles Kanji, Hiragana, Katakana)
-            const result = await this.kuroshiro.convert(text, {
-                to: 'romaji',
-                mode: 'spaced',
-                romajiSystem: 'hepburn',
-            });
-            // Cache the result
-            this.romajiTextCache.set(text, result);
-            return result;
-        } catch (error) {
-            console.warn('Romaji conversion failed for text:', text.substring(0, 30), error);
-            return text;
-        }
-    }
-
-    // Set Romaji mode and save preference
-    setRomajiMode(enabled) {
-        this.isRomajiMode = enabled;
-        try {
-            localStorage.setItem('lyricsRomajiMode', enabled ? 'true' : 'false');
+            const params = new URLSearchParams({ track: title, artist });
+            if (album) params.append('album', album);
+            const response = await fetch(apiUrl(`/api/lyrics/word-synced?${params.toString()}`));
+            if (!response.ok) return null;
+            const data = await response.json();
+            return (data.wordSynced && data.wordSynced.length > 0) ? data.wordSynced : null;
         } catch (e) {
-            console.warn('Failed to save Romaji mode preference:', e);
+            console.warn('Word-synced lyrics fetch failed:', e);
+            return null;
         }
     }
 
-    // Get saved Romaji mode preference
-    getRomajiMode() {
+    async fetchLrclib(track) {
+        const artist = Array.isArray(track.artists)
+            ? track.artists.map(a => a.name || a).join(', ')
+            : track.artist?.name || '';
+        const title = track.title || '';
+        const album = track.album?.title || '';
+        const duration = track.duration ? Math.round(track.duration) : null;
+        if (!title || !artist) return null;
         try {
-            return localStorage.getItem('lyricsRomajiMode') === 'true';
-        } catch {
-            return false;
-        }
+            const params = new URLSearchParams({ track_name: title, artist_name: artist });
+            if (album) params.append('album_name', album);
+            if (duration) params.append('duration', duration.toString());
+            const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
+            if (!response.ok) return null;
+            const data = await response.json();
+            if (data.syncedLyrics || data.plainLyrics) {
+                return {
+                    subtitles: data.syncedLyrics || null,
+                    plainLyrics: data.plainLyrics || null,
+                    lyricsProvider: 'LRCLIB',
+                };
+            }
+        } catch (e) { console.warn('LRCLIB fetch failed:', e); }
+        return null;
     }
 
-    async ensureComponentLoaded() {
-        if (this.componentLoaded) return;
+    /**
+     * Fetch order: cache -> IndexedDB -> Musixmatch word-synced -> LRCLIB fallback
+     */
+    async fetchLyrics(trackId, track = null) {
+        if (!track) return null;
 
-        if (typeof customElements !== 'undefined' && customElements.get('am-lyrics')) {
-            this.componentLoaded = true;
-            return;
-        }
+        if (this.lyricsCache.has(trackId)) return this.lyricsCache.get(trackId);
 
-        // Try local bundle first, then CDN fallback
-        const sources = [
-            '/js/vendor/am-lyrics.min.js',
-            'https://cdn.jsdelivr.net/npm/@uimaxbai/am-lyrics@0.6.5/dist/src/am-lyrics.min.js',
-        ];
+        try {
+            await musicDB.open();
+            const cached = await musicDB.getCachedLyrics(trackId);
+            if (cached) { this.lyricsCache.set(trackId, cached); return cached; }
+        } catch (e) { console.warn('IndexedDB lyrics read failed:', e); }
 
-        for (const src of sources) {
-            try {
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.type = 'module';
-                    script.src = src;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
 
-                    script.onload = () => {
-                        if (typeof customElements !== 'undefined') {
-                            customElements
-                                .whenDefined('am-lyrics')
-                                .then(() => {
-                                    this.componentLoaded = true;
-                                    resolve();
-                                })
-                                .catch(reject);
-                        } else {
-                            resolve();
-                        }
-                    };
-
-                    script.onerror = () => reject(new Error(`Failed to load from ${src}`));
-                    document.head.appendChild(script);
-                });
-                return; // loaded successfully
-            } catch (e) {
-                console.warn('Lyrics component load attempt failed:', e.message);
+        // 1) Musixmatch word-synced first (better matching, word-level timing)
+        try {
+            const wordSynced = await this.fetchWordSyncedLyrics(track);
+            if (wordSynced) {
+                const subtitles = this.wordSyncedToLRC(wordSynced);
+                const data = { wordSynced, subtitles: subtitles || null, lyricsProvider: 'Musixmatch' };
+                this.lyricsCache.set(trackId, data);
+                try { await musicDB.cacheLyrics(trackId, data); } catch { /* ignore */ }
+                return data;
             }
-        }
+        } catch (e) { console.warn('Musixmatch fetch failed:', e); }
 
-        throw new Error('Failed to load lyrics component from all sources');
-    }
-
-    async fetchLyrics(trackId, track = null, ensureIndexedDB = false) {
-        if (track) {
-            // 1. Check in-memory cache
-            if (this.lyricsCache.has(trackId)) {
-                const cached = this.lyricsCache.get(trackId);
-                // When called from downloads (ensureIndexedDB=true), guarantee IndexedDB persistence
-                if (ensureIndexedDB && cached) {
-                    try {
-                        await musicDB.open();
-                        await musicDB.cacheLyrics(trackId, cached);
-                    } catch (e) {
-                        console.warn('IndexedDB lyrics ensure-write failed:', e);
-                    }
-                }
-                return cached;
+        // 2) LRCLIB fallback (free, no API key)
+        try {
+            const lrclib = await this.fetchLrclib(track);
+            if (lrclib) {
+                this.lyricsCache.set(trackId, lrclib);
+                try { await musicDB.cacheLyrics(trackId, lrclib); } catch { /* ignore */ }
+                return lrclib;
             }
-
-            // 2. Check IndexedDB cache
-            try {
-                await musicDB.open();
-                const cached = await musicDB.getCachedLyrics(trackId);
-                if (cached) {
-                    this.lyricsCache.set(trackId, cached);
-                    return cached;
-                }
-            } catch (e) {
-                console.warn('IndexedDB lyrics read failed:', e);
-            }
-
-            // 3. Fetch from LRCLIB
-            try {
-                const artist = Array.isArray(track.artists)
-                    ? track.artists.map((a) => a.name || a).join(', ')
-                    : track.artist?.name || '';
-                const title = track.title || '';
-                const album = track.album?.title || '';
-                const duration = track.duration ? Math.round(track.duration) : null;
-
-                if (!title || !artist) {
-                    console.warn('Missing required fields for LRCLIB');
-                    return null;
-                }
-
-                const params = new URLSearchParams({
-                    track_name: title,
-                    artist_name: artist,
-                });
-
-                if (album) params.append('album_name', album);
-                if (duration) params.append('duration', duration.toString());
-
-                const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
-
-                if (response.ok) {
-                    const data = await response.json();
-
-                    if (data.syncedLyrics) {
-                        const lyricsData = {
-                            subtitles: data.syncedLyrics,
-                            lyricsProvider: 'LRCLIB',
-                        };
-
-                        this.lyricsCache.set(trackId, lyricsData);
-
-                        // Persist to IndexedDB for offline access
-                        try {
-                            await musicDB.cacheLyrics(trackId, lyricsData);
-                        } catch (e) {
-                            console.warn('IndexedDB lyrics write failed:', e);
-                        }
-
-                        return lyricsData;
-                    }
-                }
-            } catch (error) {
-                console.warn('LRCLIB fetch failed:', error);
-            }
-        }
+        } catch (e) { console.warn('LRCLIB fetch failed:', e); }
 
         return null;
     }
 
     parseSyncedLyrics(subtitles) {
         if (!subtitles) return [];
-        const lines = subtitles.split('\n').filter((line) => line.trim());
-        return lines
-            .map((line) => {
-                const match = line.match(/\[(\d+):(\d+)\.(\d+)\]\s*(.+)/);
-                if (match) {
-                    const [, minutes, seconds, centiseconds, text] = match;
-                    const timeInSeconds = parseInt(minutes) * 60 + parseInt(seconds) + parseInt(centiseconds) / 100;
-                    return { time: timeInSeconds, text: text.trim() };
-                }
-                return null;
-            })
-            .filter(Boolean);
+        return subtitles.split('\n').filter(l => l.trim()).map(line => {
+            const m = line.match(/\[(\d+):(\d+)\.(\d+)\]\s*(.+)/);
+            if (m) {
+                const frac = m[3];
+                const fracVal = frac.length === 3 ? parseInt(frac) / 1000 : parseInt(frac) / 100;
+                const time = parseInt(m[1]) * 60 + parseInt(m[2]) + fracVal;
+                return { time, text: m[4].trim() };
+            }
+            return null;
+        }).filter(Boolean);
     }
 
     generateLRCContent(lyricsData, track) {
         if (!lyricsData || !lyricsData.subtitles) return null;
-
-        const trackTitle = getTrackTitle(track);
-        const trackArtist = getTrackArtists(track);
-
-        let lrc = `[ti:${trackTitle}]\n`;
-        lrc += `[ar:${trackArtist}]\n`;
+        let lrc = `[ti:${getTrackTitle(track)}]\n`;
+        lrc += `[ar:${getTrackArtists(track)}]\n`;
         lrc += `[al:${track.album?.title || 'Unknown Album'}]\n`;
-        lrc += `[by:${lyricsData.lyricsProvider || 'Unknown'}]\n`;
-        lrc += '\n';
+        lrc += `[by:${lyricsData.lyricsProvider || 'Unknown'}]\n\n`;
         lrc += lyricsData.subtitles;
-
         return lrc;
     }
 
     downloadLRC(lyricsData, track) {
         const lrcContent = this.generateLRCContent(lyricsData, track);
-        if (!lrcContent) {
-            alert('No synced lyrics available for this track');
-            return;
-        }
-
+        if (!lrcContent) { return; }
         const blob = new Blob([lrcContent], { type: 'application/octet-stream' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -588,1108 +212,426 @@ export class LyricsManager {
 
     getCurrentLine(currentTime) {
         if (!this.syncedLyrics || this.syncedLyrics.length === 0) return -1;
-        let currentIndex = -1;
+        let idx = -1;
         for (let i = 0; i < this.syncedLyrics.length; i++) {
-            if (currentTime >= this.syncedLyrics[i].time) {
-                currentIndex = i;
-            } else {
-                break;
-            }
+            if (currentTime >= this.syncedLyrics[i].time) idx = i;
+            else break;
         }
-        return currentIndex;
-    }
-
-    // Setup MutationObserver to convert lyrics in am-lyrics component
-    setupLyricsObserver(amLyricsElement) {
-        this.stopLyricsObserver();
-
-        if (!amLyricsElement) return;
-
-        // Check for shadow DOM
-        const observeRoot = amLyricsElement.shadowRoot || amLyricsElement;
-
-        this.romajiObserver = new MutationObserver((mutations) => {
-            // Check if any relevant mutation occurred
-            const hasRelevantChange = mutations.some((mutation) => {
-                if (mutation.type === 'childList') {
-                    let relevant = false;
-                    if (mutation.addedNodes.length > 0) {
-                        for (const node of mutation.addedNodes) {
-                            if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('genius-indicator'))
-                                continue;
-                            relevant = true;
-                            break;
-                        }
-                    }
-                    if (!relevant && mutation.removedNodes.length > 0) {
-                        for (const node of mutation.removedNodes) {
-                            if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('genius-indicator'))
-                                continue;
-                            relevant = true;
-                            break;
-                        }
-                    }
-                    return relevant;
-                }
-                if (mutation.type === 'characterData') return true;
-                return false;
-            });
-
-            if (!hasRelevantChange) {
-                return;
-            }
-
-            // Debounce mutations
-            if (this.observerTimeout) {
-                clearTimeout(this.observerTimeout);
-            }
-            this.observerTimeout = setTimeout(async () => {
-                if (this.isRomajiMode) {
-                    await this.convertLyricsContent(amLyricsElement);
-                }
-                if (this.isGeniusMode && this.currentGeniusData) {
-                    this.applyGeniusAnnotations(amLyricsElement, this.currentGeniusData.referents);
-                }
-            }, 100);
-        });
-
-        // Observe all child nodes for changes (in shadow DOM if it exists)
-        // Watch for new nodes AND text content changes to catch when lyrics refresh
-        this.romajiObserver.observe(observeRoot, {
-            childList: true,
-            subtree: true,
-            characterData: true, // Watch text changes to catch lyric refreshes
-            attributes: false, // Don't watch attribute changes (highlight, etc)
-        });
-
-        // Initial conversion if Romaji mode is enabled - single attempt, no periodic polling
-        if (this.isRomajiMode) {
-            this.convertLyricsContent(amLyricsElement);
-        }
-        if (this.isGeniusMode && this.currentGeniusData) {
-            this.applyGeniusAnnotations(amLyricsElement, this.currentGeniusData.referents);
-        }
-    }
-
-    // Convert lyrics content to Romaji
-    async convertLyricsContent(amLyricsElement) {
-        if (!amLyricsElement || !this.isRomajiMode) {
-            return;
-        }
-
-        // Find the root to traverse - check for shadow DOM first
-        const rootToTraverse = amLyricsElement.shadowRoot || amLyricsElement;
-
-        // Make sure Kuroshiro is ready
-        if (!this.kuroshiroLoaded) {
-            const success = await this.loadKuroshiro();
-            if (!success) {
-                console.warn('Cannot convert lyrics - Kuroshiro load failed');
-                return;
-            }
-        }
-
-        // Find all text nodes in the component
-        const textNodes = [];
-        const walker = document.createTreeWalker(rootToTraverse, NodeFilter.SHOW_TEXT, null, false);
-
-        let node;
-        while ((node = walker.nextNode())) {
-            textNodes.push(node);
-        }
-
-        // Convert Japanese text to Romaji (using async/await for Kuroshiro)
-        for (const textNode of textNodes) {
-            if (!textNode.parentElement) {
-                continue;
-            }
-
-            const parentTag = textNode.parentElement.tagName?.toLowerCase();
-            const parentClass = String(textNode.parentElement.className || '');
-
-            // Skip elements that shouldn't be converted
-            const skipTags = ['script', 'style', 'code', 'input', 'textarea', 'time'];
-            if (skipTags.includes(parentTag)) {
-                continue;
-            }
-
-            const originalText = textNode.textContent;
-
-            // Skip progress indicators and timestamps (but NOT progress-text which is the actual lyrics!)
-            if (
-                (parentClass.includes('progress') && !parentClass.includes('progress-text')) ||
-                (parentClass.includes('time') && !parentClass.includes('progress-text')) ||
-                parentClass.includes('timestamp')
-            ) {
-                continue;
-            }
-
-            if (!originalText || originalText.trim().length === 0) {
-                continue;
-            }
-
-            // Check if contains Japanese - convert if we find Japanese
-            if (this.containsJapanese(originalText)) {
-                const romajiText = await this.convertToRomaji(originalText);
-
-                // Only update if conversion produced different text
-                if (romajiText && romajiText !== originalText) {
-                    textNode.textContent = romajiText;
-                }
-            }
-        }
-
-        // Mark this track as converted
-        if (this.currentTrackId) {
-            this.convertedTracksCache.add(this.currentTrackId);
-        }
-    }
-
-    // Stop the observer
-    stopLyricsObserver() {
-        if (this.romajiObserver) {
-            this.romajiObserver.disconnect();
-            this.romajiObserver = null;
-        }
-        if (this.observerTimeout) {
-            clearTimeout(this.observerTimeout);
-            this.observerTimeout = null;
-        }
-    }
-
-    // Toggle Romaji mode
-    async toggleRomajiMode(amLyricsElement) {
-        this.isRomajiMode = !this.isRomajiMode;
-        this.setRomajiMode(this.isRomajiMode);
-
-        if (amLyricsElement) {
-            if (this.isRomajiMode) {
-                // Turning ON: Setup observer and convert immediately
-                this.setupLyricsObserver(amLyricsElement);
-                await this.convertLyricsContent(amLyricsElement);
-            } else {
-                // Turning OFF: Stop observer
-                // Note: To restore original Japanese, we'd need to reload the component
-                this.stopLyricsObserver();
-            }
-        }
-
-        return this.isRomajiMode;
-    }
-
-    async applyGeniusAnnotations(amLyricsElement, referents) {
-        if (!amLyricsElement || !referents) return;
-
-        const root = amLyricsElement.shadowRoot || amLyricsElement;
-
-        const lineElements = Array.from(root.querySelectorAll('p, .line, .lyric-line, .lrc-line'));
-
-        if (lineElements.length === 0) return;
-
-        lineElements.forEach((el) => {
-            el.classList.remove('genius-annotated', 'genius-multi-start', 'genius-multi-end', 'genius-multi-mid');
-            delete el.__geniusAnnotations;
-        });
-
-        const normalize = (str) =>
-            str
-                .toLowerCase()
-                .replace(/[^\p{L}\p{N}\s]/gu, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-
-        referents.forEach((ref) => {
-            const fragment = normalize(ref.fragment);
-            if (!fragment) return;
-
-            for (let i = 0; i < lineElements.length; i++) {
-                let combinedText = '';
-                let currentLines = [];
-
-                for (let j = i; j < lineElements.length; j++) {
-                    const line = lineElements[j];
-
-                    const lineClone = line.cloneNode(true);
-                    lineClone
-                        .querySelectorAll('.time, .timestamp, [class*="time"], .genius-indicator')
-                        .forEach((n) => n.remove());
-                    const text = normalize(lineClone.textContent || '');
-
-                    if (!text) continue;
-
-                    if (currentLines.length > 0) combinedText += ' ';
-                    combinedText += text;
-                    currentLines.push(line);
-
-                    if (combinedText.includes(fragment)) {
-                        currentLines.forEach((el, idx) => {
-                            el.classList.add('genius-annotated');
-                            if (!el.__geniusAnnotations) el.__geniusAnnotations = [];
-
-                            if (!el.__geniusAnnotations.some((a) => a.id === ref.id)) {
-                                el.__geniusAnnotations.push(ref);
-                            }
-
-                            if (currentLines.length > 1) {
-                                if (idx === 0) el.classList.add('genius-multi-start');
-                                else if (idx === currentLines.length - 1) el.classList.add('genius-multi-end');
-                                else el.classList.add('genius-multi-mid');
-                            }
-
-                            if (!el.querySelector('.genius-indicator')) {
-                                const smiley = document.createElement('span');
-                                smiley.className = 'genius-indicator';
-                                smiley.textContent = ' ☺';
-                                smiley.style.color = '#ffff64';
-                                smiley.style.marginLeft = '0.5em';
-                                el.appendChild(smiley);
-                            }
-                        });
-                        break;
-                    }
-
-                    if (combinedText.length > fragment.length + 50) break;
-                }
-            }
-        });
+        return idx;
     }
 }
 
+/* ================================================================
+   PANEL ENTRY POINT
+   ================================================================ */
+
 export function openLyricsPanel(track, audioPlayer, lyricsManager, forceOpen = false) {
     const manager = lyricsManager || new LyricsManager();
-
-    // Load Kuroshiro in background only if track has Asian text and Romaji mode is enabled
-    const isRomajiMode = manager.getRomajiMode();
-    if (isRomajiMode && trackHasAsianText(track) && !manager.kuroshiroLoaded && !manager.kuroshiroLoading) {
-        manager.loadKuroshiro().catch((err) => {
-            console.warn('Failed to load Kuroshiro for Romaji conversion:', err);
-        });
-    }
-
-    // Load saved timing offset for this track
     manager.timingOffset = manager.getTimingOffset(track.id);
 
     const renderControls = (container) => {
-        container.innerHTML = '';
+        container.innerHTML = `<button id="close-side-panel-btn" class="btn-icon" title="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>`;
+        container.querySelector('#close-side-panel-btn').addEventListener('click', () => {
+            sidePanelManager.close();
+        });
     };
 
     const renderContent = async (container) => {
         clearLyricsPanelSync(audioPlayer, sidePanelManager.panel);
-        await renderLyricsComponent(container, track, audioPlayer, manager);
+        await renderCustomLyrics(container, track, audioPlayer, manager);
         if (container.lyricsCleanup) {
             sidePanelManager.panel.lyricsCleanup = container.lyricsCleanup;
             sidePanelManager.panel.lyricsManager = container.lyricsManager;
         }
-
-        // Extract album cover colors for the bleeding background
-        const coverEl = document.querySelector('.now-playing-bar .cover');
-        if (coverEl && coverEl.src) {
-            try {
-                const img = new Image();
-                img.crossOrigin = 'Anonymous';
-                const sep = coverEl.src.includes('?') ? '&' : '?';
-                img.src = `${coverEl.src}${sep}lyrics-color`;
-                img.onload = () => {
-                    try {
-                        const color = getVibrantColorFromImage(img);
-                        if (color) {
-                            const panel = sidePanelManager.panel;
-                            if (panel) {
-                                // Shift hue slightly for the 3 gradient colors
-                                panel.style.setProperty('--lyrics-color-1', color);
-                                // Create complementary colors by adjusting
-                                const r = parseInt(color.slice(1, 3), 16);
-                                const g = parseInt(color.slice(3, 5), 16);
-                                const b = parseInt(color.slice(5, 7), 16);
-                                const c2 = `rgb(${Math.min(255, r + 60)}, ${Math.max(0, g - 30)}, ${Math.min(255, b + 40)})`;
-                                const c3 = `rgb(${Math.max(0, r - 40)}, ${Math.min(255, g + 50)}, ${Math.min(255, b + 60)})`;
-                                panel.style.setProperty('--lyrics-color-2', c2);
-                                panel.style.setProperty('--lyrics-color-3', c3);
-                            }
-                        }
-                    } catch (e) {
-                        // Fallback to default colors
-                    }
-                };
-            } catch (e) {
-                // Fallback to default colors
-            }
-        }
+        return;
     };
 
-    // Build title with song info on multiple lines
     const songTitle = track.title || 'Unknown';
     const artistName = track.artist?.name || (track.artists ? track.artists.map(a => a.name).join(', ') : 'Unknown');
     const albumName = track.album?.title || '';
-    const panelTitle = songTitle; // Main title is the song name
-    
-    sidePanelManager.open('lyrics', panelTitle, renderControls, renderContent, forceOpen);
 
-    // After opening, set the title to multi-line HTML
+    if (sidePanelManager._lyricsPopHandler) {
+        window.removeEventListener('popstate', sidePanelManager._lyricsPopHandler);
+        sidePanelManager._lyricsPopHandler = null;
+    }
+    if (!sidePanelManager._originalClose) {
+        sidePanelManager._originalClose = sidePanelManager.close.bind(sidePanelManager);
+    }
+
+    const coverId = track.album?.cover || track.cover;
+    if (coverId && manager.api) {
+        const coverUrl = manager.api.getCoverUrl(coverId, '320');
+        sidePanelManager.panel.style.setProperty('--lyrics-bg', `url(${coverUrl})`);
+    } else {
+        sidePanelManager.panel.style.removeProperty('--lyrics-bg');
+    }
+
+    sidePanelManager.open('lyrics', songTitle, renderControls, renderContent, forceOpen);
+
+    if (!window.location.hash.includes('lyrics')) {
+        window.history.pushState({ lyricsPanel: true }, '', '#lyrics');
+    }
+
+    const resetLyricsToggle = () => {
+        const btn = document.getElementById('toggle-fullscreen-lyrics-btn');
+        if (btn) btn.classList.remove('active');
+    };
+
+    const onPopState = () => {
+        if (sidePanelManager.isActive('lyrics')) {
+            sidePanelManager.close();
+        }
+        window.removeEventListener('popstate', onPopState);
+        sidePanelManager._lyricsPopHandler = null;
+    };
+    sidePanelManager._lyricsPopHandler = onPopState;
+    window.addEventListener('popstate', onPopState);
+
+    const origClose = sidePanelManager._originalClose;
+    sidePanelManager.close = () => {
+        window.removeEventListener('popstate', onPopState);
+        sidePanelManager._lyricsPopHandler = null;
+        resetLyricsToggle();
+        if (window.location.hash === '#lyrics') {
+            window.history.back();
+        }
+        sidePanelManager.close = origClose;
+        origClose();
+    };
+
     const titleEl = document.getElementById('side-panel-title');
     if (titleEl) {
         let titleHTML = `<span class="lyrics-title-song">${songTitle.replace(/</g, '&lt;')}</span>`;
         titleHTML += `<span class="lyrics-title-artist">${artistName.replace(/</g, '&lt;')}</span>`;
-        if (albumName) {
-            titleHTML += `<span class="lyrics-title-album">${albumName.replace(/</g, '&lt;')}</span>`;
-        }
+        if (albumName) titleHTML += `<span class="lyrics-title-album">${albumName.replace(/</g, '&lt;')}</span>`;
         titleEl.innerHTML = titleHTML;
     }
 }
 
-async function renderLyricsComponent(container, track, audioPlayer, lyricsManager) {
+/* ================================================================
+   CUSTOM LYRICS RENDERER (replaces am-lyrics)
+   ================================================================ */
+
+async function renderCustomLyrics(container, track, audioPlayer, lyricsManager) {
+    const errorMsg = (msg) => {
+        container.innerHTML = `<div class="lyrics-error" style="font-family:'Bricolage Grotesque','DM Sans',sans-serif;text-align:center;padding:3rem 1.5rem;font-size:1.1rem;color:rgba(255,255,255,0.5);">${msg}</div>`;
+        container.lyricsCleanup = () => {};
+        container.lyricsManager = lyricsManager;
+        return null;
+    };
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        try {
+            await musicDB.open();
+            if (!(await musicDB.getCachedLyrics(track.id))) return errorMsg('No lyrics available offline');
+        } catch { return errorMsg('No lyrics available offline'); }
+    }
+
     container.innerHTML = '<div class="lyrics-loading">Loading lyrics...</div>';
 
-    try {
-        await lyricsManager.ensureComponentLoaded();
+    lyricsManager.currentTrackId = track.id;
+    const lyricsData = await lyricsManager.fetchLyrics(track.id, track);
+    if (!lyricsData) return errorMsg('No lyrics found');
 
-        // Set initial Romaji mode
-        lyricsManager.isRomajiMode = lyricsManager.getRomajiMode();
-        lyricsManager.currentTrackId = track.id;
+    const wordSynced = lyricsData.wordSynced || null;
+    const subtitles = wordSynced
+        ? lyricsManager.wordSyncedToLRC(wordSynced)
+        : lyricsData.subtitles;
+    const parsed = lyricsManager.parseSyncedLyrics(subtitles);
+    const hasSync = parsed.length > 0;
 
-        const title = track.title;
-        const artist = getTrackArtists(track);
-        const album = track.album?.title;
-        const durationMs = track.duration ? Math.round(track.duration * 1000) : undefined;
-        const isrc = track.isrc || '';
+    container.innerHTML = '';
 
-        container.innerHTML = '';
-        const amLyrics = document.createElement('am-lyrics');
-        amLyrics.setAttribute('song-title', title);
-        amLyrics.setAttribute('song-artist', artist);
-        if (album) amLyrics.setAttribute('song-album', album);
-        if (durationMs) amLyrics.setAttribute('song-duration', durationMs);
-        amLyrics.setAttribute('query', `${title} ${artist}`.trim());
-        if (isrc) amLyrics.setAttribute('isrc', isrc);
+    const root = document.createElement('div');
+    root.className = 'tunes-lyrics';
 
-        amLyrics.setAttribute('highlight-color', '#ffffff');
-        amLyrics.setAttribute('hover-background-color', 'rgba(255, 255, 255, 0.08)');
-        amLyrics.setAttribute('autoscroll', '');
-        amLyrics.setAttribute('interpolate', '');
-        amLyrics.style.height = '100%';
-        amLyrics.style.width = '100%';
-
-        container.appendChild(amLyrics);
-
-        // Override the built-in scrollToActiveLine to pin active line near the TOP (~8% from top)
-        const SCROLL_TOP_RATIO = 0.08; // 8% from top — Apple Music style
-        const overrideScroll = () => {
-            if (typeof amLyrics.scrollToActiveLine === 'function') {
-                amLyrics.scrollToActiveLine = function () {
-                    if (!this.lyricsContainer || this.activeLineIndices.length === 0) return;
-                    const idx = Math.min(...this.activeLineIndices);
-                    const el = this.lyricsContainer.querySelector(`.lyrics-line:nth-child(${idx + 1})`);
-                    if (el) {
-                        const ch = this.lyricsContainer.clientHeight;
-                        const top = el.offsetTop;
-                        const bg = el.querySelector('.background-text.before');
-                        let bgOff = 0;
-                        if (bg) bgOff = bg.clientHeight / 2;
-                        const target = top - ch * SCROLL_TOP_RATIO - bgOff;
-                        requestAnimationFrame(() => {
-                            this.isProgrammaticScroll = true;
-                            this.lyricsContainer?.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-                            setTimeout(() => { this.isProgrammaticScroll = false; }, 150);
-                        });
-                    }
-                };
-            }
-            if (typeof amLyrics.scrollToInstrumental === 'function') {
-                amLyrics.scrollToInstrumental = function (insertIdx) {
-                    if (!this.lyricsContainer) return;
-                    const el = this.lyricsContainer.querySelector(`.lyrics-line:nth-child(${insertIdx + 1})`);
-                    if (el) {
-                        const ch = this.lyricsContainer.clientHeight;
-                        const top = el.offsetTop;
-                        const bg = el.querySelector('.background-text.before');
-                        let bgOff = 0;
-                        if (bg) bgOff = bg.clientHeight / 2;
-                        const target = top - ch * SCROLL_TOP_RATIO - bgOff;
-                        requestAnimationFrame(() => {
-                            this.isProgrammaticScroll = true;
-                            this.lyricsContainer?.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-                            setTimeout(() => { this.isProgrammaticScroll = false; }, 150);
-                        });
-                    }
-                };
-            }
-        };
-        // Override immediately if available, and also after shadow DOM renders
-        overrideScroll();
-        setTimeout(overrideScroll, 100);
-        setTimeout(overrideScroll, 500);
-        setTimeout(overrideScroll, 1500);
-
-        // Inject custom styles into am-lyrics shadow DOM once it renders
-        const injectLyricsStyles = () => {
-            const root = amLyrics.shadowRoot;
-            if (!root) return;
-            // Check if styles already injected
-            if (root.querySelector('#custom-lyrics-style')) {
-                return; // Already injected
-            }
-            const style = document.createElement('style');
-            style.id = 'custom-lyrics-style';
-            style.textContent = `
-                /* ═══════════════════════════════════════════════
-                   Apple Music–inspired lyrics styling
-                   ═══════════════════════════════════════════════ */
-
-                /* Register --line-progress for smooth CSS transitions */
-                @property --line-progress {
-                    syntax: '<percentage>';
-                    inherits: false;
-                    initial-value: 0%;
-                }
-
-                /* ── Hide controls, footer, version, github, etc. ── */
-                .controls, .lyrics-controls, .toolbar, .options-bar,
-                button[title*="oman"], button[title*="ranslat"], button[title*="uto"],
-                .rom-btn, .trans-btn, .auto-btn,
-                [class*="control"], [class*="option"], [class*="toolbar"],
-                .settings, .settings-bar, .bottom-bar, .top-bar,
-                [class*="setting"], [class*="toggle"] {
-                    display: none !important;
-                }
-                footer, .footer, [class*="footer"],
-                [class*="version"], [class*="credit"],
-                [class*="github"], [class*="star"],
-                a[href*="github"], [class*="badge"],
-                [class*="watermark"], [class*="branding"] {
-                    display: none !important;
-                }
-                .bottom, .info-bar, .meta, .about {
-                    display: none !important;
-                }
-
-                /* ── Font ── */
-                :host, *, .line, .synced-line, .lyrics-line, p, span, div {
-                    font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif !important;
-                }
-
-                /* ── Container: pin active line near top ── */
-                .lyrics-container {
-                    padding-top: 8vh !important;
-                    padding-bottom: 88vh !important;
-                    scroll-behavior: smooth !important;
-                }
-
-                /* ── Apple Music glow pulse ── */
-                @keyframes am-glow {
-                    0%, 100% {
-                        text-shadow:
-                            0 0 18px rgba(255, 255, 255, 0.18),
-                            0 0 50px rgba(255, 255, 255, 0.06);
-                    }
-                    50% {
-                        text-shadow:
-                            0 0 28px rgba(255, 255, 255, 0.28),
-                            0 0 70px rgba(255, 255, 255, 0.10);
-                    }
-                }
-
-                /* ── Default (inactive) lyrics lines ── */
-                .lyrics-line {
-                    font-size: 1.9rem !important;
-                    line-height: 1.55 !important;
-                    font-weight: 700 !important;
-                    letter-spacing: -0.015em !important;
-                    padding: 0.35rem 0 !important;
-                    margin: 0 !important;
-                    opacity: 0.28 !important;
-                    color: rgba(255, 255, 255, 0.35) !important;
-                    transform: scale(0.975) translateZ(0) !important;
-                    transform-origin: left center !important;
-                    transition:
-                        opacity 0.55s cubic-bezier(0.25, 0.1, 0.25, 1),
-                        transform 0.55s cubic-bezier(0.25, 0.1, 0.25, 1),
-                        color 0.55s ease,
-                        text-shadow 0.6s ease,
-                        filter 0.55s ease !important;
-                    filter: blur(0.4px) !important;
-                    text-shadow: none !important;
-                    will-change: opacity, transform, filter !important;
-                }
-
-                /* ── ACTIVE LINE — the star of the show ── */
-                .lyrics-line.active-line {
-                    font-size: 1.9rem !important;
-                    line-height: 1.55 !important;
-                    font-weight: 800 !important;
-                    opacity: 1 !important;
-                    color: #ffffff !important;
-                    transform: scale(1) translateZ(0) !important;
-                    filter: none !important;
-                    animation: am-glow 3.5s ease-in-out infinite !important;
-                }
-
-                /* ── Karaoke gradient on active line words ── */
-                .lyrics-line.active-line .progress-text {
-                    background: linear-gradient(
-                        to right,
-                        #ffffff 0%,
-                        #ffffff max(0%, calc(var(--line-progress, 0%) - 3%)),
-                        rgba(255, 255, 255, 0.38) calc(var(--line-progress, 0%) + 4%),
-                        rgba(255, 255, 255, 0.38) 100%
-                    ) !important;
-                    -webkit-background-clip: text !important;
-                    background-clip: text !important;
-                    -webkit-text-fill-color: transparent !important;
-                    color: #ffffff !important;
-                    opacity: 1 !important;
-                    transition: --line-progress 0.12s linear !important;
-                    will-change: background !important;
-                }
-
-                /* ── Words that are fully sung inside the active line ── */
-                .lyrics-line.active-line .progress-text[style*="--line-progress: 100%"],
-                .lyrics-line.active-line .progress-text[style*="--line-progress:100%"] {
-                    -webkit-text-fill-color: #ffffff !important;
-                    background: none !important;
-                }
-
-                /* ── Sung / past lines — dim back elegantly ── */
-                .lyrics-line[data-sung] {
-                    opacity: 0.28 !important;
-                    color: rgba(255, 255, 255, 0.35) !important;
-                    filter: blur(0.4px) !important;
-                    text-shadow: none !important;
-                    transform: scale(0.975) translateZ(0) !important;
-                    animation: none !important;
-                    transition:
-                        opacity 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
-                        transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
-                        filter 0.4s ease !important;
-                }
-                .lyrics-line[data-sung] *,
-                .lyrics-line[data-sung] .progress-text {
-                    color: rgba(255, 255, 255, 0.35) !important;
-                    -webkit-text-fill-color: rgba(255, 255, 255, 0.35) !important;
-                    background: none !important;
-                    transition: none !important;
-                }
-
-                /* ── Instrumental indicator ── */
-                .instrumental-line {
-                    opacity: 0.45 !important;
-                    color: rgba(255, 255, 255, 0.5) !important;
-                }
-
-                /* ── Background / romanization text ── */
-                .background-text {
-                    color: rgba(255, 255, 255, 0.4) !important;
-                    font-size: 0.75em !important;
-                }
-
-                /* ── Hide scrollbar ── */
-                :host {
-                    scrollbar-width: none !important;
-                    -ms-overflow-style: none !important;
-                }
-                :host::-webkit-scrollbar { display: none !important; }
-                *, div, section, main {
-                    scrollbar-width: none !important;
-                    -ms-overflow-style: none !important;
-                }
-                *::-webkit-scrollbar { display: none !important; }
-            `;
-            root.appendChild(style);
-        };
-
-        // Aggressively remove version/github text from shadow DOM
-        const removeUnwantedElements = () => {
-            const root = amLyrics.shadowRoot;
-            if (!root) return;
-            // Walk all text nodes and hide parents containing unwanted text
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
-            let node;
-            while ((node = walker.nextNode())) {
-                const text = (node.textContent || '').trim().toLowerCase();
-                if (
-                    text.includes('v0.6') || text.includes('v0.5') || text.includes('v0.4') ||
-                    text.includes('star') || text.includes('github') ||
-                    text.includes('uimaxbai') || text.includes('am-lyrics') ||
-                    text.includes('version')
-                ) {
-                    let el = node.parentElement;
-                    // Walk up a few levels to hide the container
-                    for (let i = 0; i < 3 && el; i++) {
-                        if (el === root || el === root.host) break;
-                        if (el.children && el.children.length <= 2) {
-                            el.style.display = 'none';
-                            break;
-                        }
-                        el = el.parentElement;
-                    }
-                }
-            }
-        };
-
-        // Use data-sung attribute to mark lines that have been sung and passed.
-        // The CSS in the shadow DOM dims them back to default appearance.
-
-        const forceLyricsDim = () => {
-            const root = amLyrics.shadowRoot;
-            if (!root) return;
-
-            // Find all lyric line containers
-            let lines = root.querySelectorAll('.line, .synced-line, [class*="lyric-line"], p[class]');
-            if (lines.length === 0) {
-                lines = root.querySelectorAll('p, div.line, div[class*="line"]');
-            }
-            if (lines.length === 0) return;
-
-            // Find the currently active line
-            let activeIndex = -1;
-            for (let i = 0; i < lines.length; i++) {
-                const cls = lines[i].className || '';
-                if (cls.includes('active') || cls.includes('current')) {
-                    activeIndex = i;
-                    break;
-                }
-            }
-
-            // Also check for 'past' class lines to find the frontier
-            if (activeIndex === -1) {
-                for (let i = lines.length - 1; i >= 0; i--) {
-                    const cls = lines[i].className || '';
-                    if (cls.includes('past')) {
-                        activeIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            // Apply data-sung to all lines BEFORE the active line.
-            // data-sung CSS now dims them back to default (gray, low opacity).
-            for (let i = 0; i < lines.length; i++) {
-                if (i < activeIndex) {
-                    if (!lines[i].hasAttribute('data-sung')) {
-                        lines[i].setAttribute('data-sung', '');
-                        // Strip any inline color/opacity the component set
-                        lines[i].style.removeProperty('color');
-                        lines[i].style.removeProperty('opacity');
-                        lines[i].style.removeProperty('-webkit-text-fill-color');
-                        lines[i].style.removeProperty('text-shadow');
-                        lines[i].querySelectorAll('*').forEach(child => {
-                            child.style.removeProperty('color');
-                            child.style.removeProperty('opacity');
-                            child.style.removeProperty('-webkit-text-fill-color');
-                        });
-                    }
-                } else if (i === activeIndex) {
-                    // Force bright white on the active line via inline styles (NO glare)
-                    if (lines[i].hasAttribute('data-sung')) {
-                        lines[i].removeAttribute('data-sung');
-                    }
-                    lines[i].style.setProperty('opacity', '1', 'important');
-                    lines[i].style.setProperty('color', '#ffffff', 'important');
-                    lines[i].style.setProperty('font-weight', '800', 'important');
-                    lines[i].style.setProperty('text-shadow', 'none', 'important');
-                    lines[i].style.setProperty('filter', 'none', 'important');
-                    // Scrolling is handled by the overridden scrollToActiveLine on the am-lyrics component
-                } else {
-                    // Future lines: remove data-sung, clear forced active styles
-                    if (lines[i].hasAttribute('data-sung')) {
-                        lines[i].removeAttribute('data-sung');
-                    }
-                    // Clear any leftover forced active styles from when this was the active line
-                    lines[i].style.removeProperty('opacity');
-                    lines[i].style.removeProperty('color');
-                    lines[i].style.removeProperty('font-weight');
-                    lines[i].style.removeProperty('text-shadow');
-                    lines[i].style.removeProperty('filter');
-                }
-            }
-        };
-
-        // Try immediately and also observe for shadow DOM readiness
-        injectLyricsStyles();
-        removeUnwantedElements();
-        const observer = new MutationObserver(() => {
-            injectLyricsStyles();
-            removeUnwantedElements();
-            forceLyricsDim();
-        });
-        observer.observe(amLyrics, { childList: true, subtree: true });
-        // Also observe shadow root directly
-        const observeShadow = () => {
-            const root = amLyrics.shadowRoot;
-            if (!root) return;
-            const shadowObserver = new MutationObserver(() => {
-                forceLyricsDim();
-            });
-            shadowObserver.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
-        };
-        observeShadow();
-        setTimeout(() => { injectLyricsStyles(); removeUnwantedElements(); forceLyricsDim(); observeShadow(); }, 500);
-        setTimeout(() => { injectLyricsStyles(); removeUnwantedElements(); forceLyricsDim(); }, 1500);
-        setTimeout(() => { removeUnwantedElements(); forceLyricsDim(); }, 3000);
-        // Continuous polling - run every 80ms to beat the component's own updates
-        const pollInterval = setInterval(() => {
-            if (!document.contains(amLyrics)) { clearInterval(pollInterval); return; }
-            forceLyricsDim();
-        }, 80);
-
-        // Setup observer IMMEDIATELY to catch lyrics as they load (not after waiting)
-        // This is critical - observer must be running before lyrics arrive from LRCLIB
-        lyricsManager.setupLyricsObserver(amLyrics);
-
-        // If Romaji mode is enabled and track has Asian text, ensure Kuroshiro is ready
-        if (lyricsManager.isRomajiMode && trackHasAsianText(track) && !lyricsManager.kuroshiroLoaded) {
-            await lyricsManager.loadKuroshiro();
+    if (!hasSync && lyricsData.plainLyrics) {
+        for (const text of lyricsData.plainLyrics.split('\n')) {
+            const p = document.createElement('p');
+            p.className = 'tl-plain-line';
+            p.textContent = text;
+            root.appendChild(p);
         }
-
-        lyricsManager
-            .fetchLyrics(track.id, track)
-            .then(async () => {
-                if (lyricsManager.isGeniusMode) {
-                    try {
-                        const data = await lyricsManager.geniusManager.getDataForTrack(track);
-                        if (data) {
-                            lyricsManager.currentGeniusData = data;
-                            lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
-                        }
-                    } catch (e) {
-                        console.warn('Genius auto-load failed', e);
-                    }
-                }
-            })
-            .catch((e) => console.warn('Background lyrics fetch failed', e));
-
-        // Wait for lyrics to appear, then do an immediate conversion
-        const waitForLyrics = () => {
-            return new Promise((resolve) => {
-                // Check if lyrics are already loaded
-                const checkForLyrics = () => {
-                    const hasLyrics =
-                        amLyrics.querySelector(".lyric-line, [class*='lyric']") ||
-                        (amLyrics.shadowRoot && amLyrics.shadowRoot.querySelector("[class*='lyric']")) ||
-                        (amLyrics.textContent && amLyrics.textContent.length > 50);
-                    return hasLyrics;
-                };
-
-                if (checkForLyrics()) {
-                    resolve();
-                    return;
-                }
-
-                // Check more frequently (200ms) for faster response
-                let attempts = 0;
-                const maxAttempts = 25; // 5 seconds max
-                const interval = setInterval(() => {
-                    attempts++;
-                    if (checkForLyrics() || attempts >= maxAttempts) {
-                        clearInterval(interval);
-                        resolve();
-                    }
-                }, 200);
-            });
-        };
-
-        await waitForLyrics();
-
-        // Convert immediately after lyrics detected
-        if (lyricsManager.isRomajiMode) {
-            await lyricsManager.convertLyricsContent(amLyrics);
-            // One retry after 500ms in case more lyrics load
-            setTimeout(() => lyricsManager.convertLyricsContent(amLyrics), 500);
-        }
-
-        if (lyricsManager.isGeniusMode && lyricsManager.currentGeniusData) {
-            lyricsManager.applyGeniusAnnotations(amLyrics, lyricsManager.currentGeniusData.referents);
-        }
-
-        const cleanup = setupSync(track, audioPlayer, amLyrics, lyricsManager);
-
-        // Attach cleanup to container for easy access
-        container.lyricsCleanup = cleanup;
+        container.appendChild(root);
+        container.lyricsCleanup = () => {};
         container.lyricsManager = lyricsManager;
-
-        return amLyrics;
-    } catch (error) {
-        console.error('am-lyrics component failed, trying fallback renderer:', error);
-        // Fallback: render lyrics from IndexedDB cache with custom karaoke renderer
-        return renderFallbackLyrics(container, track, audioPlayer, lyricsManager);
+        return root;
     }
+
+    if (!hasSync) return errorMsg('No synced lyrics found');
+
+    let wordMap = buildWordMap(wordSynced, parsed);
+
+    const lineEls = [];
+    for (let i = 0; i < parsed.length; i++) {
+        const el = document.createElement('p');
+        el.className = 'tl-line';
+        el.dataset.idx = i;
+
+        if (wordMap && wordMap[i]) {
+            for (const w of wordMap[i]) {
+                const span = document.createElement('span');
+                span.className = 'tl-word tl-word-future';
+                span.innerHTML = wrapParenthesized(w.text);
+                span.dataset.start = w.start;
+                span.dataset.end = w.end;
+                el.appendChild(span);
+            }
+        } else {
+            el.innerHTML = wrapParenthesized(parsed[i].text);
+        }
+
+        el.addEventListener('click', () => {
+            audioPlayer.currentTime = parsed[i].time;
+            audioPlayer.play();
+        });
+        root.appendChild(el);
+        lineEls.push(el);
+    }
+
+    container.classList.add('lyrics-scroll-mask');
+    container.appendChild(root);
+    container.scrollTop = 0;
+
+    const cleanup = setupThrottledSync(parsed, () => wordMap, lineEls, container, audioPlayer, lyricsManager);
+
+    container.lyricsCleanup = cleanup;
+    container.lyricsManager = lyricsManager;
+
+    if (!wordSynced && typeof navigator !== 'undefined' && navigator.onLine) {
+        let aborted = false;
+        lyricsManager.fetchWordSyncedLyrics(track).then(ws => {
+            if (aborted || !ws) return;
+            const cached = lyricsManager.lyricsCache.get(track.id);
+            if (cached) {
+                cached.wordSynced = ws;
+                lyricsManager.lyricsCache.set(track.id, cached);
+                try { musicDB.cacheLyrics(track.id, cached); } catch {}
+            }
+            const newMap = buildWordMap(ws, parsed);
+            if (!newMap) return;
+            wordMap = newMap;
+            for (const [idxStr, words] of Object.entries(newMap)) {
+                const idx = parseInt(idxStr, 10);
+                const el = lineEls[idx];
+                if (!el || el.querySelector('.tl-word')) continue;
+                el.textContent = '';
+                for (const w of words) {
+                    const span = document.createElement('span');
+                    span.className = 'tl-word tl-word-future';
+                    span.innerHTML = wrapParenthesized(w.text);
+                    span.dataset.start = w.start;
+                    span.dataset.end = w.end;
+                    el.appendChild(span);
+                }
+            }
+        }).catch(() => {});
+        const origCleanup = container.lyricsCleanup;
+        container.lyricsCleanup = () => { aborted = true; origCleanup(); };
+    }
+
+    return root;
+}
+
+function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function wrapParenthesized(text) {
+    const escaped = escHtml(text);
+    return escaped.replace(/(\([^)]*\))/g, '<span class="tl-bg-vocal">$1</span>');
 }
 
 /**
- * Custom offline-capable lyrics renderer with karaoke word-fill effect.
- * Used when am-lyrics web component can't load (offline / network error).
+ * Build a map of line index -> word timing objects for word-level highlight.
+ * Matches word-synced lines to parsed LRC lines by approximate timestamp.
  */
-async function renderFallbackLyrics(container, track, audioPlayer, lyricsManager) {
-    // Try to get lyrics from IndexedDB
-    let lyricsData = null;
-    try {
-        await musicDB.open();
-        lyricsData = await musicDB.getCachedLyrics(track.id);
-    } catch (e) {
-        console.warn('IndexedDB lyrics read failed in fallback:', e);
+function buildWordMap(wordSynced, parsed) {
+    if (!wordSynced || !parsed || parsed.length === 0) return null;
+    const map = {};
+    for (const wsLine of wordSynced) {
+        const startSec = wsLine.start || 0;
+        let bestIdx = -1;
+        let bestDiff = Infinity;
+        for (let i = 0; i < parsed.length; i++) {
+            const diff = Math.abs(parsed[i].time - startSec);
+            if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+        }
+        if (bestIdx >= 0 && bestDiff < 2.0) {
+            const words = [];
+            if (wsLine.words && wsLine.words.length > 0) {
+                for (let wi = 0; wi < wsLine.words.length; wi++) {
+                    const w = wsLine.words[wi];
+                    const wStart = w.time ?? w.startTime ?? w.start ?? 0;
+                    const nextStart = wi + 1 < wsLine.words.length
+                        ? (wsLine.words[wi + 1].time ?? wsLine.words[wi + 1].startTime ?? wsLine.words[wi + 1].start ?? 0)
+                        : (wsLine.end || startSec + 5);
+                    words.push({
+                        text: (w.word || w.text || w.c || '') + ' ',
+                        start: wStart,
+                        end: w.endTime ?? w.end ?? nextStart,
+                    });
+                }
+            } else {
+                words.push({
+                    text: wsLine.text || '',
+                    start: startSec,
+                    end: wsLine.end || startSec + 5,
+                });
+            }
+            if (words.length > 0) map[bestIdx] = words;
+        }
     }
+    return Object.keys(map).length > 0 ? map : null;
+}
 
-    // Also check in-memory cache
-    if (!lyricsData && lyricsManager.lyricsCache.has(track.id)) {
-        lyricsData = lyricsManager.lyricsCache.get(track.id);
-    }
+/* ================================================================
+   THROTTLED SYNC ENGINE (no rAF)
+   ================================================================ */
 
-    if (!lyricsData || !lyricsData.subtitles) {
-        container.innerHTML = `<div class="lyrics-error" style="font-family:'Bricolage Grotesque','DM Sans',sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No cached lyrics available offline</div>`;
-        return null;
-    }
+function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, lyricsManager) {
+    let activeLineIdx = -1;
+    let intervalId = null;
+    let isUserScrolling = false;
+    let userScrollTimer = null;
+    let canScroll = false;
+    let initialScrollTimer = null;
 
-    const parsed = lyricsManager.parseSyncedLyrics(lyricsData.subtitles);
-    if (parsed.length === 0) {
-        container.innerHTML = `<div class="lyrics-error" style="font-family:'Bricolage Grotesque','DM Sans',sans-serif;opacity:0.5;text-align:center;padding:3rem 1rem;">No synced lyrics found</div>`;
-        return null;
-    }
+    scrollEl.addEventListener('touchstart', () => {
+        isUserScrolling = true;
+        clearTimeout(userScrollTimer);
+    }, { passive: true });
+    scrollEl.addEventListener('touchend', () => {
+        clearTimeout(userScrollTimer);
+        userScrollTimer = setTimeout(() => { isUserScrolling = false; }, 3000);
+    }, { passive: true });
 
-    // Build DOM
-    container.innerHTML = '';
-    const wrapper = document.createElement('div');
-    wrapper.className = 'fallback-lyrics-wrapper';
-    wrapper.style.cssText = `
-        font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
-        padding: 8vh 1.5rem 88vh;
-        overflow-y: auto;
-        height: 100%;
-        scrollbar-width: none;
-        -ms-overflow-style: none;
-    `;
+    let swipeStartY = 0;
+    let swipeStartScrollTop = 0;
+    scrollEl.addEventListener('touchstart', (e) => {
+        swipeStartY = e.touches[0].clientY;
+        swipeStartScrollTop = scrollEl.scrollTop;
+    }, { passive: true });
+    scrollEl.addEventListener('touchend', (e) => {
+        if (swipeStartScrollTop > 30) return;
+        const deltaY = (e.changedTouches[0]?.clientY || 0) - swipeStartY;
+        if (deltaY > 100) sidePanelManager.close();
+    }, { passive: true });
 
-    const lineEls = parsed.map((line, idx) => {
-        const el = document.createElement('p');
-        el.className = 'fb-lyric-line';
-        el.textContent = line.text;
-        el.dataset.time = line.time;
-        el.dataset.idx = idx;
-        el.style.cssText = `
-            font-size: 1.9rem;
-            line-height: 1.55;
-            font-weight: 700;
-            letter-spacing: -0.015em;
-            padding: 0.35rem 0;
-            margin: 0;
-            color: rgba(255,255,255,0.35);
-            opacity: 0.28;
-            cursor: pointer;
-            transform: scale(0.975);
-            transform-origin: left center;
-            filter: blur(0.4px);
-            transition: opacity 0.55s cubic-bezier(0.25,0.1,0.25,1), transform 0.55s cubic-bezier(0.25,0.1,0.25,1), color 0.55s ease, text-shadow 0.6s ease, filter 0.55s ease;
-            -webkit-user-select: none;
-            user-select: none;
-            will-change: opacity, transform, filter;
-        `;
-        el.addEventListener('click', () => {
-            audioPlayer.currentTime = line.time;
-            audioPlayer.play();
-        });
-        wrapper.appendChild(el);
-        return el;
-    });
+    const getTimingOffset = () => lyricsManager?.timingOffset || 0;
 
-    container.appendChild(wrapper);
+    const scrollToActive = (instant) => {
+        if (activeLineIdx >= 0 && activeLineIdx < lineEls.length && !isUserScrolling) {
+            const lineTop = lineEls[activeLineIdx].offsetTop;
+            const offset = window.innerHeight * 0.30;
+            scrollEl.scrollTo({
+                top: lineTop - offset,
+                behavior: instant ? 'instant' : 'smooth'
+            });
+        }
+    };
 
-    // --- Karaoke sync loop ---
-    let activeIdx = -1;
-    let animId = null;
+    const LYRICS_LEAD_SEC = 0.3;
 
-    const updateActive = () => {
-        const t = audioPlayer.currentTime;
+    const update = () => {
+        const t = audioPlayer.currentTime - getTimingOffset() / 1000 + LYRICS_LEAD_SEC;
+        if (Number.isNaN(t)) return;
+
         let newIdx = -1;
         for (let i = 0; i < parsed.length; i++) {
             if (t >= parsed[i].time) newIdx = i;
             else break;
         }
-        if (newIdx !== activeIdx) {
-            // Dim old line back — Apple Music style
-            if (activeIdx >= 0 && activeIdx < lineEls.length) {
-                const old = lineEls[activeIdx];
-                old.style.opacity = '0.28';
-                old.style.fontWeight = '700';
-                old.style.color = 'rgba(255,255,255,0.35)';
-                old.style.textShadow = 'none';
-                old.style.transform = 'scale(0.975)';
-                old.style.filter = 'blur(0.4px)';
+
+        if (newIdx !== activeLineIdx) {
+            if (activeLineIdx >= 0 && activeLineIdx < lineEls.length) {
+                lineEls[activeLineIdx].classList.remove('tl-active');
+                lineEls[activeLineIdx].classList.add('tl-past');
+                resetWordSpans(lineEls[activeLineIdx], true);
             }
-            activeIdx = newIdx;
-            // Highlight new line — bright white with glow
-            if (activeIdx >= 0 && activeIdx < lineEls.length) {
-                const el = lineEls[activeIdx];
-                el.style.opacity = '1';
-                el.style.fontWeight = '800';
-                el.style.color = '#ffffff';
-                el.style.textShadow = '0 0 20px rgba(255,255,255,0.2), 0 0 50px rgba(255,255,255,0.07)';
-                el.style.transform = 'scale(1)';
-                el.style.filter = 'none';
-                // Scroll to 8% from top
-                const sc = wrapper;
-                if (sc && sc.scrollTo) {
-                    const cRect = sc.getBoundingClientRect();
-                    const lRect = el.getBoundingClientRect();
-                    const relTop = lRect.top - cRect.top + sc.scrollTop;
-                    const tgt = relTop - (sc.clientHeight * 0.08);
-                    sc.scrollTo({ top: Math.max(0, tgt), behavior: 'smooth' });
-                } else {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            }
-        }
-        animId = requestAnimationFrame(updateActive);
-    };
-
-    // Start loop
-    animId = requestAnimationFrame(updateActive);
-
-    const cleanup = () => {
-        if (animId) cancelAnimationFrame(animId);
-    };
-
-    container.lyricsCleanup = cleanup;
-    container.lyricsManager = lyricsManager;
-    return wrapper;
-}
-
-function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
-    let baseTimeMs = 0;
-    let lastTimestamp = performance.now();
-    let animationFrameId = null;
-
-    // Get timing offset from lyrics manager (in milliseconds)
-    const getTimingOffset = () => {
-        return lyricsManager?.timingOffset || 0;
-    };
-
-    const updateTime = () => {
-        const currentMs = audioPlayer.currentTime * 1000;
-        baseTimeMs = currentMs;
-        lastTimestamp = performance.now();
-        // Apply timing offset: positive offset delays lyrics, negative advances them
-        amLyrics.currentTime = currentMs - getTimingOffset();
-    };
-
-    const tick = () => {
-        if (!audioPlayer.paused) {
-            const now = performance.now();
-            const elapsed = now - lastTimestamp;
-            const nextMs = baseTimeMs + elapsed;
-            // Apply timing offset: positive offset delays lyrics, negative advances them
-            amLyrics.currentTime = nextMs - getTimingOffset();
-            animationFrameId = requestAnimationFrame(tick);
-        }
-    };
-
-    const onPlay = () => {
-        baseTimeMs = audioPlayer.currentTime * 1000;
-        lastTimestamp = performance.now();
-        tick();
-    };
-
-    const onPause = () => {
-        if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-            animationFrameId = null;
-        }
-    };
-
-    const onLineClick = (e) => {
-        if (e.detail && e.detail.timestamp !== undefined) {
-            const manager = lyricsManager || sidePanelManager.panel.lyricsManager;
-            if (manager && manager.isGeniusMode) {
-                const timestampSeconds = e.detail.timestamp / 1000;
-
-                const lyricsData = manager.lyricsCache.get(track.id);
-                if (lyricsData && lyricsData.subtitles) {
-                    const parsed = manager.parseSyncedLyrics(lyricsData.subtitles);
-
-                    const line = parsed.find((l) => Math.abs(l.time - timestampSeconds) < 1.0);
-
-                    if (line && line.text && manager.currentGeniusData) {
-                        const annotations = manager.geniusManager.findAnnotations(
-                            line.text,
-                            manager.currentGeniusData.referents
-                        );
-                        showGeniusAnnotations(annotations, line.text);
-                    }
-                }
-                return;
+            for (let i = Math.max(0, activeLineIdx + 1); i < newIdx; i++) {
+                lineEls[i].classList.remove('tl-active');
+                lineEls[i].classList.add('tl-past');
             }
 
-            audioPlayer.currentTime = e.detail.timestamp / 1000;
-            audioPlayer.play();
+            activeLineIdx = newIdx;
+
+            if (activeLineIdx >= 0 && activeLineIdx < lineEls.length) {
+                lineEls[activeLineIdx].classList.remove('tl-past');
+                lineEls[activeLineIdx].classList.add('tl-active');
+
+                if (canScroll) scrollToActive(false);
+            }
+        }
+
+    };
+
+    const startInterval = () => { if (!intervalId) intervalId = setInterval(update, 100); };
+    const stopInterval = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+
+    const onPlay = () => startInterval();
+    const onPlaying = () => startInterval();
+    const onPause = () => stopInterval();
+    const onSeeked = () => {
+        activeLineIdx = -1;
+        for (const el of lineEls) {
+            el.classList.remove('tl-active', 'tl-past');
+            resetWordSpans(el, false);
+        }
+        if (!audioPlayer.paused) startInterval();
+        update();
+    };
+    const onTimeUpdate = () => {
+        if (!intervalId && !audioPlayer.paused) {
+            startInterval();
+            audioPlayer.removeEventListener('timeupdate', onTimeUpdate);
         }
     };
 
-    audioPlayer.addEventListener('timeupdate', updateTime);
     audioPlayer.addEventListener('play', onPlay);
+    audioPlayer.addEventListener('playing', onPlaying);
     audioPlayer.addEventListener('pause', onPause);
-    audioPlayer.addEventListener('seeked', updateTime);
-    amLyrics.addEventListener('line-click', onLineClick);
+    audioPlayer.addEventListener('seeked', onSeeked);
+    audioPlayer.addEventListener('timeupdate', onTimeUpdate);
 
-    if (!audioPlayer.paused) {
-        tick();
-    }
+    if (!audioPlayer.paused && !intervalId) startInterval();
+
+    scrollEl.scrollTop = 0;
+    update();
+
+    initialScrollTimer = setTimeout(() => {
+        scrollEl.scrollTop = 0;
+        update();
+        canScroll = true;
+        scrollToActive(true);
+    }, 400);
 
     return () => {
-        if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-        }
-        audioPlayer.removeEventListener('timeupdate', updateTime);
+        canScroll = false;
+        clearTimeout(initialScrollTimer);
+        stopInterval();
+        clearTimeout(userScrollTimer);
         audioPlayer.removeEventListener('play', onPlay);
+        audioPlayer.removeEventListener('playing', onPlaying);
         audioPlayer.removeEventListener('pause', onPause);
-        audioPlayer.removeEventListener('seeked', updateTime);
-        amLyrics.removeEventListener('line-click', onLineClick);
+        audioPlayer.removeEventListener('seeked', onSeeked);
+        audioPlayer.removeEventListener('timeupdate', onTimeUpdate);
     };
 }
 
-function showGeniusAnnotations(annotations, lineText) {
-    const existing = document.querySelector('.genius-annotation-modal');
-    if (existing) existing.remove();
-
-    const modal = document.createElement('div');
-    modal.className = 'genius-annotation-modal';
-
-    let contentHtml = `
-        <div class="genius-modal-content">
-            <div class="genius-header">
-                <span class="genius-line">"${lineText}"</span>
-                <button class="close-genius">×</button>
-            </div>
-            <div class="genius-body">
-    `;
-
-    if (annotations.length === 0) {
-        contentHtml += `
-            <div class="annotation-item">
-                <div class="annotation-text" style="color: var(--muted-foreground); font-style: italic;">No Genius annotation found for this line.</div>
-            </div>
-        `;
-    } else {
-        annotations.forEach((ann) => {
-            const body = ann.annotations[0].body.plain;
-            contentHtml += `
-                <div class="annotation-item">
-                    <div class="annotation-text">${body.replace(/\n/g, '<br>')}</div>
-                </div>
-            `;
-        });
-    }
-
-    contentHtml += `</div></div>`;
-    modal.innerHTML = contentHtml;
-
-    document.body.appendChild(modal);
-
-    modal.querySelector('.close-genius').addEventListener('click', () => modal.remove());
-
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.remove();
-    });
+function resetWordSpans(lineEl, markPast) {
+    const spans = lineEl.querySelectorAll('.tl-word');
+    for (const s of spans) s.className = 'tl-word';
 }
 
+/* ================================================================
+   EXPORTS
+   ================================================================ */
+
 export async function renderLyricsInFullscreen(track, audioPlayer, lyricsManager, container) {
-    return renderLyricsComponent(container, track, audioPlayer, lyricsManager);
+    return renderCustomLyrics(container, track, audioPlayer, lyricsManager);
 }
 
 export function clearFullscreenLyricsSync(container) {
@@ -1697,17 +639,11 @@ export function clearFullscreenLyricsSync(container) {
         container.lyricsCleanup();
         container.lyricsCleanup = null;
     }
-    if (container && container.lyricsManager) {
-        container.lyricsManager.stopLyricsObserver();
-    }
 }
 
 export function clearLyricsPanelSync(audioPlayer, panel) {
     if (panel && panel.lyricsCleanup) {
         panel.lyricsCleanup();
         panel.lyricsCleanup = null;
-    }
-    if (panel && panel.lyricsManager) {
-        panel.lyricsManager.stopLyricsObserver();
     }
 }

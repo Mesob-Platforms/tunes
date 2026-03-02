@@ -7,13 +7,16 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const ADMIN_EMAIL = 'naolmideksa@gmail.com';
 
 /**
- * Google OAuth Web Client ID — required for native Google One Tap sign-in.
- * Get this from Google Cloud Console → APIs & Credentials → OAuth 2.0 Client IDs
- * (the **Web application** type, NOT Android). It's the same client ID configured in
- * Supabase → Authentication → Providers → Google.
- * Leave empty to fall back to the standard Supabase OAuth redirect flow.
+ * Google OAuth Web Client ID — used for web and in Supabase → Authentication → Google.
+ * Same as configured in Supabase → Authentication → Providers → Google.
  */
-const GOOGLE_WEB_CLIENT_ID = '917537000667-ddotjubit837hn0bnginptc1ihrnqaql.apps.googleusercontent.com';
+const GOOGLE_WEB_CLIENT_ID = '917537000667-rnr049dt6m0qp1mehsdagctj0s31e137.apps.googleusercontent.com';
+
+/**
+ * Google OAuth Android Client ID — required for native "Continue with Google" on Android.
+ * From Google Cloud Console → Credentials → Android OAuth client (package com.mesob.tunes + your SHA-1).
+ */
+const GOOGLE_ANDROID_CLIENT_ID = '917537000667-uji450r9mdj0a9vkjh7m8h66q519cht3.apps.googleusercontent.com';
 
 let supabase = null;
 
@@ -28,4 +31,4 @@ export function isAdminEmail(email) {
     return email && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
-export { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_EMAIL, GOOGLE_WEB_CLIENT_ID };
+export { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_EMAIL, GOOGLE_WEB_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID };

@@ -3,16 +3,17 @@ import { LosslessAPI } from './api.js';
 import { apiSettings, themeManager, downloadQualitySettings, sidebarSettings } from './storage.js';
 import { UIRenderer } from './ui.js';
 import { Player } from './player.js';
-import { MultiScrobbler } from './multi-scrobbler.js';
 import { LyricsManager, openLyricsPanel, clearLyricsPanelSync } from './lyrics.js';
 import { createRouter, updateTabTitle, navigate } from './router.js';
 import { initializePlayerEvents, initializeTrackInteractions, handleTrackAction } from './events.js';
 import { initializeUIInteractions } from './ui-interactions.js';
-import { debounce, SVG_PLAY } from './utils.js';
+import { debounce, SVG_PLAY, showConfirmDialog, copyToClipboard, openExternalUrl } from './utils.js';
+import { showNotification } from './downloads.js';
 import { sidePanelManager } from './side-panel.js';
 import { db } from './db.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { authManager } from './accounts/auth.js';
+import { supabase } from './accounts/config.js';
 import { getAvatarUrl } from './accounts/profile.js';
 import { registerSW } from './pwa-stub.js';
 import { apiUrl } from './platform.js';
@@ -20,10 +21,10 @@ import { initMediaBridge } from './mediaBridge.js';
 import { isNative } from './platform.js';
 import { initNetworkMonitor, onNetworkChange, checkAndClearStaleCache } from './networkMonitor.js';
 import './smooth-scrolling.js';
+
 // Lazy-loaded modules
 let settingsModule = null;
 let downloadsModule = null;
-let trackerModule = null;
 let metadataModule = null;
 
 async function loadSettingsModule() {
@@ -38,13 +39,6 @@ async function loadDownloadsModule() {
         downloadsModule = await import('./downloads.js');
     }
     return downloadsModule;
-}
-
-async function loadTrackerModule() {
-    if (!trackerModule) {
-        trackerModule = await import('./tracker.js');
-    }
-    return trackerModule;
 }
 
 async function loadMetadataModule() {
@@ -74,13 +68,13 @@ function initializeCasting(audioPlayer, castBtn) {
 
         castBtn.addEventListener('click', () => {
             if (!audioPlayer.src) {
-                alert('Please play a track first to enable casting.');
+                showNotification('Please play a track first to enable casting.');
                 return;
             }
             audioPlayer.remote.prompt().catch((err) => {
                 if (err.name === 'NotAllowedError') return;
                 if (err.name === 'NotFoundError') {
-                    alert('No remote playback devices (Chromecast/AirPlay) were found on your network.');
+                    showNotification('No remote playback devices found on your network.');
                     return;
                 }
                 console.log('Cast prompt error:', err);
@@ -122,7 +116,7 @@ function initializeCasting(audioPlayer, castBtn) {
     } else if (window.innerWidth > 768) {
         castBtn.style.display = 'flex';
         castBtn.addEventListener('click', () => {
-            alert('Casting is not supported in this browser. Try Chrome for Chromecast or Safari for AirPlay.');
+            showNotification('Casting is not supported in this browser.');
         });
     }
 }
@@ -186,8 +180,30 @@ function initializeKeyboardShortcuts(player, audioPlayer) {
     });
 }
 
+window.addEventListener('error', (e) => {
+    if (e.message?.includes('ResizeObserver') || e.message?.includes('Script error')) return;
+    console.error('Unhandled error:', e.error || e.message);
+});
+window.addEventListener('unhandledrejection', (e) => {
+    console.error('Unhandled promise rejection:', e.reason);
+    const msg = e.reason?.message || '';
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed to fetch')) {
+        showNotification('Network error — check your connection.');
+    }
+});
+
+window.addEventListener('online', () => {
+    document.body.classList.remove('app-offline');
+    showNotification('Back online');
+});
+window.addEventListener('offline', () => {
+    document.body.classList.add('app-offline');
+    showNotification('You\'re offline — playing downloaded music only');
+});
+
 document.addEventListener('DOMContentLoaded', async () => {
-    // ── Version-based cache clear (must run before other init) ──
+    if (!navigator.onLine) document.body.classList.add('app-offline');
+
     await checkAndClearStaleCache();
 
     // ── Unified network monitoring (Capacitor Network on native, browser events on web) ──
@@ -208,7 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const player = new Player(audioPlayer, api, 'LOW');
 
     const ui = new UIRenderer(api, player);
-    const scrobbler = new MultiScrobbler();
+    const scrobbler = { isAuthenticated: () => false, updateNowPlaying: () => {}, scrobble: () => {}, loveTrack: () => {} };
     const lyricsManager = new LyricsManager(api);
 
     // Expose refs for cross-module access (e.g. admin panel auth)
@@ -216,6 +232,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize native media bridge (Android foreground service + notification)
     initMediaBridge(player, audioPlayer, api);
+
+    // Native: global deep link handler for OAuth cold-start
+    if (isNative) {
+        import('@capacitor/app').then(({ App }) => {
+            App.addListener('appUrlOpen', async ({ url }) => {
+                if (!url.includes('auth-callback')) return;
+                try { const { Browser } = await import('@capacitor/browser'); await Browser.close(); } catch (_) {}
+                const hashParams = new URLSearchParams(url.split('#')[1] || '');
+                const queryParams = new URLSearchParams(url.split('?')[1]?.split('#')[0] || '');
+                const accessToken = hashParams.get('access_token');
+                const refreshToken = hashParams.get('refresh_token');
+                const code = queryParams.get('code');
+                if (accessToken && refreshToken) {
+                    await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+                } else if (code) {
+                    await supabase.auth.exchangeCodeForSession(code);
+                }
+            });
+        });
+    }
 
     // Native Android hardware back button handler
     if (isNative) {
@@ -430,12 +466,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Defer non-critical modules - load in background after router runs
     const deferredInit = async () => {
         try {
-            const [settingsMod, trackerMod] = await Promise.all([
-                loadSettingsModule(),
-                loadTrackerModule(),
-            ]);
-            settingsMod.initializeSettings(scrobbler, player, api, ui);
-            trackerMod.initTracker(player);
+            const settingsMod = await loadSettingsModule();
+            if (settingsMod) settingsMod.initializeSettings(scrobbler, player, api, ui);
         } catch (e) {
             console.error('Deferred module init error:', e);
         }
@@ -463,7 +495,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             newCover.addEventListener('click', async (e) => {
                 e.stopPropagation(); // Prevent footer click from interfering
                 if (!player.currentTrack) {
-                    alert('No track is currently playing');
+                    showNotification('No track is currently playing');
                     return;
                 }
 
@@ -487,6 +519,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up immediately and also after a short delay in case element isn't ready
     setupCoverClick();
     setTimeout(setupCoverClick, 500);
+
+    // Swipe gestures on now-playing bar: up = fullscreen, left = next, right = prev
+    (function setupNowPlayingSwipes() {
+        const bar = document.querySelector('.now-playing-bar');
+        if (!bar) return;
+        let startX = 0, startY = 0;
+        const MIN_SWIPE = 45;
+        const AXIS_RATIO = 0.6; // horizontal swipe must be more horizontal than vertical
+
+        bar.addEventListener('touchstart', (e) => {
+            if (e.target.closest('button, a, input, [role="slider"]')) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }, { passive: true });
+
+        bar.addEventListener('touchend', (e) => {
+            if (e.target.closest('button, a, input, [role="slider"]')) return;
+            if (startX === 0 && startY === 0) return;
+            const endX = e.changedTouches[0].clientX;
+            const endY = e.changedTouches[0].clientY;
+            const dx = endX - startX;
+            const dy = endY - startY;
+            startX = 0;
+            startY = 0;
+
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
+            if (absDy > absDx) {
+                if (dy < -MIN_SWIPE && !player.currentTrack) return;
+                if (dy < -MIN_SWIPE) {
+                    const overlay = document.getElementById('fullscreen-cover-overlay');
+                    if (overlay && overlay.style.display !== 'flex') {
+                        const nextTrack = player.getNextTrack();
+                        ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+                    }
+                    return;
+                }
+            } else {
+                if (absDx < MIN_SWIPE) return;
+                if (dx < 0) {
+                    player.playNext();
+                } else {
+                    player.playPrev();
+                }
+            }
+        }, { passive: true });
+    })();
 
     // All playlists are public – share button always available when editing
 
@@ -564,15 +643,62 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }, { passive: true });
 
-            mainContent.addEventListener('touchend', () => {
+            mainContent.addEventListener('touchend', async () => {
                 if (!pulling) { startY = 0; return; }
                 const indicator = ptrIndicator;
                 if (indicator.classList.contains('threshold')) {
-                    // Trigger a real full page reload (like Ctrl+R)
                     indicator.classList.add('refreshing');
                     indicator.style.height = '40px';
-                    window.location.reload();
-                    return; // page will reload
+                    try {
+                        const path = window.location.pathname;
+                        if (path === '/' || path === '/home') {
+                            if (window.__tunesRefs?.ui) {
+                                window.__tunesRefs.ui._pageHtmlCache?.delete('home');
+                                window.__tunesRefs.ui._invalidateHomeDataCache?.();
+                                try { const { db } = await import('./db.js'); await db.open(); await db.performTransaction('home_cache', 'readwrite', (s) => s.clear()); } catch {}
+                                await window.__tunesRefs.ui.renderHomePage();
+                            }
+                        } else if (path.startsWith('/search/') || path === '/search' || path === '/explore') {
+                            if (window.__tunesRefs?.ui) {
+                                const q = path.startsWith('/search/') ? decodeURIComponent(path.replace('/search/', '')) : '';
+                                await window.__tunesRefs.ui.renderSearchPage(q);
+                            }
+                        } else if (path === '/library') {
+                            if (window.__tunesRefs?.ui) {
+                                await window.__tunesRefs.ui.renderLibraryPage();
+                            }
+                        } else if (path === '/account') {
+                            if (window.__tunesRefs?.ui) {
+                                await window.__tunesRefs.ui.renderAccountPage();
+                            }
+                        } else if (path.startsWith('/album/')) {
+                            if (window.__tunesRefs?.ui) {
+                                const id = path.replace('/album/', '');
+                                await window.__tunesRefs.ui.renderAlbumPage(id);
+                            }
+                        } else if (path.startsWith('/artist/')) {
+                            if (window.__tunesRefs?.ui) {
+                                const id = path.replace('/artist/', '');
+                                await window.__tunesRefs.ui.renderArtistPage(id);
+                            }
+                        } else if (path.startsWith('/playlist/')) {
+                            if (window.__tunesRefs?.ui) {
+                                const id = path.replace('/playlist/', '');
+                                await window.__tunesRefs.ui.renderPlaylistPage(id);
+                            }
+                        } else if (path.startsWith('/mix/')) {
+                            if (window.__tunesRefs?.ui) {
+                                const id = path.replace('/mix/', '');
+                                await window.__tunesRefs.ui.renderMixPage(id);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[PullRefresh] soft refresh failed:', e);
+                    }
+                    setTimeout(() => {
+                        indicator.classList.remove('pulling', 'threshold', 'refreshing');
+                        indicator.style.height = '0';
+                    }, 400);
                 } else {
                     indicator.classList.remove('pulling', 'threshold');
                     indicator.style.height = '0';
@@ -586,7 +712,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('toggle-lyrics-btn')?.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!player.currentTrack) {
-            alert('No track is currently playing');
+            showNotification('No track is currently playing');
             return;
         }
 
@@ -814,8 +940,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (navigator.share) {
                 await navigator.share(shareData);
             } else {
-                await navigator.clipboard.writeText(shareData.url);
-                alert('Link copied to clipboard!');
+                const ok = await copyToClipboard(shareData.url);
+                showNotification(ok ? 'Link copied to clipboard!' : 'Could not copy link');
             }
         } catch (_) {}
     });
@@ -944,7 +1070,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await downloadPlaylistAsZip(mix, tracks, api, downloadQualitySettings.getQuality(), lyricsManager);
             } catch (error) {
                 console.error('Mix download failed:', error);
-                alert('Failed to download mix: ' + error.message);
+                showNotification('Failed to download mix: ' + error.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -988,7 +1114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await downloadPlaylistAsZip(playlist, tracks, api, downloadQualitySettings.getQuality(), lyricsManager);
             } catch (error) {
                 console.error('Playlist download failed:', error);
-                alert('Failed to download playlist: ' + error.message);
+                showNotification('Failed to download playlist: ' + error.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -1035,7 +1161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (e.target.closest('#delete-folder-btn')) {
             const folderId = window.location.pathname.split('/')[2];
-            if (folderId && confirm('Are you sure you want to delete this folder?')) {
+            if (folderId && await showConfirmDialog('Delete folder?', 'This cannot be undone.')) {
                 await db.deleteFolder(folderId);
                 navigate('/library');
             }
@@ -1120,7 +1246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             const missingTracks = result.missingTracks;
 
                             if (tracks.length === 0) {
-                                alert('No valid tracks found in the CSV file! Please check the format.');
+                                showNotification('No valid tracks found in the CSV file.');
                                 progressElement.style.display = 'none';
                                 return;
                             }
@@ -1134,7 +1260,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             }
                         } catch (error) {
                             console.error('Failed to parse CSV!', error);
-                            alert('Failed to parse CSV file! ' + error.message);
+                            showNotification('Failed to parse CSV file.');
                             progressElement.style.display = 'none';
                             return;
                         } finally {
@@ -1190,7 +1316,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         shareBtn.style.display = 'flex';
                         shareBtn.onclick = () => {
                             const url = `${window.location.origin}/userplaylist/${playlist.id}`;
-                            navigator.clipboard.writeText(url).then(() => alert('Link copied to clipboard!'));
+                            copyToClipboard(url).then(ok => showNotification(ok ? 'Link copied!' : 'Could not copy'));
                         };
                     }
 
@@ -1220,7 +1346,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         shareBtn.style.display = 'flex';
                         shareBtn.onclick = () => {
                             const url = `${window.location.origin}/userplaylist/${playlist.id}`;
-                            navigator.clipboard.writeText(url).then(() => alert('Link copied to clipboard!'));
+                            copyToClipboard(url).then(ok => showNotification(ok ? 'Link copied!' : 'Could not copy'));
                         };
                     }
 
@@ -1279,28 +1405,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     text: `Check out this playlist: ${playlistName}`,
                     url: url
                 }).catch((err) => {
-                    // User cancelled or error occurred - fallback to clipboard
                     if (err.name !== 'AbortError') {
-                        navigator.clipboard.writeText(url).then(() => {
-                            // Show toast notification
-                            const toast = document.createElement('div');
-                            toast.textContent = 'Link copied to clipboard!';
-                            toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--secondary);color:var(--foreground);padding:0.75rem 1.5rem;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:10000;font-size:0.9rem;';
-                            document.body.appendChild(toast);
-                            setTimeout(() => toast.remove(), 3000);
-                        });
+                        copyToClipboard(url).then(ok => showNotification(ok ? 'Link copied!' : 'Could not copy'));
                     }
                 });
             } else {
-                // Fallback to clipboard
-                navigator.clipboard.writeText(url).then(() => {
-                    // Show toast notification
-                    const toast = document.createElement('div');
-                    toast.textContent = 'Link copied to clipboard!';
-                    toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--secondary);color:var(--foreground);padding:0.75rem 1.5rem;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:10000;font-size:0.9rem;';
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.remove(), 3000);
-                });
+                copyToClipboard(url).then(ok => showNotification(ok ? 'Link copied!' : 'Could not copy'));
             }
         }
 
@@ -1366,7 +1476,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } catch (error) {
                 console.error('Failed to play playlist:', error);
-                alert('Failed to play playlist: ' + error.message);
+                showNotification('Failed to play playlist.');
             }
         }
 
@@ -1388,7 +1498,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await downloadAlbumAsZip(album, tracks, api, downloadQualitySettings.getQuality(), lyricsManager);
             } catch (error) {
                 console.error('Album download failed:', error);
-                alert('Failed to download album: ' + error.message);
+                showNotification('Failed to download album.');
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -1554,7 +1664,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } catch (error) {
                 console.error('Artist radio failed:', error);
-                alert('Failed to start artist radio: ' + error.message);
+                showNotification('Failed to start artist radio.');
             } finally {
                 if (document.body.contains(btn)) {
                     btn.disabled = false;
@@ -1596,14 +1706,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 const likedTracks = await db.getFavorites('track');
                 if (likedTracks.length === 0) {
-                    alert('No liked tracks to download.');
+                    showNotification('No liked tracks to download.');
                     return;
                 }
                 const { downloadLikedTracks } = await loadDownloadsModule();
                 await downloadLikedTracks(likedTracks, api, downloadQualitySettings.getQuality(), lyricsManager);
             } catch (error) {
                 console.error('Liked tracks download failed:', error);
-                alert('Failed to download liked tracks: ' + error.message);
+                showNotification('Failed to download liked tracks.');
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -1622,7 +1732,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showDiscographyDownloadModal(artist, api, downloadQualitySettings.getQuality(), lyricsManager, btn);
             } catch (error) {
                 console.error('Failed to load artist for discography download:', error);
-                alert('Failed to load artist: ' + error.message);
+                showNotification('Failed to load artist.');
             }
         }
 
@@ -1683,7 +1793,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (err) {
                 if (err.name !== 'AbortError') {
                     console.error('Error selecting folder:', err);
-                    alert('Failed to access folder. Please try again.');
+                    showNotification('Failed to access folder. Please try again.');
                 }
                 const btn = document.getElementById('select-local-folder-btn');
                 const btnText = document.getElementById('select-local-folder-text');
@@ -1702,30 +1812,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Setup clear button for search bar
     ui.setupSearchClearButton(searchInput);
 
-    // Live-typing search: update results without skeleton flash
     const performSearch = debounce((query) => {
-        if (query) {
-            // Silently update URL (replaceState avoids history spam while typing)
-            const newPath = `/search/${encodeURIComponent(query)}`;
-            if (newPath !== window.location.pathname) {
-                window.history.replaceState({}, '', newPath);
-            }
-            // Render directly — skip the navigate→router→showPage chain that causes skeleton flash
-            ui.renderSearchPage(query, true);
-        }
-    }, 500);
+        ui.addToSearchHistory(query);
+        navigate(`/search/${encodeURIComponent(query)}`);
+        const historyEl = document.getElementById('search-history');
+        if (historyEl) historyEl.style.display = 'none';
+    }, 750);
 
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value.trim();
-        if (query.length > 2) {
-            // Ensure we're on the search page (once), then let performSearch handle updates
-            const searchPageEl = document.getElementById('page-search');
-            if (searchPageEl && !searchPageEl.classList.contains('active')) {
-                ui.showPage('search');
-            }
-            performSearch(query);
-        } else if (query.length === 0) {
-            // When input is cleared, show explore landing
+        if (query.length === 0) {
             const exploreLanding = document.getElementById('explore-landing');
             const searchResultsTitle = document.getElementById('search-results-title');
             const searchTabs = document.querySelector('.search-tabs');
@@ -1735,13 +1831,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.querySelectorAll('.search-tab-content').forEach(el => { el.style.display = 'none'; el.classList.remove('active'); });
             const allContainer = document.getElementById('search-all-container');
             if (allContainer) allContainer.innerHTML = '';
-        }
-    });
-
-    searchInput.addEventListener('change', (e) => {
-        const query = e.target.value.trim();
-        if (query.length > 2) {
-            ui.addToSearchHistory(query);
+        } else if (query.length > 2) {
+            performSearch(query);
         }
     });
 
@@ -1791,14 +1882,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const handleRouteChange = async (event) => {
         const overlay = document.getElementById('fullscreen-cover-overlay');
-        // Remove fullscreen-open class when navigating away
-        if (window.location.hash !== '#fullscreen') {
-            document.body.classList.remove('fullscreen-open');
-        }
-        const isFullscreenOpen = overlay && getComputedStyle(overlay).display === 'flex';
+        const hash = window.location.hash;
+        const isFullscreenOpen = overlay && overlay.style.display !== 'none';
 
-        if (isFullscreenOpen && window.location.hash !== '#fullscreen') {
+        if (isFullscreenOpen && hash !== '#fullscreen' && hash !== '#lyrics') {
             ui.closeFullscreenCover();
+        } else if (!isFullscreenOpen && hash !== '#fullscreen') {
+            document.body.classList.remove('fullscreen-open');
         }
 
         if (event && event.state && event.state.exitTrap) {
@@ -1812,8 +1902,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        await router();
-        updateTabTitle(player);
+        document.body.classList.add('is-routing');
+        try {
+            await router();
+            updateTabTitle(player);
+        } catch (err) {
+            console.error('[Router] navigation failed:', err);
+        } finally {
+            requestAnimationFrame(() => document.body.classList.remove('is-routing'));
+        }
     };
 
     await handleRouteChange();
@@ -1921,6 +2018,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         observer.observe(contextMenu, { attributes: true });
     }
 
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            if (player._preloadTimeout) { clearTimeout(player._preloadTimeout); player._preloadTimeout = null; }
+        }
+    });
+
     // === Account Page Event Handlers ===
     const googleSignInBtn = document.getElementById('google-sign-in-btn');
     if (googleSignInBtn) {
@@ -1940,7 +2043,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await authManager.signInWithEmailPassword(email, password);
             } else {
                 await authManager.signInWithEmail(email);
-                alert('Check your email for a magic link to sign in.');
+                showNotification('Check your email for a magic link to sign in.');
             }
         });
     }
@@ -1951,11 +2054,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const email = document.getElementById('account-email-input')?.value?.trim();
             const password = document.getElementById('account-password-input')?.value;
             if (!email || !password) {
-                alert('Please enter both email and password to create an account.');
+                showNotification('Please enter both email and password.');
                 return;
             }
             await authManager.signUpWithEmailPassword(email, password);
-            alert('Account created! Check your email to confirm, then sign in.');
+            showNotification('Account created! Check your email to confirm.');
         });
     }
 
@@ -1964,7 +2067,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         forgotPasswordBtn.addEventListener('click', async () => {
             const email = document.getElementById('account-email-input')?.value?.trim();
             if (!email) {
-                alert('Please enter your email address first.');
+                showNotification('Please enter your email address first.');
                 return;
             }
             await authManager.sendPasswordReset(email);
@@ -1983,7 +2086,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const clearHistoryLibraryBtn = document.getElementById('clear-history-library-btn');
     if (clearHistoryLibraryBtn) {
         clearHistoryLibraryBtn.addEventListener('click', async () => {
-            if (confirm('Clear all recently played tracks? This cannot be undone.')) {
+            if (await showConfirmDialog('Clear history?', 'All recently played tracks will be removed.')) {
                 try {
                     await db.clearHistory();
                     const recentContainer = document.getElementById('library-recent-container');
@@ -1992,7 +2095,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                     } catch (err) {
                     console.error('Failed to clear history:', err);
-                    alert('Failed to clear history');
+                    showNotification('Failed to clear history.');
                 }
             }
         });
@@ -2007,13 +2110,30 @@ document.addEventListener('DOMContentLoaded', async () => {
    UPDATE NOTIFICATION BAR — gradient bar BELOW mobile tab bar
    ══════════════════════════════════════════════════════════════ */
 
+function _syncUpdateBarOffset(bar) {
+    if (!bar) return;
+    const root = document.documentElement;
+    const visible = document.body.classList.contains('has-update-bar') && bar.style.display !== 'none';
+    const height = visible ? Math.ceil(bar.getBoundingClientRect().height) : 0;
+    root.style.setProperty('--mobile-tab-offset', height > 0 ? `${height}px` : '0px');
+    if (height > 0) {
+        root.style.setProperty('--update-bar-height', `${height}px`);
+    } else {
+        root.style.removeProperty('--update-bar-height');
+    }
+}
+
 async function _initUpdateNotificationBar() {
     const bar = document.getElementById('update-notification-bar');
     if (!bar) return;
     try {
-        const res = await fetch(apiUrl('/api/updates/check'));
-        const updates = await res.json();
-        if (!Array.isArray(updates) || updates.length === 0) { bar.style.display = 'none'; return; }
+        const { data: updates } = await supabase.rpc('get_active_updates');
+        if (!Array.isArray(updates) || updates.length === 0) {
+            bar.style.display = 'none';
+            document.body.classList.remove('has-update-bar');
+            _syncUpdateBarOffset(bar);
+            return;
+        }
 
         _injectUpdateBarStyles();
         const latest = updates[0];
@@ -2041,19 +2161,29 @@ async function _initUpdateNotificationBar() {
             const link = bar.getAttribute('data-update-link');
             const uid = bar.getAttribute('data-update-id');
             _trackEvent('update', uid, 'click');
-            if (link) window.open(link, '_blank', 'noopener');
+            if (link) openExternalUrl(link);
         });
 
         // Fade-in + push tab bar up + track impression
         requestAnimationFrame(() => {
             bar.classList.add('tunes-update-visible');
             document.body.classList.add('has-update-bar');
+            _syncUpdateBarOffset(bar);
+            const recalc = () => _syncUpdateBarOffset(bar);
+            window.addEventListener('resize', recalc, { passive: true });
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', recalc, { passive: true });
+            }
             _trackEvent('update', latest.id, 'impression');
         });
 
     } catch (e) {
         console.warn('[Updates] Could not check for updates:', e);
-        if (bar) bar.style.display = 'none';
+        if (bar) {
+            bar.style.display = 'none';
+            document.body.classList.remove('has-update-bar');
+            _syncUpdateBarOffset(bar);
+        }
     }
 }
 
@@ -2204,8 +2334,23 @@ const _annDataMap = new Map();
 
 async function _initAnnouncementBanners() {
     try {
-        const res = await fetch(apiUrl('/api/announcements/active'));
-        const announcements = await res.json();
+        _setAnnouncementSlot('home-announcement-banner', '');
+        _setAnnouncementSlot('explore-announcement-banner', '');
+        _setAnnouncementSlot('sidebar-announcement-banner', '');
+
+        let announcements = [];
+        try {
+            const resp = await fetch(apiUrl('/api/announcements/active'));
+            if (resp.ok) announcements = await resp.json();
+        } catch (_) { /* worker failed, try Supabase RPC */ }
+
+        if (!Array.isArray(announcements) || announcements.length === 0) {
+            try {
+                const { data } = await supabase.rpc('get_active_announcements');
+                if (Array.isArray(data)) announcements = data;
+            } catch (_) { /* RPC also failed */ }
+        }
+
         if (!Array.isArray(announcements) || announcements.length === 0) return;
 
         // Store data for modal access
@@ -2904,94 +3049,18 @@ async function _trackEvent(itemType, itemId, eventType) {
         return;
     }
 
-    // Try direct send if online
     try {
-        const res = await fetch(apiUrl('/api/track-event'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                item_type: itemType,
-                item_id: Number(itemId),
-                user_id: user.uid,
-                event_type: eventType
-            })
-        });
-        if (!res.ok) {
-            // If send fails, queue for retry
-            await offlineSync.queueTrackEvent(itemType, itemId, eventType);
-        }
+        const { error } = await supabase.from('admin_tracking').upsert(
+            { item_type: itemType, item_id: Number(itemId), user_id: user.uid, event_type: eventType },
+            { onConflict: 'item_type,item_id,user_id,event_type', ignoreDuplicates: true }
+        );
+        if (error) await offlineSync.queueTrackEvent(itemType, itemId, eventType);
     } catch (e) {
-        // Network error — queue for offline sync
         await offlineSync.queueTrackEvent(itemType, itemId, eventType);
     }
 }
 
-// === Pull-to-Refresh on Homepage ===
-(function initPullToRefresh() {
-    const mainContent = document.querySelector('.main-content');
-    if (!mainContent) return;
-
-    let startY = 0;
-    let pulling = false;
-    let pullIndicator = null;
-
-    function createPullIndicator() {
-        if (pullIndicator) return pullIndicator;
-        pullIndicator = document.createElement('div');
-        pullIndicator.id = 'pull-to-refresh-indicator';
-        pullIndicator.style.cssText = 'position:absolute;top:0;left:0;right:0;height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;transition:height 0.2s;z-index:50;pointer-events:none;';
-        pullIndicator.innerHTML = '<div style="display:flex;align-items:center;gap:0.5rem;opacity:0.5;font-size:0.8rem;font-family:DM Sans,sans-serif;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ptr-arrow" style="transition:transform 0.2s;"><polyline points="7 13 12 18 17 13"/><line x1="12" y1="18" x2="12" y2="6"/></svg> Pull to refresh</div>';
-        mainContent.style.position = 'relative';
-        mainContent.insertBefore(pullIndicator, mainContent.firstChild);
-        return pullIndicator;
-    }
-
-    mainContent.addEventListener('touchstart', (e) => {
-        if (mainContent.scrollTop <= 0 && window.location.pathname === '/' || window.location.pathname === '/home') {
-            startY = e.touches[0].clientY;
-            pulling = true;
-        }
-    }, { passive: true });
-
-    mainContent.addEventListener('touchmove', (e) => {
-        if (!pulling) return;
-        const dy = e.touches[0].clientY - startY;
-        if (dy > 0 && mainContent.scrollTop <= 0) {
-            const indicator = createPullIndicator();
-            const h = Math.min(dy * 0.5, 80);
-            indicator.style.height = h + 'px';
-            const arrow = indicator.querySelector('.ptr-arrow');
-            if (arrow) arrow.style.transform = h >= 60 ? 'rotate(180deg)' : '';
-            if (h >= 60) {
-                indicator.querySelector('div').lastChild.textContent = ' Release to refresh';
-            } else {
-                indicator.querySelector('div').lastChild.textContent = ' Pull to refresh';
-            }
-        }
-    }, { passive: true });
-
-    mainContent.addEventListener('touchend', () => {
-        if (!pulling) return;
-        pulling = false;
-        const indicator = pullIndicator;
-        if (indicator) {
-            const h = parseInt(indicator.style.height);
-            if (h >= 60) {
-                indicator.innerHTML = '<div style="display:flex;align-items:center;gap:0.5rem;opacity:0.5;font-size:0.8rem;font-family:DM Sans,sans-serif;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite;"><path d="M21 12a9 9 0 11-6.22-8.57"/></svg> Refreshing...</div>';
-                // Real full page reload (like Ctrl+R)
-                window.location.reload();
-                return;
-            } else {
-                indicator.style.height = '0px';
-            }
-        }
-    }, { passive: true });
-
-    // Add spin animation
-    const style = document.createElement('style');
-    style.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
-    document.head.appendChild(style);
-})();
+// Duplicate pull-to-refresh removed — handled in the main init block above
 
 function showUpdateNotification(updateCallback) {
     const notification = document.createElement('div');
@@ -3370,7 +3439,7 @@ function showDiscographyDownloadModal(artist, api, quality, lyricsManager, trigg
         const includeSingles = document.getElementById('download-singles').checked;
 
         if (!includeAlbums && !includeEPs && !includeSingles) {
-            alert('Please select at least one type of release to download.');
+            showNotification('Please select at least one release type.');
             return;
         }
 
@@ -3398,7 +3467,7 @@ function showDiscographyDownloadModal(artist, api, quality, lyricsManager, trigg
             await downloadDiscography(artist, selectedReleases, api, quality, lyricsManager);
         } catch (error) {
             console.error('Discography download failed:', error);
-            alert('Failed to download discography: ' + error.message);
+            showNotification('Failed to download discography.');
         } finally {
             triggerBtn.disabled = false;
             triggerBtn.innerHTML = originalHTML;

@@ -9,17 +9,16 @@ import {
     formatTime,
     SVG_BIN,
     getTrackArtists,
+    copyToClipboard,
+    openExternalUrl,
 } from './utils.js';
-import { lastFMStorage, libreFmSettings, waveformSettings, crossfadeSettings } from './storage.js';
+import { crossfadeSettings } from './storage.js';
 import { showNotification, downloadTrackWithMetadata, downloadAlbumAsZip, downloadPlaylistAsZip } from './downloads.js';
 import { downloadQualitySettings } from './storage.js';
 import { updateTabTitle, navigate } from './router.js';
 import { db } from './db.js';
 import { syncManager } from './accounts/supabaseSync.js';
-import { waveformGenerator } from './waveform.js';
 import { audioContextManager } from './audio-context.js';
-
-let currentTrackIdForWaveform = null;
 
 export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     const playPauseBtn = document.querySelector('.now-playing-bar .play-pause-btn');
@@ -27,14 +26,17 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     const prevBtn = document.getElementById('prev-btn');
     const shuffleBtn = document.getElementById('shuffle-btn');
     const repeatBtn = document.getElementById('repeat-btn');
-    const sleepTimerBtnDesktop = document.getElementById('sleep-timer-btn-desktop');
-    const sleepTimerBtnMobile = document.getElementById('sleep-timer-btn');
 
     // History tracking
     let historyLoggedTrackId = null;
 
     audioPlayer.addEventListener('loadstart', () => {
         historyLoggedTrackId = null;
+    });
+
+    window.addEventListener('playback-gave-up', (e) => {
+        const trackTitle = e.detail?.trackTitle || 'Track';
+        showNotification(`Couldn't play "${trackTitle}", skipping…`);
     });
 
     // Sync UI with player state on load
@@ -69,12 +71,6 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
                 scrobbler.updateNowPlaying(player.currentTrack);
             }
 
-            // Resume AudioContext for waveform on mobile (iOS)
-            if (waveformGenerator.audioContext.state === 'suspended') {
-                waveformGenerator.audioContext.resume();
-            }
-
-            updateWaveform();
         }
 
         playPauseBtn.innerHTML = SVG_PAUSE;
@@ -104,46 +100,39 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
         player.playNext();
     });
 
-    audioPlayer.addEventListener('timeupdate', async () => {
+    let _lastHistoryCheck = 0;
+    audioPlayer.addEventListener('timeupdate', () => {
         const { currentTime, duration } = audioPlayer;
-        if (duration) {
-            const progressFill = document.getElementById('progress-fill');
-            const currentTimeEl = document.getElementById('current-time');
-            progressFill.style.width = `${(currentTime / duration) * 100}%`;
-            currentTimeEl.textContent = formatTime(currentTime);
+        if (!duration) return;
 
-            // Crossfade: start fading out volume when approaching end of track
-            if (crossfadeSettings.getEnabled() && !player._isCrossfading && player.repeatMode !== REPEAT_MODE.ONE) {
-                const cfDuration = crossfadeSettings.getDuration();
-                const remaining = duration - currentTime;
-                if (cfDuration > 0 && remaining <= cfDuration && remaining > 0.5) {
-                    player.startCrossfadeOut(remaining);
-                }
+        const progressFill = document.getElementById('progress-fill');
+        const currentTimeEl = document.getElementById('current-time');
+        progressFill.style.width = `${(currentTime / duration) * 100}%`;
+        currentTimeEl.textContent = formatTime(currentTime);
+
+        if (crossfadeSettings.getEnabled() && !player._isCrossfading && player.repeatMode !== REPEAT_MODE.ONE) {
+            const cfDuration = crossfadeSettings.getDuration();
+            const remaining = duration - currentTime;
+            if (cfDuration > 0 && remaining <= cfDuration && remaining > 0.5) {
+                player.startCrossfadeOut(remaining);
             }
+        }
 
-            // Log to history after 10 seconds of playback
-            if (currentTime >= 10 && player.currentTrack && player.currentTrack.id !== historyLoggedTrackId) {
-                const trackToLog = player.currentTrack;
-                try {
-                    const historyEntry = await db.addToHistory(trackToLog);
-                    // Only mark as logged AFTER successful save
-                    historyLoggedTrackId = trackToLog.id;
-                    console.log('[History] Saved:', trackToLog.title, '| Genre:', historyEntry?.genre || 'none');
+        const now = Date.now();
+        if (now - _lastHistoryCheck < 2000) return;
+        _lastHistoryCheck = now;
 
-                    syncManager.syncHistoryItem(historyEntry);
-                    syncManager.logListeningEvent(historyEntry);
-
-                    // Notify account page so stats/mood/genres update instantly
-                    window.dispatchEvent(new CustomEvent('history-changed'));
-
-                    if (window.location.hash === '#recent') {
-                        ui.renderRecentPage();
-                    }
-                } catch (err) {
-                    console.error('[History] FAILED to save track:', trackToLog.title, err);
-                    // Don't set historyLoggedTrackId — allow retry on next timeupdate
-                }
-            }
+        if (currentTime >= 10 && player.currentTrack && player.currentTrack.id !== historyLoggedTrackId) {
+            const trackToLog = player.currentTrack;
+            db.addToHistory(trackToLog).then(historyEntry => {
+                historyLoggedTrackId = trackToLog.id;
+                syncManager.syncHistoryItem(historyEntry);
+                syncManager.logListeningEvent(historyEntry);
+                window.dispatchEvent(new CustomEvent('history-changed'));
+                if (window.location.hash === '#recent') ui.renderRecentPage();
+            }).catch(err => {
+                console.error('[History] FAILED to save track:', trackToLog.title, err);
+            });
         }
     });
 
@@ -214,6 +203,8 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
                 }, delay);
             } else {
                 // Retries exhausted, skip to next
+                const trackTitle = player.currentTrack?.title || 'Track';
+                showNotification(`Couldn't play "${trackTitle}", skipping…`);
                 console.warn('Skipping to next track after retries failed');
                 player._errorRetryCount = 0;
                 setTimeout(() => player.playNext(), 1000);
@@ -241,140 +232,13 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
             mode === REPEAT_MODE.OFF ? 'Repeat' : mode === REPEAT_MODE.ALL ? 'Repeat Queue' : 'Repeat One';
     });
 
-    // Sleep Timer for desktop
-    if (sleepTimerBtnDesktop) {
-        sleepTimerBtnDesktop.addEventListener('click', () => {
-            if (player.isSleepTimerActive()) {
-                player.clearSleepTimer();
-                showNotification('Sleep timer cancelled');
-            } else {
-                showSleepTimerModal(player);
-            }
-        });
-    }
-
-    // Sleep Timer for mobile
-    if (sleepTimerBtnMobile) {
-        sleepTimerBtnMobile.addEventListener('click', () => {
-            if (player.isSleepTimerActive()) {
-                player.clearSleepTimer();
-                showNotification('Sleep timer cancelled');
-            } else {
-                showSleepTimerModal(player);
-            }
-        });
-    }
 
     // Volume controls
     const volumeBar = document.getElementById('volume-bar');
     const volumeFill = document.getElementById('volume-fill');
     const volumeBtn = document.getElementById('volume-btn');
 
-    // Waveform Masking Logic
-    const updateWaveform = async () => {
-        const progressBar = document.getElementById('progress-bar');
-        const playerControls = document.querySelector('.player-controls');
-
-        const isTracker =
-            player.currentTrack &&
-            (player.currentTrack.isTracker ||
-                (player.currentTrack.id && String(player.currentTrack.id).startsWith('tracker-')));
-
-        if (!waveformSettings.isEnabled() || !player.currentTrack || isTracker) {
-            if (progressBar) {
-                progressBar.style.webkitMaskImage = '';
-                progressBar.style.maskImage = '';
-                progressBar.classList.remove('has-waveform', 'waveform-loaded');
-            }
-            if (playerControls) {
-                playerControls.classList.remove('waveform-loaded');
-            }
-            currentTrackIdForWaveform = null;
-            return;
-        }
-
-        if (progressBar && currentTrackIdForWaveform !== player.currentTrack.id) {
-            currentTrackIdForWaveform = player.currentTrack.id;
-            progressBar.classList.add('has-waveform');
-            progressBar.classList.remove('waveform-loaded');
-            if (playerControls) {
-                playerControls.classList.remove('waveform-loaded');
-            }
-
-            // Clear current mask while loading
-            progressBar.style.webkitMaskImage = '';
-            progressBar.style.maskImage = '';
-
-            try {
-                const streamUrl = await player.api.getStreamUrl(player.currentTrack.id, 'LOW');
-                const waveformData = await waveformGenerator.getWaveform(streamUrl, player.currentTrack.id);
-
-                if (waveformData && currentTrackIdForWaveform === player.currentTrack.id) {
-                    let { peaks, duration } = waveformData;
-                    const trackDuration = player.currentTrack.duration;
-
-                    // Padding logic for sync
-                    if (trackDuration && duration && duration < trackDuration) {
-                        const diff = trackDuration - duration;
-                        if (diff > 0.5) {
-                            // If difference is significant (> 500ms)
-                            // Calculate how many peaks represent the missing time
-                            // peaks.length represents 'duration'
-                            // X peaks represent 'diff'
-                            const peaksPerSecond = peaks.length / duration;
-                            const paddingPeaksCount = Math.floor(diff * peaksPerSecond);
-
-                            if (paddingPeaksCount > 0) {
-                                const newPeaks = new Float32Array(peaks.length + paddingPeaksCount);
-                                // Fill start with 0s (implied by new Float32Array)
-                                newPeaks.set(peaks, paddingPeaksCount);
-                                peaks = newPeaks;
-                            }
-                        }
-                    }
-
-                    // Create a temporary canvas to generate the mask
-                    const canvas = document.createElement('canvas');
-                    const rect = progressBar.getBoundingClientRect();
-                    canvas.width = rect.width || 500;
-                    canvas.height = 28; // Fixed height for mask generation
-
-                    waveformGenerator.drawWaveform(canvas, peaks);
-
-                    const dataUrl = canvas.toDataURL();
-                    progressBar.style.webkitMaskImage = `url(${dataUrl})`;
-                    progressBar.style.webkitMaskSize = '100% 100%';
-                    progressBar.style.webkitMaskRepeat = 'no-repeat';
-                    progressBar.style.maskImage = `url(${dataUrl})`;
-                    progressBar.style.maskSize = '100% 100%';
-                    progressBar.style.maskRepeat = 'no-repeat';
-
-                    progressBar.classList.add('waveform-loaded');
-                    if (playerControls) {
-                        playerControls.classList.add('waveform-loaded');
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to load waveform mask:', e);
-            }
-        }
-    };
-
-    window.addEventListener('waveform-toggle', (e) => {
-        if (!e.detail.enabled) {
-            const progressBar = document.getElementById('progress-bar');
-            const playerControls = document.querySelector('.player-controls');
-            if (progressBar) {
-                progressBar.style.webkitMaskImage = '';
-                progressBar.style.maskImage = '';
-                progressBar.classList.remove('has-waveform', 'waveform-loaded');
-            }
-            if (playerControls) {
-                playerControls.classList.remove('waveform-loaded');
-            }
-        }
-        updateWaveform();
-    });
+    const updateWaveform = () => {};
 
     const updateVolumeUI = () => {
         const { muted } = audioPlayer;
@@ -907,15 +771,6 @@ export async function handleTrackAction(
         const added = await db.toggleFavorite(type, item);
         syncManager.syncLibraryItem(type, item, added);
 
-        if (added && type === 'track' && scrobbler) {
-            if (lastFMStorage.isEnabled() && lastFMStorage.shouldLoveOnLike()) {
-                scrobbler.loveTrack(item);
-            }
-            if (libreFmSettings.isEnabled() && libreFmSettings.shouldLoveOnLike()) {
-                scrobbler.loveTrack(item);
-            }
-        }
-
         // Update all instances of this item's like button on the page
         const id = type === 'playlist' ? item.uuid : item.id;
         const selector =
@@ -1108,16 +963,26 @@ export async function handleTrackAction(
             navigate(`/album/${item.album.id}`);
         }
     } else if (action === 'copy-link' || action === 'share') {
-        // Use stored href from card if available, otherwise construct URL
-        const contextMenu = document.getElementById('context-menu');
-        const storedHref = contextMenu?._contextHref;
-        const url = storedHref
-            ? `${window.location.origin}${storedHref}`
-            : `${window.location.origin}/track/${item.id || item.uuid}`;
+        const trackTitle = item.title || 'this track';
+        const artistName = getTrackArtists(item) || '';
+        const shareText = `Listening to ${trackTitle} by ${artistName} on Tunes`;
 
-        navigator.clipboard.writeText(url).then(() => {
-            showNotification('Link copied to clipboard!');
-        });
+        if (navigator.share) {
+            try {
+                await navigator.share({ title: trackTitle, text: shareText });
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    console.warn('Share failed:', e);
+                }
+            }
+        } else {
+            const contextMenu = document.getElementById('context-menu');
+            const storedHref = contextMenu?._contextHref;
+            const url = storedHref
+                ? `${window.location.origin}${storedHref}`
+                : `${window.location.origin}/track/${item.id || item.uuid}`;
+            copyToClipboard(url).then(ok => showNotification(ok ? 'Link copied!' : 'Could not copy'));
+        }
     } else if (action === 'track-info') {
         // Show detailed track info modal
         const isTracker = item.isTracker;
@@ -1272,7 +1137,7 @@ export async function handleTrackAction(
         }
 
         if (url) {
-            window.open(url, '_blank');
+            openExternalUrl(url);
         } else {
             showNotification('No original URL available for this track.');
         }
@@ -1429,16 +1294,23 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
         }
         if (trackItem && !trackItem.dataset.queueIndex && !e.target.closest('.remove-from-playlist-btn')) {
             const parentList = trackItem.closest('.track-list');
+            const isSearchContext = parentList?.closest('#search-tracks-container, #search-all-container, #home-recommended-songs, #home-trending-tracks');
             const allTrackElements = Array.from(parentList.querySelectorAll('.track-item'));
             const trackList = allTrackElements.map((el) => trackDataStore.get(el)).filter(Boolean);
 
             if (trackList.length > 0) {
                 const clickedTrackId = trackItem.dataset.trackId;
-                const startIndex = trackList.findIndex((t) => t.id == clickedTrackId);
+                const clickedTrack = trackList.find((t) => t.id == clickedTrackId);
 
-                player.setQueue(trackList, startIndex);
                 document.getElementById('shuffle-btn').classList.remove('active');
-                player.playTrackFromQueue();
+
+                if (isSearchContext && clickedTrack) {
+                    player.playWithMix(clickedTrack);
+                } else {
+                    const startIndex = trackList.findIndex((t) => t.id == clickedTrackId);
+                    player.setQueue(trackList, startIndex);
+                    player.playTrackFromQueue();
+                }
             }
         }
 
@@ -1450,10 +1322,9 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
 
             const href = card.dataset.href;
             if (href) {
-                // Allow native links inside card to work if any exist
                 if (e.target.closest('a')) return;
-
                 e.preventDefault();
+
                 navigate(href);
             }
         }
@@ -1575,11 +1446,12 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
         const action = target.dataset.action;
         const track = contextMenu._contextTrack || contextTrack;
         const type = contextMenu._contextType || 'track';
+        contextMenu.style.display = 'none';
+        contextMenu.style.visibility = '';
+        contextMenu._contextType = null;
         if (action && track) {
             await handleTrackAction(action, track, player, api, lyricsManager, type, ui, scrobbler);
         }
-        contextMenu.style.display = 'none';
-        contextMenu._contextType = null;
     });
 
     // Now playing bar interactions – clicking anywhere on the bar (except buttons/sliders/artist-links) opens fullscreen
@@ -1625,6 +1497,44 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
             }
         }
     });
+
+    // ── Swipe gestures on now-playing bar (up=fullscreen, left=next, right=prev) ──
+    if (nowPlayingBar) {
+        let _npTouchStartX = 0, _npTouchStartY = 0, _npTouchStartTime = 0;
+        const SWIPE_THRESHOLD = 50;
+        const SWIPE_VELOCITY = 0.3;
+        const VERTICAL_THRESHOLD = 60;
+
+        nowPlayingBar.addEventListener('touchstart', (e) => {
+            if (e.target.closest('button, input, .progress-bar, .volume-bar')) return;
+            const t = e.touches[0];
+            _npTouchStartX = t.clientX;
+            _npTouchStartY = t.clientY;
+            _npTouchStartTime = Date.now();
+        }, { passive: true });
+
+        nowPlayingBar.addEventListener('touchend', (e) => {
+            if (e.target.closest('button, input, .progress-bar, .volume-bar')) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - _npTouchStartX;
+            const dy = _npTouchStartY - t.clientY;
+            const dt = Date.now() - _npTouchStartTime;
+            const vx = Math.abs(dx) / dt;
+            const vy = Math.abs(dy) / dt;
+
+            if (dy > VERTICAL_THRESHOLD && vy > SWIPE_VELOCITY && Math.abs(dy) > Math.abs(dx)) {
+                if (player.currentTrack) {
+                    document.querySelector('.now-playing-bar .cover')?.click();
+                }
+            } else if (Math.abs(dx) > SWIPE_THRESHOLD && vx > SWIPE_VELOCITY && Math.abs(dx) > Math.abs(dy)) {
+                if (dx < 0) {
+                    player.playNext();
+                } else {
+                    player.playPrev();
+                }
+            }
+        }, { passive: true });
+    }
 
     const nowPlayingLikeBtn = document.getElementById('now-playing-like-btn');
     if (nowPlayingLikeBtn) {
@@ -1705,54 +1615,6 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
     }
 }
 
-function showSleepTimerModal(player) {
-    const modal = document.getElementById('sleep-timer-modal');
-    if (!modal) return;
-
-    const closeModal = () => {
-        modal.classList.remove('active');
-        cleanup();
-    };
-
-    const handleOptionClick = (e) => {
-        const timerOption = e.target.closest('.timer-option');
-        if (timerOption) {
-            let minutes;
-            if (timerOption.id === 'custom-timer-btn') {
-                const customInput = document.getElementById('custom-minutes');
-                minutes = parseInt(customInput.value);
-                if (!minutes || minutes < 1) {
-                    showNotification('Please enter a valid number of minutes');
-                    return;
-                }
-            } else {
-                minutes = parseInt(timerOption.dataset.minutes);
-            }
-
-            if (minutes) {
-                player.setSleepTimer(minutes);
-                showNotification(`Sleep timer set for ${minutes} minute${minutes === 1 ? '' : 's'}`);
-                closeModal();
-            }
-        }
-    };
-
-    const handleCancel = (e) => {
-        if (e.target.id === 'cancel-sleep-timer' || e.target.classList.contains('modal-overlay')) {
-            closeModal();
-        }
-    };
-
-    const cleanup = () => {
-        modal.removeEventListener('click', handleOptionClick);
-        modal.removeEventListener('click', handleCancel);
-    };
-
-    modal.addEventListener('click', handleOptionClick);
-    modal.addEventListener('click', handleCancel);
-
-    modal.classList.add('active');
-}
 
 function positionMenu(menu, x, y, anchorRect = null) {
     // Temporarily show to measure dimensions

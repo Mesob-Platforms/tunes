@@ -13,6 +13,7 @@ import {
 import { lyricsSettings, bulkDownloadSettings, playlistSettings } from './storage.js';
 import { addMetadataToAudio } from './metadata.js';
 import { DashDownloader } from './dash-downloader.js';
+import { apiUrl } from './platform.js';
 import { generateM3U, generateM3U8, generateCUE, generateNFO, generateJSON } from './playlist-generator.js';
 import { db } from './db.js'; // For IndexedDB audio caching
 import { getVibrantColorFromImage } from './vibrant-color.js';
@@ -46,6 +47,7 @@ export function catalogDownloadedTrack(track) {
         title:     track.title || '',
         artist:    track.artist?.name || (track.artists?.[0]?.name) || '',
         artistId:  track.artist?.id || (track.artists?.[0]?.id) || null,
+        artistPicture: track.artist?.picture || (track.artists?.[0]?.picture) || null,
         album:     track.album?.title || '',
         albumId:   track.album?.id || null,
         cover:     track.album?.cover || null,
@@ -162,25 +164,7 @@ function _updateGlowColor(coverUrl) {
 }
 
 export function showNotification(message) {
-    const container = createDownloadNotification();
-
-    const notifEl = document.createElement('div');
-    notifEl.className = 'download-task';
-
-    notifEl.innerHTML = `
-        <div style="display: flex; align-items: start;">
-            ${message}
-        </div>
-    `;
-
-    container.appendChild(notifEl);
-    _updateNotifHeader();
-
-    // Auto remove
-    setTimeout(() => {
-        notifEl.style.animation = 'slide-out 0.3s ease forwards';
-        setTimeout(() => { notifEl.remove(); _updateNotifHeader(); }, 300);
-    }, 1500);
+    return;
 }
 
 export function addDownloadTask(trackId, track, filename, api, abortController) {
@@ -401,31 +385,53 @@ async function bulkDownloadSequentially(tracks, api, quality, lyricsManager, not
 
         try {
             const { blob } = await downloadTrackBlob(track, quality, api, null, signal);
-            // Cache in IndexedDB for in-app offline playback
             await db.cacheTrackBlob(track.id, blob);
             catalogDownloadedTrack(track);
 
-            // Cache lyrics for offline access - ALWAYS try to fetch and cache
+            // Cache lyrics for offline access
             if (lyricsManager) {
                 try {
-                    // Force online fetch even if offline (for downloads, we want fresh lyrics)
                     const lyricsData = await lyricsManager.fetchLyrics(track.id, track, true);
                     if (!lyricsData) {
-                        // If fetch failed, try one more time after a short delay
                         await new Promise(resolve => setTimeout(resolve, 500));
                         await lyricsManager.fetchLyrics(track.id, track, true);
                     }
                 } catch (e) {
                     console.warn(`Failed to cache lyrics for ${track.title}:`, e);
-                    // Try one more time silently
                     try {
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         await lyricsManager.fetchLyrics(track.id, track, true);
                     } catch (e2) {
-                        // Final failure - log but don't block download
                         console.warn(`Final lyrics fetch failed for ${track.title}`);
                     }
                 }
+            }
+
+            // Cache album cover + artist picture for offline display
+            try {
+                const coverId = track.album?.cover;
+                const artistPicId = track.artist?.picture || track.artists?.[0]?.picture;
+                const normalizedKey = (prefix, id) => (id ? `${prefix}-${String(id).replace(/\//g, '-')}` : null);
+                const fetchAndCache = async (imageId, prefix, size = '320x320') => {
+                    if (!imageId) return;
+                    const key = normalizedKey(prefix, imageId);
+                    const existing = await db.getCachedImage(key);
+                    if (existing) return;
+                    const formattedId = String(imageId).replace(/-/g, '/');
+                    const tidalUrl = `https://resources.tidal.com/images/${formattedId}/${size}.jpg`;
+                    const proxyUrl = apiUrl(`/api/image-proxy?url=${encodeURIComponent(tidalUrl)}`);
+                    const resp = await fetch(proxyUrl);
+                    if (resp.ok) {
+                        const imgBlob = await resp.blob();
+                        await db.cacheImage(key, imgBlob);
+                    }
+                };
+                await Promise.allSettled([
+                    fetchAndCache(coverId, 'cover', '1280x1280'),
+                    fetchAndCache(artistPicId, 'artist', '320x320'),
+                ]);
+            } catch (imgErr) {
+                console.warn('Image caching failed (non-blocking):', imgErr);
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
@@ -863,7 +869,7 @@ function completeBulkDownload(notifEl, success = true, message = null) {
 
 export async function downloadTrackWithMetadata(track, quality, api, lyricsManager = null, abortController = null) {
     if (!track) {
-        alert('No track is currently playing');
+        showNotification('No track is currently playing');
         return;
     }
 
@@ -912,27 +918,50 @@ export async function downloadTrackWithMetadata(track, quality, api, lyricsManag
         completeDownloadTask(track.id, true);
         catalogDownloadedTrack(enrichedTrack);
 
-        // Cache lyrics for offline access - ALWAYS try to fetch and cache
+        // Cache lyrics for offline access
         if (lyricsManager) {
             try {
-                // Force online fetch even if offline (for downloads, we want fresh lyrics)
                 const lyricsData = await lyricsManager.fetchLyrics(track.id, enrichedTrack, true);
                 if (!lyricsData) {
-                    // If fetch failed, try one more time after a short delay
                     await new Promise(resolve => setTimeout(resolve, 500));
                     await lyricsManager.fetchLyrics(track.id, enrichedTrack, true);
                 }
             } catch (e) {
                 console.warn(`Failed to cache lyrics for ${enrichedTrack.title}:`, e);
-                // Try one more time silently
                 try {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     await lyricsManager.fetchLyrics(track.id, enrichedTrack, true);
                 } catch (e2) {
-                    // Final failure - log but don't block download
                     console.warn(`Final lyrics fetch failed for ${enrichedTrack.title}`);
                 }
             }
+        }
+
+        // Cache album cover + artist picture for offline display
+        try {
+            const coverId = enrichedTrack.album?.cover;
+            const artistPicId = enrichedTrack.artist?.picture || enrichedTrack.artists?.[0]?.picture;
+            const normalizedKey = (prefix, id) => (id ? `${prefix}-${String(id).replace(/\//g, '-')}` : null);
+            const fetchAndCache = async (imageId, prefix, size = '320x320') => {
+                if (!imageId) return;
+                const key = normalizedKey(prefix, imageId);
+                const existing = await db.getCachedImage(key);
+                if (existing) return;
+                const formattedId = String(imageId).replace(/-/g, '/');
+                const tidalUrl = `https://resources.tidal.com/images/${formattedId}/${size}.jpg`;
+                const proxyUrl = apiUrl(`/api/image-proxy?url=${encodeURIComponent(tidalUrl)}`);
+                const resp = await fetch(proxyUrl);
+                if (resp.ok) {
+                    const imgBlob = await resp.blob();
+                    await db.cacheImage(key, imgBlob);
+                }
+            };
+            await Promise.allSettled([
+                fetchAndCache(coverId, 'cover', '1280x1280'),
+                fetchAndCache(artistPicId, 'artist', '320x320'),
+            ]);
+        } catch (imgErr) {
+            console.warn('Image caching failed (non-blocking):', imgErr);
         }
     } catch (error) {
         if (error.name !== 'AbortError') {

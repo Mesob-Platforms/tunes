@@ -30,9 +30,16 @@ Desktop.ini
 # Build artifacts / temp debug files
 *.apk
 android/tunes-release.keystore
+android/tunes-release.jks
 generate-icons.js
 _*.js
 _*.css
 _*.html
 _*.txt
+styles_diff.txt
+SHA1_FOR_GOOGLE.txt
+
+# Android build caches
+android/.gradle/
+android/app/build/
 

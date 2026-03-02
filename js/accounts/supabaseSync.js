@@ -75,8 +75,23 @@ const syncManager = {
         return { library, history, userPlaylists, userFolders };
     },
 
+    _pendingUpdates: {},
+    _debounceTimers: {},
+
     async _updateUserJSON(uid, field, data) {
-        const record = await this._getUserRecord(uid);
+        this._pendingUpdates[field] = { uid, data };
+
+        if (this._debounceTimers[field]) clearTimeout(this._debounceTimers[field]);
+        this._debounceTimers[field] = setTimeout(() => this._flushUpdate(field), 1500);
+    },
+
+    async _flushUpdate(field) {
+        const pending = this._pendingUpdates[field];
+        if (!pending) return;
+        delete this._pendingUpdates[field];
+        delete this._debounceTimers[field];
+
+        const record = await this._getUserRecord(pending.uid);
         if (!record) {
             console.error('Cannot update: no user record found');
             return;
@@ -85,7 +100,7 @@ const syncManager = {
         try {
             const { data: updated, error } = await supabase
                 .from('user_data')
-                .update({ [field]: data })
+                .update({ [field]: pending.data })
                 .eq('id', record.id)
                 .select()
                 .single();
@@ -645,9 +660,17 @@ const syncManager = {
             await offlineSync.queueListeningEvent(track);
         }
     },
-    /** Fetch global trending data from listening_events (all users) */
+    _trendingCache: null,
+    _trendingCacheTime: 0,
+    _TRENDING_TTL: 5 * 60 * 1000,
+
+    /** Fetch global trending data from listening_events (all users), cached for 5 min */
     async getGlobalTrending(limit = 20) {
         if (!supabase) return { tracks: [], artists: [], albums: [] };
+
+        if (this._trendingCache && (Date.now() - this._trendingCacheTime) < this._TRENDING_TTL) {
+            return this._trendingCache;
+        }
 
         try {
             const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -658,19 +681,24 @@ const syncManager = {
                 .limit(2000);
 
             if (error || !data || data.length === 0) {
-                // Fallback: try without date filter (all time)
                 const { data: allData, error: allErr } = await supabase
                     .from('listening_events')
                     .select('track_id, track_title, artist_name, album_title, album_id')
                     .limit(2000);
                 if (allErr || !allData || allData.length === 0) return { tracks: [], artists: [], albums: [] };
-                return this._aggregateTrending(allData, limit);
+                const result = this._aggregateTrending(allData, limit);
+                this._trendingCache = result;
+                this._trendingCacheTime = Date.now();
+                return result;
             }
 
-            return this._aggregateTrending(data, limit);
+            const result = this._aggregateTrending(data, limit);
+            this._trendingCache = result;
+            this._trendingCacheTime = Date.now();
+            return result;
         } catch (e) {
             console.warn('[Supabase] Failed to get global trending:', e);
-            return { tracks: [], artists: [], albums: [] };
+            return this._trendingCache || { tracks: [], artists: [], albums: [] };
         }
     },
 

@@ -2,8 +2,8 @@
 export class APICache {
     constructor(options = {}) {
         this.memoryCache = new Map();
-        this.maxSize = options.maxSize || 200;
-        this.ttl = options.ttl || 1000 * 60 * 30;
+        this.maxSize = options.maxSize || 50000;
+        this.ttl = options.ttl || Infinity;
         this.dbName = 'monochrome-cache';
         this.dbVersion = 1;
         this.db = null;

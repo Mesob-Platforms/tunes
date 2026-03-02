@@ -6,12 +6,11 @@ const WORKER_ORIGIN = 'https://tunes-music-app.naolmideksa.workers.dev';
 export const isNative = Capacitor.isNativePlatform();
 
 /**
- * Prefix a relative /api/... path with the worker origin when running
- * inside the native Android shell (Capacitor serves from https://localhost,
- * so relative API paths would 404 without this).
+ * Always prefix /api/ paths with the Worker origin.
+ * Static files live on Cloudflare Pages (unlimited); API on the Worker.
  */
 export function apiUrl(path) {
-    return isNative ? `${WORKER_ORIGIN}${path}` : path;
+    return path.startsWith('/api/') ? `${WORKER_ORIGIN}${path}` : path;
 }
 
 

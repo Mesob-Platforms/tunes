@@ -66,6 +66,32 @@ let albumDataMap = {}; // Maps track keys to album info: { title, artist, cover 
 let observer = null;
 let pageMutObs = null;
 
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message = payload?.error || payload?.message || `Request failed (${response.status})`;
+      throw new Error(message);
+    }
+    return payload;
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Request timed out');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    2.  ENTRY POINT — called from ui.renderWrappedPage()
    ═══════════════════════════════════════════════════════════════ */
@@ -96,16 +122,33 @@ export async function initWrapped(api) {
     const token = session?.access_token;
     if (!token) { container.innerHTML = '<p class="wr-err">Please sign in to view your Wrapped.</p>'; return; }
 
-    const [compRes, lbRes] = await Promise.all([
-      fetch(apiUrl('/api/wrapped/compute'), { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }),
-      fetch(apiUrl('/api/wrapped/leaderboard'), { headers: { 'Authorization': `Bearer ${token}` } }),
+    const [computeRes, leaderboardRes] = await Promise.allSettled([
+      fetchJsonWithTimeout(
+        apiUrl('/api/wrapped/compute'),
+        { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } },
+        15000
+      ),
+      fetchJsonWithTimeout(
+        apiUrl('/api/wrapped/leaderboard'),
+        { headers: { 'Authorization': `Bearer ${token}` } },
+        12000
+      ),
     ]);
-    data = await compRes.json();
-    const lbJson = await lbRes.json();
-    leaderboard = lbJson.leaderboard || [];
+
+    if (computeRes.status !== 'fulfilled') {
+      throw (computeRes.reason instanceof Error ? computeRes.reason : new Error('Failed to load Wrapped data.'));
+    }
+
+    data = computeRes.value || {};
+    if (leaderboardRes.status === 'fulfilled') {
+      leaderboard = leaderboardRes.value?.leaderboard || [];
+    } else {
+      leaderboard = [];
+      console.warn('[Wrapped] Leaderboard unavailable:', leaderboardRes.reason);
+    }
 
     if (data.error) { container.innerHTML = `<p class="wr-err">${data.error}</p>`; return; }
-    if (data.total_plays === 0) { container.innerHTML = '<p class="wr-err">You don\'t have any listening data for this period yet.<br>Start listening!</p>'; return; }
+    if (Number(data.total_plays || 0) === 0) { container.innerHTML = '<p class="wr-err">You don\'t have any listening data for this period yet.<br>Start listening!</p>'; return; }
 
     await resolveImages();
     buildUI(container);
@@ -646,14 +689,20 @@ function sectionTop5Albums() {
 
 /* ── 12  LEADERBOARD ── */
 function sectionLeaderboard() {
-  const rows = (leaderboard || []).slice(0, 10).map((u, i) => `
+  const rows = (leaderboard || []).slice(0, 10).map((u, i) => {
+    const rank = Number.isFinite(Number(u?.rank)) ? Number(u.rank) : i + 1;
+    const minutes = Number.isFinite(Number(u?.total_minutes)) ? Number(u.total_minutes) : 0;
+    const name = esc(u?.display_name || 'Listener');
+    const avatar = getAvatarUrl(u?.avatar_seed || 'listener');
+    return `
     <div class="wr-lb-row wr-anim">
-      <span class="wr-lb-rank" style="${i < 3 ? `color:${[C.orange, '#C0C0C0', '#CD7F32'][i]}` : ''}">#${u.rank}</span>
-      <img src="${getAvatarUrl(u.avatar_seed)}" class="wr-lb-avatar" alt="">
-      <span class="wr-lb-name">${esc(u.display_name)}</span>
-      <span class="wr-lb-stat">${u.total_minutes.toLocaleString()} min</span>
+      <span class="wr-lb-rank" style="${i < 3 ? `color:${[C.orange, '#C0C0C0', '#CD7F32'][i]}` : ''}">#${rank}</span>
+      <img src="${avatar}" class="wr-lb-avatar" alt="">
+      <span class="wr-lb-name">${name}</span>
+      <span class="wr-lb-stat">${minutes.toLocaleString()} min</span>
     </div>
-  `).join('');
+  `;
+  }).join('');
   const s = mk('div', '');
   s.innerHTML = `
     <div class="wr-anim wr-section-label" style="text-align:center;margin-bottom:1.5rem">\uD83D\uDC51 Top Listeners</div>

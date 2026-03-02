@@ -1,7 +1,6 @@
 // js/accounts/auth.js
-import { supabase, isAdminEmail, GOOGLE_WEB_CLIENT_ID } from './config.js';
+import { supabase, isAdminEmail, GOOGLE_WEB_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID } from './config.js';
 import { isNative } from '../platform.js';
-import { GoogleOneTapAuth } from 'capacitor-native-google-one-tap-signin';
 
 // Helper: show an inline message in the gate
 function showGateMessage(elementId, text, type = 'error') {
@@ -49,58 +48,60 @@ export class AuthManager {
         this.unsubscribe = null;
         this.authListeners = [];
         this._initDone = false;
-        this._pendingEmail = null;   // email being worked with
-        this._otpPurpose = null;     // 'signup' or 'reset'
-        this._skipGateHide = false;  // after OTP verify during signup, don't hide gate yet
-        this._googleOneTapReady = false; // Google One Tap plugin initialized
+        this._sessionRestored = false;
+        this._pendingEmail = null;
+        this._otpPurpose = null;
+        this._skipGateHide = false;
+        this._googleOneTapReady = false; // unused, kept for compat
+    }
+
+    _wasSignedIn() {
+        return localStorage.getItem('tunes_was_signed_in') === 'true';
+    }
+
+    _cacheAuthState(signedIn) {
+        if (signedIn) {
+            localStorage.setItem('tunes_was_signed_in', 'true');
+        } else {
+            localStorage.removeItem('tunes_was_signed_in');
+        }
+    }
+
+    _extractUser(rawUser) {
+        if (!rawUser) return null;
+        return {
+            uid: rawUser.id,
+            email: rawUser.email,
+            displayName: rawUser.user_metadata?.full_name || rawUser.user_metadata?.name || rawUser.email,
+            photoURL: rawUser.user_metadata?.avatar_url || null,
+            isAdmin: isAdminEmail(rawUser.email),
+        };
     }
 
     init() {
         if (!supabase || this._initDone) return;
         this._initDone = true;
-
-        // Check for existing session FIRST before showing the auth gate.
-        // This prevents the sign-in screen from flashing when the user is already logged in.
         this._initialSessionChecked = false;
 
         supabase.auth.getSession().then(({ data: { session } }) => {
             this.session = session;
-            const rawUser = session?.user || null;
-
-            this.user = rawUser ? {
-                uid: rawUser.id,
-                email: rawUser.email,
-                displayName: rawUser.user_metadata?.full_name || rawUser.user_metadata?.name || rawUser.email,
-                photoURL: rawUser.user_metadata?.avatar_url || null,
-                isAdmin: isAdminEmail(rawUser.email),
-            } : null;
-
+            this.user = this._extractUser(session?.user);
             this._initialSessionChecked = true;
+            this._sessionRestored = true;
 
-            // Now update UI — gate stays hidden if logged in, or shows if not
+            this._cacheAuthState(!!this.user);
             this.updateUI(this.user);
             this.authListeners.forEach(listener => listener(this.user));
         });
 
-        // Listen for future auth state changes (sign in, sign out, token refresh, etc.)
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            // Skip the INITIAL_SESSION event — we already handled it above via getSession()
             if (!this._initialSessionChecked) return;
 
             this.session = session;
-            const rawUser = session?.user || null;
+            this.user = this._extractUser(session?.user);
+            this._cacheAuthState(!!this.user);
 
-            this.user = rawUser ? {
-                uid: rawUser.id,
-                email: rawUser.email,
-                displayName: rawUser.user_metadata?.full_name || rawUser.user_metadata?.name || rawUser.email,
-                photoURL: rawUser.user_metadata?.avatar_url || null,
-                isAdmin: isAdminEmail(rawUser.email),
-            } : null;
-
-            // If we're in the middle of signup (OTP verified, need to set password), don't hide the gate
             if (this._skipGateHide && this.user) {
-                // Don't call updateUI — we need the gate to stay visible for password creation
                 this.authListeners.forEach(listener => listener(this.user));
                 return;
             }
@@ -121,116 +122,82 @@ export class AuthManager {
 
     // ===== AUTH METHODS =====
 
-    // ===== GOOGLE ONE TAP (Native) =====
-
-    /**
-     * Initialize the Google One Tap plugin on native platforms.
-     * Safe to call multiple times — no-ops after first successful init.
-     */
-    async _initGoogleOneTap() {
-        if (this._googleOneTapReady || !GOOGLE_WEB_CLIENT_ID) return false;
-        try {
-            await GoogleOneTapAuth.initialize({ clientId: GOOGLE_WEB_CLIENT_ID });
-            this._googleOneTapReady = true;
-            return true;
-        } catch (e) {
-            console.warn('[auth] Google One Tap init failed:', e);
-            return false;
-        }
-    }
-
-    /**
-     * Attempt automatic / One Tap sign-in (native only).
-     * Returns the Google ID token on success, null otherwise.
-     */
-    async _tryGoogleOneTap() {
-        if (!this._googleOneTapReady) return null;
-        try {
-            const result = await GoogleOneTapAuth.tryAutoOrOneTapSignIn();
-            if (result.isSuccess && result.success?.idToken) {
-                return result.success.idToken;
-            }
-            return null;
-        } catch (e) {
-            console.warn('[auth] Google One Tap auto sign-in failed:', e);
-            return null;
-        }
-    }
-
-    /**
-     * Sign in with a Google ID token via Supabase's signInWithIdToken.
-     */
-    async _signInWithGoogleIdToken(idToken) {
-        const { data, error } = await supabase.auth.signInWithIdToken({
-            provider: 'google',
-            token: idToken,
-        });
-        if (error) throw error;
-        return data;
-    }
-
-    /**
-     * Auto-trigger Google One Tap when the auth gate loads on native platforms.
-     * Runs silently in the background — if it succeeds the gate hides automatically.
-     */
-    async _autoTriggerGoogleOneTap() {
-        try {
-            await this._initGoogleOneTap();
-            const idToken = await this._tryGoogleOneTap();
-            if (idToken) {
-                await this._signInWithGoogleIdToken(idToken);
-                // Success — onAuthStateChange will hide the gate
-            }
-        } catch (e) {
-            // Silent fail — user can still use the manual Google button or email/OTP
-            console.warn('[auth] Auto Google One Tap failed:', e);
-        }
-    }
-
     async signInWithGoogle() {
         if (!supabase) {
             showGateMessage('gate-email-message', 'Supabase is not configured.');
             return;
         }
+        const googleBtn = document.getElementById('gate-google-btn') || document.getElementById('google-sign-in-btn');
+        if (googleBtn) { googleBtn.disabled = true; googleBtn.style.opacity = '0.5'; googleBtn.textContent = 'Connecting to Google...'; }
         try {
-            // Native path: use Google One Tap / Credential Manager for a native-feeling UX
-            if (isNative && GOOGLE_WEB_CLIENT_ID) {
-                await this._initGoogleOneTap();
-
-                if (this._googleOneTapReady) {
-                    // Show full account picker (button-flow) for manual taps
-                    const result = await GoogleOneTapAuth.signInWithGoogleButtonFlowForNativePlatform();
-                    if (result.isSuccess && result.success?.idToken) {
-                        return await this._signInWithGoogleIdToken(result.success.idToken);
-                    }
-                    // User cancelled or native flow failed — do NOT fall through to browser
-                    if (result.noSuccess) {
-                        const reason = result.noSuccess.noSuccessReasonCode || 'unknown';
-                        console.log('[auth] Google One Tap dismissed:', reason);
-                        if (reason === 'USER_CANCELED' || reason === 'CANCELLED') {
-                            // User deliberately dismissed — just return silently
-                            return;
-                        }
-                        showGateMessage('gate-email-message', 'Google sign-in failed. Please try again.');
-                    }
-                    // On native, never fall through to browser OAuth
+            if (isNative) {
+                const [{ Browser }, { App }, { data, error: oauthErr }] = await Promise.all([
+                    import('@capacitor/browser'),
+                    import('@capacitor/app'),
+                    supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: {
+                            redirectTo: 'com.mesob.tunes://auth-callback',
+                            skipBrowserRedirect: true,
+                        },
+                    }),
+                ]);
+                if (oauthErr) throw oauthErr;
+                if (!data?.url) {
+                    showGateMessage('gate-email-message', 'Could not start Google sign-in.');
                     return;
                 }
+
+                const urlOpenHandler = App.addListener('appUrlOpen', async ({ url }) => {
+                    if (!url.includes('auth-callback')) return;
+                    try { await Browser.close(); } catch (_) {}
+                    urlOpenHandler.remove();
+
+                    // Extract tokens from the URL fragment or query
+                    const hashParams = new URLSearchParams(url.split('#')[1] || '');
+                    const queryParams = new URLSearchParams(url.split('?')[1]?.split('#')[0] || '');
+                    const accessToken = hashParams.get('access_token');
+                    const refreshToken = hashParams.get('refresh_token');
+                    const code = queryParams.get('code');
+
+                    if (accessToken && refreshToken) {
+                        const { error: sessErr } = await supabase.auth.setSession({
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                        });
+                        if (sessErr) {
+                            console.error('[auth] setSession failed:', sessErr);
+                            showGateMessage('gate-email-message', `Sign-in failed: ${sessErr.message}`);
+                        }
+                    } else if (code) {
+                        const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+                        if (exchErr) {
+                            console.error('[auth] exchangeCode failed:', exchErr);
+                            showGateMessage('gate-email-message', `Sign-in failed: ${exchErr.message}`);
+                        }
+                    } else {
+                        console.error('[auth] No tokens or code in callback URL:', url);
+                        showGateMessage('gate-email-message', 'Sign-in did not complete. Please try again.');
+                    }
+                });
+
+                await Browser.open({ url: data.url, presentationStyle: 'popover' });
+                return;
             }
 
-            // Web-only path: use Supabase OAuth redirect (browser)
-            if (!isNative) {
-                const { data, error } = await supabase.auth.signInWithOAuth({
-                    provider: 'google',
-                    options: { redirectTo: window.location.origin },
-                });
-                if (error) throw error;
-                return data;
-            }
+            // Web: standard OAuth redirect
+            const { data, error } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: { redirectTo: window.location.origin },
+            });
+            if (error) throw error;
+            return data;
         } catch (error) {
             console.error('Google login failed:', error);
             showGateMessage('gate-email-message', `Google login failed: ${error.message || JSON.stringify(error)}`);
             throw error;
+        } finally {
+            if (googleBtn) { googleBtn.disabled = false; googleBtn.style.opacity = '1'; googleBtn.textContent = 'Continue with Google'; }
         }
     }
 
@@ -244,6 +211,28 @@ export class AuthManager {
             console.error('Sign in failed:', error);
             const msg = error?.message || JSON.stringify(error);
             showGateMessage('gate-password-message', `Sign in failed: ${msg}`);
+            throw error;
+        }
+    }
+
+    async signUpWithPassword(email, password) {
+        if (!supabase) return;
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: { emailRedirectTo: window.location.origin },
+            });
+            if (error) throw error;
+            if (data?.user?.identities?.length === 0) {
+                showGateMessage('gate-setpw-message', 'An account with this email already exists. Try signing in instead.');
+                throw new Error('Account already exists');
+            }
+            return data;
+        } catch (error) {
+            console.error('Sign up failed:', error);
+            const msg = error?.message || JSON.stringify(error);
+            showGateMessage('gate-setpw-message', `Sign up failed: ${msg}`);
             throw error;
         }
     }
@@ -300,11 +289,28 @@ export class AuthManager {
     async signOut() {
         if (!supabase) return;
         try {
-            await supabase.auth.signOut();
-            // Also sign out from Google One Tap to prevent auto-sign-in on next gate load
-            if (this._googleOneTapReady) {
-                try { await GoogleOneTapAuth.signOut(); } catch { /* ignore */ }
+            const player = window.__tunesRefs?.player;
+            if (player) {
+                player.audio.pause();
+                player.audio.currentTime = 0;
+                player.audio.src = '';
+                player.currentTrack = null;
+                player.queue = [];
+                player.shuffledQueue = [];
+                player.currentQueueIndex = -1;
+                if (player.dashInitialized) {
+                    player.dashPlayer.reset();
+                    player.dashInitialized = false;
+                }
+                player.updateMediaSessionPlaybackState?.();
+                player.saveQueueState?.();
             }
+
+            const nowPlaying = document.querySelector('.now-playing-bar');
+            if (nowPlaying) nowPlaying.classList.remove('active');
+
+            this._cacheAuthState(false);
+            await supabase.auth.signOut();
         } catch (error) {
             console.error('Logout failed:', error);
             throw error;
@@ -318,10 +324,11 @@ export class AuthManager {
         if (authGate) {
             if (user) {
                 authGate.style.display = 'none';
-            } else {
+            } else if (this._sessionRestored) {
                 authGate.style.display = 'flex';
                 showGateScreen('gate-screen-email');
             }
+            // If session not yet restored, gate stays hidden (display:none from HTML)
         }
 
         const accountSpan = document.querySelector('#sidebar-nav-account a span');
@@ -377,11 +384,6 @@ export class AuthManager {
     }
 
     initAuthGate() {
-        // ===== NATIVE: Auto-trigger Google One Tap on gate load =====
-        if (isNative && GOOGLE_WEB_CLIENT_ID) {
-            this._autoTriggerGoogleOneTap();
-        }
-
         // ===== SCREEN 1: Email entry =====
         const gateGoogleBtn = document.getElementById('gate-google-btn');
         if (gateGoogleBtn) {
@@ -445,7 +447,7 @@ export class AuthManager {
             });
         }
 
-        // Forgot password
+        // Forgot password — use Supabase resetPasswordForEmail
         const forgotPassword = document.getElementById('gate-forgot-password');
         if (forgotPassword) {
             forgotPassword.addEventListener('click', async () => {
@@ -454,32 +456,35 @@ export class AuthManager {
                     return;
                 }
                 clearGateMessage('gate-password-message');
-                this._otpPurpose = 'reset';
-                showGateMessage('gate-password-message', 'Sending reset code...', 'info');
+                showGateMessage('gate-password-message', 'Sending reset link...', 'info');
                 try {
-                    await this._sendOtpAndShowScreen(this._pendingEmail);
-                } catch {
-                    showGateMessage('gate-password-message', 'Failed to send code. Try again.');
+                    const { error } = await supabase.auth.resetPasswordForEmail(this._pendingEmail, {
+                        redirectTo: window.location.origin,
+                    });
+                    if (error) throw error;
+                    showGateMessage('gate-password-message', 'Reset link sent! Check your email.', 'success');
+                } catch (err) {
+                    showGateMessage('gate-password-message', `Failed to send reset link: ${err.message}`);
                 }
             });
         }
 
-        // Create account (new user)
+        // Create account (new user) — go straight to set-password screen
         const createAccount = document.getElementById('gate-create-account');
         if (createAccount) {
-            createAccount.addEventListener('click', async () => {
+            createAccount.addEventListener('click', () => {
                 if (!this._pendingEmail) {
                     showGateScreen('gate-screen-email');
                     return;
                 }
                 clearGateMessage('gate-password-message');
                 this._otpPurpose = 'signup';
-                showGateMessage('gate-password-message', 'Sending verification code...', 'info');
-                try {
-                    await this._sendOtpAndShowScreen(this._pendingEmail);
-                } catch (err) {
-                    showGateMessage('gate-password-message', `Failed to send code: ${err.message}`);
-                }
+                const title = document.getElementById('gate-setpw-title');
+                const subtitle = document.getElementById('gate-setpw-subtitle');
+                if (title) title.textContent = 'Create your password';
+                if (subtitle) subtitle.textContent = `Sign up as ${this._pendingEmail}`;
+                showGateScreen('gate-screen-setpassword');
+                document.getElementById('gate-newpw-input')?.focus();
             });
         }
 
@@ -575,12 +580,14 @@ export class AuthManager {
 
                 setButtonLoading('gate-setpw-submit', true, 'Set Password');
                 try {
-                    await this.setPassword(pw);
-                    // Password set! Now let the gate hide normally
+                    if (this._otpPurpose === 'signup' && this._pendingEmail && !this.user) {
+                        await this.signUpWithPassword(this._pendingEmail, pw);
+                    } else {
+                        await this.setPassword(pw);
+                    }
                     this._skipGateHide = false;
                     this._otpPurpose = null;
                     this._pendingEmail = null;
-                    // Trigger UI update to hide the gate
                     this.updateUI(this.user);
                 } catch {
                     // Error already shown

@@ -1,5 +1,36 @@
 //js/utils.js
 import { qualityBadgeSettings, coverArtSizeSettings, trackDateSettings } from './storage.js';
+import { Capacitor } from '@capacitor/core';
+
+export async function openExternalUrl(url) {
+    if (Capacitor.isNativePlatform()) {
+        try {
+            const { Browser } = await import('@capacitor/browser');
+            await Browser.open({ url });
+            return;
+        } catch {}
+    }
+    window.open(url, '_blank', 'noopener');
+}
+
+export async function copyToClipboard(text) {
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 export const QUALITY = 'HI_RES_LOSSLESS';
 
@@ -77,8 +108,15 @@ export const getTrackYearDisplay = (track) => {
     return ` • ${year}`;
 };
 
-export const createPlaceholder = (text, isLoading = false) => {
-    return `<div class="placeholder-text ${isLoading ? 'loading' : ''}">${text}</div>`;
+export const createPlaceholder = (text, isLoading = false, { icon, cta, ctaHref } = {}) => {
+    if (!icon) {
+        return `<div class="placeholder-text ${isLoading ? 'loading' : ''}">${text}</div>`;
+    }
+    return `<div class="empty-state-box">
+        <span class="material-symbols-rounded empty-state-icon">${icon}</span>
+        <p class="empty-state-msg">${text}</p>
+        ${cta ? `<a class="empty-state-cta" href="${ctaHref || '#/search'}">${cta}</a>` : ''}
+    </div>`;
 };
 
 export const trackDataStore = new WeakMap();
@@ -436,4 +474,29 @@ export async function getCoverBlob(api, coverId) {
         return blob;
     }
     return null;
+}
+
+export function showConfirmDialog(title, message = '') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        document.getElementById('confirm-modal-title').textContent = title;
+        document.getElementById('confirm-modal-message').textContent = message;
+        modal.classList.add('active');
+
+        const cleanup = () => {
+            modal.classList.remove('active');
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            overlay.removeEventListener('click', onCancel);
+        };
+        const onOk = () => { cleanup(); resolve(true); };
+        const onCancel = () => { cleanup(); resolve(false); };
+
+        const okBtn = document.getElementById('confirm-modal-ok');
+        const cancelBtn = document.getElementById('confirm-modal-cancel');
+        const overlay = modal.querySelector('.modal-overlay');
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        overlay.addEventListener('click', onCancel);
+    });
 }

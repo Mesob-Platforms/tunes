@@ -1,7 +1,7 @@
 export class MusicDatabase {
     constructor() {
         this.dbName = 'MonochromeDB';
-        this.version = 12; // Bumped for offline_events store
+        this.version = 13; // Bumped for cached_images store (offline covers + artist pics)
         this.db = null;
     }
 
@@ -78,6 +78,10 @@ export class MusicDatabase {
                     store.createIndex('eventType', 'eventType', { unique: false });
                     store.createIndex('createdAt', 'createdAt', { unique: false });
                     store.createIndex('synced', 'synced', { unique: false });
+                }
+                // Cached images for offline album covers + artist pictures
+                if (!db.objectStoreNames.contains('cached_images')) {
+                    db.createObjectStore('cached_images', { keyPath: 'id' });
                 }
             };
         });
@@ -826,7 +830,7 @@ export class MusicDatabase {
         const entry = await this.performTransaction('home_cache', 'readonly', (store) => store.get('home_content'));
         if (!entry) return null;
         const age = Date.now() - entry.timestamp;
-        const ttl = 15 * 60 * 1000; // 15 minutes
+        const ttl = 120 * 60 * 1000; // 2 hours
         if (age > ttl) {
             // Expired - delete it
             await this.performTransaction('home_cache', 'readwrite', (store) => store.delete('home_content'));
@@ -943,6 +947,27 @@ export class MusicDatabase {
         );
     }
 
+    /* ── Cached-images helpers (offline covers + artist pics) ── */
+
+    async cacheImage(key, blob) {
+        await this.performTransaction('cached_images', 'readwrite', (store) =>
+            store.put({ id: String(key), blob, cachedAt: Date.now() })
+        );
+    }
+
+    async getCachedImage(key) {
+        const entry = await this.performTransaction('cached_images', 'readonly', (store) =>
+            store.get(String(key))
+        );
+        return entry ? entry.blob : null;
+    }
+
+    async removeCachedImage(key) {
+        await this.performTransaction('cached_images', 'readwrite', (store) =>
+            store.delete(String(key))
+        );
+    }
+
     /* ── Offline Event Queue ────────────────────────────────────── */
 
     /**
@@ -967,15 +992,26 @@ export class MusicDatabase {
      * Get all unsynced events.
      * @returns {Promise<Array>} Array of unsynced events
      */
+    static UNSYNCED_BATCH_LIMIT = 500;
+
     async getUnsyncedEvents() {
         const db = await this._getValidDb();
         return new Promise((resolve, reject) => {
             const transaction = db.transaction('offline_events', 'readonly');
             const store = transaction.objectStore('offline_events');
             const index = store.index('synced');
-            const request = index.getAll(false); // Get all where synced = false
+            const results = [];
+            const request = index.openCursor(IDBKeyRange.only(false));
 
-            request.onsuccess = () => resolve(request.result || []);
+            request.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (!cursor || results.length >= MusicDatabase.UNSYNCED_BATCH_LIMIT) {
+                    resolve(results);
+                    return;
+                }
+                results.push(cursor.value);
+                cursor.continue();
+            };
             request.onerror = () => reject(request.error);
         });
     }

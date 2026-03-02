@@ -1,8 +1,8 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-visual" />
         <title>Tunes</title>
         <meta name="theme-color" content="#000000" />
         <meta name="mobile-web-app-capable" content="yes" />
@@ -39,14 +39,15 @@
     </head>
 
     <body>
+        <a href="#main-content" class="skip-link">Skip to main content</a>
         <!-- Auth Gate - blocks entire app until user is logged in -->
         <div id="auth-gate" style="position:fixed;inset:0;z-index:99999;background:#000;display:none;align-items:center;justify-content:center;flex-direction:column;padding:1.5rem;overflow-y:auto;">
 
             <!-- ===== SCREEN 1: EMAIL ENTRY ===== -->
             <div id="gate-screen-email" class="gate-screen" style="max-width:380px;width:100%;text-align:center;">
-                <div style="margin-bottom:1.5rem;">
-                    <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
+                <div style="margin-bottom:1.5rem;display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
+                    <img src="/assets/app-icon.png" alt="Tunes" style="width:80px;height:80px;border-radius:20px;" />
+                    <span style="font-family:'Tiny5',cursive;font-size:2.5rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span>
                 </div>
                 <p style="opacity:0.4;font-size:0.85rem;margin:0 0 2rem;color:#fff;font-family:'DM Sans',sans-serif;">Sign in to continue</p>
 
@@ -74,9 +75,9 @@
 
             <!-- ===== SCREEN 2: PASSWORD (returning user) ===== -->
             <div id="gate-screen-password" class="gate-screen" style="display:none;max-width:380px;width:100%;text-align:center;">
-                <div style="margin-bottom:1.5rem;">
-                    <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
+                <div style="margin-bottom:1.5rem;display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
+                    <img src="/assets/app-icon.png" alt="Tunes" style="width:80px;height:80px;border-radius:20px;" />
+                    <span style="font-family:'Tiny5',cursive;font-size:2.5rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span>
                 </div>
                 <h2 style="font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 0.35rem;font-family:'DM Sans',sans-serif;">Welcome back</h2>
                 <p id="gate-password-subtitle" style="opacity:0.4;font-size:0.82rem;margin:0 0 1.75rem;color:#fff;font-family:'DM Sans',sans-serif;"></p>
@@ -96,9 +97,9 @@
 
             <!-- ===== SCREEN 3: OTP VERIFICATION (signup + forgot) ===== -->
             <div id="gate-screen-otp" class="gate-screen" style="display:none;max-width:380px;width:100%;text-align:center;">
-                <div style="margin-bottom:1.5rem;">
-                    <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
+                <div style="margin-bottom:1.5rem;display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
+                    <img src="/assets/app-icon.png" alt="Tunes" style="width:80px;height:80px;border-radius:20px;" />
+                    <span style="font-family:'Tiny5',cursive;font-size:2.5rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span>
                 </div>
                 <h2 style="font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 0.35rem;font-family:'DM Sans',sans-serif;">Check your email</h2>
                 <p id="gate-otp-subtitle" style="opacity:0.4;font-size:0.82rem;margin:0 0 1.75rem;color:#fff;font-family:'DM Sans',sans-serif;">We sent a code to your email</p>
@@ -117,9 +118,9 @@
 
             <!-- ===== SCREEN 4: SET PASSWORD (after OTP) ===== -->
             <div id="gate-screen-setpassword" class="gate-screen" style="display:none;max-width:380px;width:100%;text-align:center;">
-                <div style="margin-bottom:1.5rem;">
-                    <span style="font-family:'Tiny5',cursive;font-size:3rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span><br>
-                    <span style="font-family:'Cinzel',serif;font-size:0.55rem;font-weight:400;color:rgba(255,255,255,0.4);letter-spacing:0.25em;text-transform:uppercase;line-height:1;margin-top:4px;display:inline-block;">BY MESOB</span>
+                <div style="margin-bottom:1.5rem;display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
+                    <img src="/assets/app-icon.png" alt="Tunes" style="width:80px;height:80px;border-radius:20px;" />
+                    <span style="font-family:'Tiny5',cursive;font-size:2.5rem;font-weight:400;color:#fff;letter-spacing:0.05em;line-height:1;">tunes</span>
                 </div>
                 <h2 id="gate-setpw-title" style="font-size:1.3rem;font-weight:700;color:#fff;margin:0 0 0.35rem;font-family:'DM Sans',sans-serif;">Create your password</h2>
                 <p id="gate-setpw-subtitle" style="opacity:0.4;font-size:0.82rem;margin:0 0 1.75rem;color:#fff;font-family:'DM Sans',sans-serif;">You'll use this to sign in next time</p>
@@ -149,6 +150,7 @@
                 </li>
                 <li data-action="start-mix" data-type-filter="album,track">Start mix</li>
                 <li data-action="add-to-queue">Add to queue</li>
+                <li data-action="play-next">Play next</li>
                 <li
                     data-action="toggle-like"
                     data-type-filter="album,playlist,mix,user-playlist,artist"
@@ -290,22 +292,19 @@
                                 </svg>
                             </button>
                         </div>
+                        <div id="fullscreen-lyrics-container" class="fullscreen-lyrics-container" style="display:none"></div>
                         <div class="fullscreen-volume-container">
                             <button id="toggle-fullscreen-lyrics-btn" class="btn-icon fullscreen-lyrics-toggle" title="Toggle Lyrics">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M6 4h12M4 8h16M6 12h12M4 16h16M6 20h12"/>
                                 </svg>
                             </button>
-                            <button id="fs-volume-btn" class="fs-volume-btn" title="Mute">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-                                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                            <button id="fs-queue-inline-btn" class="btn-icon fullscreen-lyrics-toggle" title="Queue">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                                    <circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>
                                 </svg>
                             </button>
-                            <div id="fs-volume-bar" class="fs-volume-bar">
-                                <div id="fs-volume-fill" class="fs-volume-fill"></div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -407,6 +406,18 @@
                 </div>
                 <div class="modal-actions">
                     <button id="playlist-select-cancel" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="confirm-modal" class="modal">
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <h3 id="confirm-modal-title">Are you sure?</h3>
+                <p id="confirm-modal-message" style="color: rgba(255,255,255,0.6); margin: 0.5rem 0 0; font-size: 0.9rem;"></p>
+                <div class="modal-actions">
+                    <button id="confirm-modal-cancel" class="btn-secondary">Cancel</button>
+                    <button id="confirm-modal-ok" class="btn-primary" style="background: #ef4444; border-color: #ef4444;">Confirm</button>
                 </div>
             </div>
         </div>
@@ -633,7 +644,6 @@
                     <div class="sidebar-logo">
                         <div class="app-logo-text">
                             <span class="logo-tunes">tunes</span>
-                            <span class="logo-byline">BY MESOB</span>
                         </div>
                         <button
                             id="sidebar-toggle"
@@ -697,7 +707,7 @@
                 </div>
             </aside>
 
-            <main class="main-content">
+            <main id="main-content" class="main-content">
                 <div id="pull-to-refresh-indicator">
                     <svg class="ptr-spinner" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
@@ -707,7 +717,7 @@
                 <div id="page-background"></div>
                 <header class="main-header search-hidden">
                     <div class="navigation-controls desktop-only">
-                        <button id="nav-back" class="nav-btn" title="Go Back">
+                        <button id="nav-back" class="nav-btn" title="Go Back" aria-label="Go back">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="24"
@@ -722,7 +732,7 @@
                                 <path d="m15 18-6-6 6-6" />
                             </svg>
                         </button>
-                        <button id="nav-forward" class="nav-btn" title="Go Forward">
+                        <button id="nav-forward" class="nav-btn" title="Go Forward" aria-label="Go forward">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="24"
@@ -738,7 +748,7 @@
                             </svg>
                         </button>
                     </div>
-                    <button class="hamburger-menu" id="hamburger-btn" title="Open navigation">
+                    <button class="hamburger-menu" id="hamburger-btn" title="Open navigation" aria-label="Open navigation menu">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="3" y1="12" x2="21" y2="12"></line>
                             <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -747,7 +757,6 @@
                     </button>
                     <div class="home-header-title" id="home-header-title">
                         <span class="logo-tunes">tunes</span>
-                        <span class="logo-byline">BY MESOB</span>
                     </div>
                     <form class="search-bar" id="search-form">
                         <svg
@@ -778,6 +787,7 @@
                             type="button"
                             class="search-clear-btn btn-icon"
                             title="Clear search"
+                            aria-label="Clear search"
                             style="display: none"
                         >
                             &times;
@@ -794,71 +804,81 @@
                 </header>
 
                 <div id="page-home" class="page">
-                    <!-- Wrapped Banner (injected dynamically when available) -->
-                    <div id="home-wrapped-banner" style="padding:0 1rem;display:none;"></div>
-
-                    <!-- Announcement Banner (injected dynamically) -->
-                    <div id="home-announcement-banner" style="padding:0 1rem;display:none;"></div>
-
-                    <!-- Jump Back In - Horizontal Scroll (TOP) -->
-                    <section class="home-section" id="home-recent-section">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Jump Back In</h2>
-                            </div>
-                        <div class="home-scroll-row" id="home-recent-mixed"></div>
-                        </section>
-
-                    <!-- Recommended Albums - Horizontal Scroll -->
-                    <section class="home-section" id="home-albums-section">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Albums For You</h2>
+                    <!-- Welcome / empty state (shown when no history, favorites, or playlists) -->
+                    <div id="home-welcome" style="display:none;">
+                        <div style="text-align:center;padding:2.5rem 1.5rem 1.5rem;">
+                            <span class="material-symbols-rounded" style="font-size:2.5rem;opacity:0.4;">music_note</span>
+                            <h2 style="margin:0.75rem 0 0.4rem;font-size:1.15rem;opacity:0.8;">Welcome to Tunes</h2>
+                            <p style="opacity:0.45;font-size:0.85rem;margin-bottom:1.25rem;">Search for music you love to get personalized recommendations.</p>
+                            <a href="#/search" style="display:inline-block;padding:0.65rem 1.75rem;background:var(--primary, #6366f1);color:#fff;border-radius:2rem;font-size:0.9rem;font-weight:600;text-decoration:none;">Explore Music</a>
+                        </div>
                     </div>
-                        <div class="home-scroll-row" id="home-recommended-albums"></div>
+
+                    <div id="home-content">
+                        <!-- Wrapped Banner (injected dynamically when available) -->
+                        <div id="home-wrapped-banner" style="padding:0 1rem;display:none;"></div>
+
+                        <!-- Announcement Banner (injected dynamically) -->
+                        <div id="home-announcement-banner" style="padding:0 1rem;display:none;"></div>
+
+                        <!-- Quick Picks shortcut grid -->
+                        <section class="home-section" id="home-shortcuts-section">
+                            <div id="home-shortcuts-grid" class="home-shortcuts-grid"></div>
                         </section>
 
-                    <!-- Top Songs - Card with tracks -->
-                    <section class="home-section" id="home-songs-section">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Songs For You</h2>
+
+                        <!-- Recommended Albums - Horizontal Scroll -->
+                        <section class="home-section" id="home-albums-section">
+                            <div class="home-section-header">
+                                <h2 class="section-title">Albums For You</h2>
                             </div>
-                        <div class="home-songs-card">
-                            <div class="track-list" id="home-recommended-songs"></div>
+                            <div class="home-scroll-row" id="home-recommended-albums"></div>
+                        </section>
+
+                        <!-- Top Songs - Card with tracks -->
+                        <section class="home-section" id="home-songs-section">
+                            <div class="home-section-header">
+                                <h2 class="section-title">Songs For You</h2>
+                            </div>
+                            <div class="home-songs-card">
+                                <div class="track-list" id="home-recommended-songs"></div>
                             </div>
                         </section>
 
-                    <!-- Recommended Artists - Horizontal Scroll -->
-                    <section class="home-section" id="home-artists-section">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Artists For You</h2>
+                        <!-- Recommended Artists - Horizontal Scroll -->
+                        <section class="home-section" id="home-artists-section">
+                            <div class="home-section-header">
+                                <h2 class="section-title">Artists For You</h2>
                             </div>
-                        <div class="home-scroll-row" id="home-recommended-artists"></div>
+                            <div class="home-scroll-row" id="home-recommended-artists"></div>
                         </section>
 
-                    <!-- Trending on Tunes sections (from listening_events) -->
-                    <section class="home-section" id="home-trending-artists-section" style="display:none;">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Trending Artists on Tunes</h2>
-                        </div>
-                        <div class="home-scroll-row" id="home-trending-artists"></div>
-                    </section>
-                    <section class="home-section" id="home-trending-albums-section" style="display:none;">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Trending Albums on Tunes</h2>
-                        </div>
-                        <div class="home-scroll-row" id="home-trending-albums"></div>
-                    </section>
-                    <section class="home-section" id="home-trending-tracks-section" style="display:none;">
-                        <div class="home-section-header">
-                            <h2 class="section-title">Trending Tracks on Tunes</h2>
-                        </div>
-                        <div class="home-songs-card">
-                            <div class="track-list" id="home-trending-tracks"></div>
-                        </div>
-                    </section>
+                        <!-- Trending on Tunes sections (from listening_events) -->
+                        <section class="home-section" id="home-trending-artists-section" style="display:none;">
+                            <div class="home-section-header">
+                                <h2 class="section-title">Trending Artists on Tunes</h2>
+                            </div>
+                            <div class="home-scroll-row" id="home-trending-artists"></div>
+                        </section>
+                        <section class="home-section" id="home-trending-albums-section" style="display:none;">
+                            <div class="home-section-header">
+                                <h2 class="section-title">Trending Albums on Tunes</h2>
+                            </div>
+                            <div class="home-scroll-row" id="home-trending-albums"></div>
+                        </section>
+                        <section class="home-section" id="home-trending-tracks-section" style="display:none;">
+                            <div class="home-section-header">
+                                <h2 class="section-title">Trending Tracks on Tunes</h2>
+                            </div>
+                            <div class="home-songs-card">
+                                <div class="track-list" id="home-trending-tracks"></div>
+                            </div>
+                        </section>
 
-                    <!-- Pull to refresh spinner -->
-                    <div id="pull-refresh-spinner" style="display:none; text-align:center; padding:1rem 0;">
-                        <div style="width:24px;height:24px;border:2px solid rgba(255,255,255,0.1);border-top-color:rgba(255,255,255,0.6);border-radius:50%;margin:0 auto;animation:spin 0.7s linear infinite;"></div>
+                        <!-- Pull to refresh spinner -->
+                        <div id="pull-refresh-spinner" style="display:none; text-align:center; padding:1rem 0;">
+                            <div style="width:24px;height:24px;border:2px solid rgba(255,255,255,0.1);border-top-color:rgba(255,255,255,0.6);border-radius:50%;margin:0 auto;animation:spin 0.7s linear infinite;"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -875,7 +895,12 @@
                             <h3 style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;opacity:0.4;margin:0 0 0.75rem;">Trending on Tunes</h3>
                             <div id="explore-trending-list" style="display:flex;flex-wrap:wrap;gap:0.5rem;"></div>
                         </div>
+                        <div id="explore-browse-section" style="margin-bottom:1.5rem;">
+                            <h3 style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;opacity:0.4;margin:0 0 0.75rem;">Browse by Genre</h3>
+                            <div id="explore-browse-list" style="display:flex;flex-wrap:wrap;gap:0.5rem;"></div>
+                        </div>
                     </div>
+                    <div id="search-recent-chips" class="search-recent-chips" style="display:none;"></div>
                     <h2 class="section-title" id="search-results-title">Search Results</h2>
                     <div class="search-tabs">
                         <button class="search-tab active" data-tab="all">All</button>
@@ -1634,6 +1659,30 @@
                                 </p>
                             </div>
 
+                            <!-- Crossfade Setting -->
+                            <div id="account-crossfade-section" style="margin-bottom: 1.25rem; padding: 1.25rem; background: var(--card); border-radius: 16px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <span class="material-symbols-rounded" style="font-size: 1.1rem; opacity: 0.7;">swap_horiz</span>
+                                        <div>
+                                            <p style="font-size: 0.88rem; font-weight: 600; margin: 0;">Crossfade</p>
+                                            <p style="font-size: 0.72rem; opacity: 0.35; margin: 0.15rem 0 0;">Smooth transition between tracks</p>
+                                        </div>
+                                    </div>
+                                    <label class="toggle-switch" style="position:relative;width:44px;height:24px;flex-shrink:0;">
+                                        <input type="checkbox" id="crossfade-toggle" style="opacity:0;width:0;height:0;">
+                                        <span class="toggle-slider" style="position:absolute;cursor:pointer;inset:0;background:rgba(255,255,255,0.12);border-radius:24px;transition:0.2s;"></span>
+                                    </label>
+                                </div>
+                                <div id="crossfade-duration-row" style="display: none; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.06);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                        <span style="font-size: 0.78rem; opacity: 0.5;">Duration</span>
+                                        <span id="crossfade-duration-value" style="font-size: 0.82rem; font-weight: 600;">3s</span>
+                                    </div>
+                                    <input type="range" id="crossfade-duration-slider" min="1" max="12" value="3" step="1" style="width:100%;accent-color:var(--highlight, #6366f1);height:4px;">
+                                </div>
+                            </div>
+
                             <!-- Sign Out -->
                             <button id="sign-out-btn" class="btn-secondary" style="width: 100%; padding: 0.75rem; color: #ef4444; border-color: rgba(239,68,68,0.3); margin-top: 0.5rem;">Sign Out</button>
                         </div>
@@ -1724,7 +1773,7 @@
 
                             <!-- Daily Activity Sparkline -->
                             <div id="admin-daily-sparkline" style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
-                                <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Daily Activity <span style="opacity:0.6;">(30d)</span></p>
+                                <p id="admin-daily-activity-label" style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">Daily Activity</p>
                                 <div id="admin-sparkline-bars" style="display:flex;align-items:flex-end;gap:2px;height:60px;"></div>
                             </div>
 
@@ -1746,12 +1795,12 @@
                             <!-- Trending Now - horizontal scroll -->
                             <div style="display:flex;gap:1rem;margin-bottom:1.25rem;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:4px;">
                                 <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;min-width:85%;flex-shrink:0;scroll-snap-align:start;">
-                                    <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🔥 Trending Artists <span style="opacity:0.5;">(48h)</span></p>
+                                    <p id="admin-trending-artists-label" style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🔥 Trending Artists</p>
                                     <canvas id="admin-chart-artists" height="250" style="display:none;"></canvas>
                                     <div id="admin-trending-artists-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
                                 </div>
                                 <div style="background:var(--card);border-radius:16px;padding:1rem 1.25rem;min-width:85%;flex-shrink:0;scroll-snap-align:start;">
-                                    <p style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🎵 Trending Tracks <span style="opacity:0.5;">(48h)</span></p>
+                                    <p id="admin-trending-tracks-label" style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;opacity:0.35;margin:0 0 0.75rem;">🎵 Trending Tracks</p>
                                     <canvas id="admin-chart-tracks" height="250" style="display:none;"></canvas>
                                     <div id="admin-trending-tracks-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
                                 </div>
@@ -1966,7 +2015,7 @@
                                     <div style="background:rgba(255,255,255,0.05);border-radius:8px;height:6px;overflow:hidden;">
                                         <div id="admin-db-size-bar" style="height:100%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);width:0%;transition:width 0.3s ease;border-radius:8px;"></div>
                                     </div>
-                                    <p style="font-size:0.6rem;opacity:0.4;margin:0.35rem 0 0;">of 500 MB (Supabase Free)</p>
+                                    <p style="font-size:0.6rem;opacity:0.4;margin:0.35rem 0 0;">of 500 MB (Supabase Free) · auto-archive at 150 MB</p>
                                 </div>
 
                                 <!-- Listening Events Row Count -->
@@ -2020,7 +2069,6 @@
                         <div class="about-hero">
                             <h1 class="about-app-name">
                                 <span class="logo-tunes">tunes</span>
-                                <span class="logo-byline">BY MESOB</span>
                             </h1>
                             <p class="about-tagline">A music streaming app built with love for music.</p>
                             </div>
@@ -2104,10 +2152,6 @@
                                 <a href="https://t.me/z_fly1" target="_blank" rel="noopener noreferrer" class="about-link">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
                                     Telegram
-                                </a>
-                                <a href="https://instagram.com/_a.d.i.s.u_" target="_blank" rel="noopener noreferrer" class="about-link">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
-                                    Instagram
                                 </a>
                             </div>
                         </div>
@@ -2256,17 +2300,6 @@
 
                         <p style="font-size:0.78rem;opacity:0.45;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;padding-left:0.25rem;">Addisu (z-fly1)</p>
                         <div class="contact-methods" style="margin-bottom:1.25rem;">
-                            <a href="https://instagram.com/_a.d.i.s.u_" target="_blank" rel="noopener noreferrer" class="contact-method">
-                                <div class="contact-method-icon" style="background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
-                                </div>
-                                <div class="contact-method-info">
-                                    <span class="contact-method-label">Instagram</span>
-                                    <span class="contact-method-handle">@_a.d.i.s.u_</span>
-                                </div>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="contact-method-arrow"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                            </a>
-
                             <a href="https://t.me/z_fly1" target="_blank" rel="noopener noreferrer" class="contact-method">
                                 <div class="contact-method-icon" style="background: #2AABEE;">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
@@ -2428,7 +2461,7 @@
                 </div>
                 <div class="player-controls">
                     <div class="buttons">
-                        <button id="shuffle-btn" title="Shuffle">
+                        <button id="shuffle-btn" title="Shuffle" aria-label="Shuffle">
                             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="m18 14 4 4-4 4"/>
                                 <path d="m18 2 4 4-4 4"/>
@@ -2437,20 +2470,20 @@
                                 <path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/>
                             </svg>
                         </button>
-                        <button id="prev-btn" title="Previous">
+                        <button id="prev-btn" title="Previous" aria-label="Previous track">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                                 <rect x="3" y="5" width="2.5" height="14" rx="1"/>
                                 <path d="M19.5 5.27c0-.94-1.07-1.47-1.8-.9L9.2 11.1c-.57.44-.57 1.36 0 1.8l8.5 6.73c.73.57 1.8.04 1.8-.9V5.27z"/>
                             </svg>
                         </button>
-                        <button class="play-pause-btn" title="Play"></button>
-                        <button id="next-btn" title="Next">
+                        <button class="play-pause-btn" title="Play" aria-label="Play"></button>
+                        <button id="next-btn" title="Next" aria-label="Next track">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M4.5 5.27c0-.94 1.07-1.47 1.8-.9l8.5 6.73c.57.44.57 1.36 0 1.8l-8.5 6.73c-.73.57-1.8.04-1.8-.9V5.27z"/>
                                 <rect x="18.5" y="5" width="2.5" height="14" rx="1"/>
                             </svg>
                         </button>
-                        <button id="repeat-btn" title="Repeat">
+                        <button id="repeat-btn" title="Repeat" aria-label="Repeat">
                             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="m17 2 4 4-4 4"/>
                                 <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
@@ -2481,7 +2514,7 @@
                                 <path d="M7 4h10M5 8h14M7 12h10M5 16h14M7 20h10"/>
                             </svg>
                         </button>
-                        <button id="queue-btn" title="Queue">
+                        <button id="queue-btn" title="Queue" aria-label="Open queue">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <line x1="8" y1="6" x2="21" y2="6"/>
                                 <line x1="8" y1="12" x2="21" y2="12"/>
@@ -2569,7 +2602,7 @@
                         </div>
                     </div>
                     <div class="volume-slider-row desktop-only">
-                        <button id="volume-btn" title="Mute"></button>
+                        <button id="volume-btn" title="Mute" aria-label="Volume"></button>
                         <div id="volume-bar" class="volume-bar">
                             <div id="volume-fill" class="volume-fill"></div>
                         </div>

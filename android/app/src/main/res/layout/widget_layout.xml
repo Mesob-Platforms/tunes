@@ -5,20 +5,28 @@
     android:layout_height="match_parent"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:padding="8dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
     android:background="@drawable/widget_background">
 
-    <!-- Album art -->
-    <ImageView
-        android:id="@+id/widget_album_art"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
-        android:scaleType="centerCrop"
-        android:src="@mipmap/ic_launcher"
-        android:contentDescription="Album art"
-        android:layout_marginEnd="10dp" />
+    <FrameLayout
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/widget_album_bg"
+        android:clipToOutline="true">
 
-    <!-- Track info: title + artist -->
+        <ImageView
+            android:id="@+id/widget_album_art"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:src="@mipmap/ic_launcher"
+            android:contentDescription="Album art" />
+    </FrameLayout>
+
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -33,8 +41,9 @@
             android:layout_height="wrap_content"
             android:text="Not Playing"
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
+            android:textSize="14sp"
             android:fontFamily="sans-serif-medium"
+            android:letterSpacing="-0.01"
             android:maxLines="1"
             android:ellipsize="marquee"
             android:singleLine="true" />
@@ -44,49 +53,45 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Tunes"
-            android:textColor="#AAAAAA"
-            android:textSize="11sp"
+            android:textColor="#999999"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif"
             android:maxLines="1"
             android:ellipsize="end"
             android:singleLine="true"
-            android:layout_marginTop="2dp" />
+            android:layout_marginTop="1dp" />
     </LinearLayout>
 
-    <!-- Previous button -->
     <ImageButton
         android:id="@+id/widget_prev"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:src="@android:drawable/ic_media_previous"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:src="@drawable/ic_notif_prev"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="Previous"
         android:scaleType="centerInside"
-        android:tint="#FFFFFF"
-        android:layout_marginEnd="4dp" />
+        android:padding="7dp"
+        android:layout_marginEnd="2dp" />
 
-    <!-- Play/Pause button -->
     <ImageButton
         android:id="@+id/widget_play_pause"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:src="@android:drawable/ic_media_play"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:src="@drawable/ic_notif_play"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="Play or Pause"
         android:scaleType="centerInside"
-        android:tint="#FFFFFF"
-        android:layout_marginEnd="4dp" />
+        android:padding="6dp"
+        android:layout_marginEnd="2dp" />
 
-    <!-- Next button -->
     <ImageButton
         android:id="@+id/widget_next"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:src="@android:drawable/ic_media_next"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:src="@drawable/ic_notif_next"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="Next"
         android:scaleType="centerInside"
-        android:tint="#FFFFFF" />
+        android:padding="7dp" />
 
 </LinearLayout>
-
-

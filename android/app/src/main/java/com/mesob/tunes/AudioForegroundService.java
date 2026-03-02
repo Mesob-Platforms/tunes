@@ -12,8 +12,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
@@ -35,9 +33,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Foreground service that keeps audio alive when the app is backgrounded or swiped away.
- * Manages a MediaSession, media-style notification with play/pause/next/prev/like,
- * audio focus, headphone unplug (becoming noisy), and Bluetooth auto-resume.
+ * Foreground service that keeps audio alive when the app is backgrounded.
+ * Manages a MediaSession, media-style notification with prev/play/pause/next,
+ * headphone unplug (becoming noisy), and Bluetooth auto-resume.
+ *
+ * Audio focus is NOT managed here — the WebView's Chromium engine handles
+ * focus internally for the <audio> element. Requesting focus here would
+ * conflict and cause Chromium to pause audio immediately after starting.
  */
 public class AudioForegroundService extends Service {
 
@@ -45,9 +47,8 @@ public class AudioForegroundService extends Service {
     public static final String ACTION_UPDATE = "com.mesob.tunes.ACTION_UPDATE";
     public static final String CHANNEL_ID = "tunes_music_playback";
     private static final int NOTIFICATION_ID = 1;
-    private static final long PAUSE_STOP_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+    private static final long PAUSE_STOP_DELAY_MS = 5 * 60 * 1000;
 
-    // Notification action intents
     public static final String ACTION_PLAY  = "com.mesob.tunes.ACTION_PLAY";
     public static final String ACTION_PAUSE = "com.mesob.tunes.ACTION_PAUSE";
     public static final String ACTION_NEXT  = "com.mesob.tunes.ACTION_NEXT";
@@ -57,16 +58,9 @@ public class AudioForegroundService extends Service {
 
     private MediaSessionCompat mediaSession;
     private NotificationManager notificationManager;
-    private AudioManager audioManager;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Runnable pauseStopRunnable;
     private final ExecutorService artExecutor = Executors.newSingleThreadExecutor();
-
-    // Audio focus
-    private AudioFocusRequest audioFocusRequest;
-    private boolean hasAudioFocus = false;
-    private boolean wasPlayingBeforeFocusLoss = false;
-    private boolean isDucked = false;
 
     // Bluetooth auto-resume
     private boolean pausedDueToNoisy = false;
@@ -92,12 +86,9 @@ public class AudioForegroundService extends Service {
         super.onCreate();
         createNotificationChannel();
 
-        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-
         mediaSession = new MediaSessionCompat(this, "TunesMediaSession");
         mediaSession.setActive(true);
 
-        // Handle media button callbacks from the notification / lock screen / headphones
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
@@ -124,7 +115,7 @@ public class AudioForegroundService extends Service {
                 Intent i = new Intent(MediaBridge.ACTION_MEDIA_BRIDGE);
                 i.setPackage(getPackageName());
                 i.putExtra(MediaBridge.EXTRA_ACTION, "seekTo");
-                i.putExtra("position", pos / 1000.0); // ms → seconds
+                i.putExtra("position", pos / 1000.0);
                 sendBroadcast(i);
             }
 
@@ -136,11 +127,7 @@ public class AudioForegroundService extends Service {
         });
 
         notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-
-        // Register "becoming noisy" receiver (headphone unplug → auto-pause)
         registerNoisyReceiver();
-
-        // Register Bluetooth reconnect receiver (BT → auto-resume if was paused by disconnect)
         registerBluetoothReconnectReceiver();
     }
 
@@ -152,7 +139,6 @@ public class AudioForegroundService extends Service {
             return START_NOT_STICKY;
         }
 
-        // Handle pause/play actions from SleepTimerReceiver or other sources
         String action = intent.getAction();
         if (ACTION_PAUSE.equals(action)) {
             sendActionToJS("pause");
@@ -179,8 +165,6 @@ public class AudioForegroundService extends Service {
             return START_NOT_STICKY;
         }
 
-        boolean wasPlaying = currentIsPlaying;
-
         currentTitle      = intent.getStringExtra("title");
         currentArtist     = intent.getStringExtra("artist");
         currentAlbum      = intent.getStringExtra("album");
@@ -195,29 +179,15 @@ public class AudioForegroundService extends Service {
         if (currentAlbum == null) currentAlbum = "";
         if (currentAlbumArtUrl == null) currentAlbumArtUrl = "";
 
-        // Request audio focus when playback starts
-        if (currentIsPlaying && !wasPlaying) {
-            requestAudioFocus();
-        } else if (!currentIsPlaying && wasPlaying) {
-            // Don't release focus on pause — hold it until service stops
-        }
-
-        // Reset noisy flag when user manually resumes
         if (currentIsPlaying) {
             pausedDueToNoisy = false;
         }
 
-        // Update MediaSession metadata + playback state
         updateMediaSessionMetadata();
         updateMediaSessionPlaybackState();
-
-        // Post notification
         startForeground(NOTIFICATION_ID, buildNotification());
-
-        // Load album art asynchronously
         loadAlbumArtAsync();
 
-        // Manage auto-stop after 5 minutes of pause
         if (currentIsPlaying) {
             cancelPauseStopTimer();
         } else {
@@ -236,7 +206,6 @@ public class AudioForegroundService extends Service {
     @Override
     public void onDestroy() {
         cancelPauseStopTimer();
-        abandonAudioFocus();
         unregisterNoisyReceiver();
         unregisterBluetoothReceiver();
         if (mediaSession != null) {
@@ -245,78 +214,6 @@ public class AudioForegroundService extends Service {
         }
         artExecutor.shutdownNow();
         super.onDestroy();
-    }
-
-    // ──────────────────────────────────────────────────
-    //  Audio Focus
-    // ──────────────────────────────────────────────────
-
-    private final AudioManager.OnAudioFocusChangeListener focusChangeListener = (focusChange) -> {
-        switch (focusChange) {
-            case AudioManager.AUDIOFOCUS_GAIN:
-                // Regained full focus
-                hasAudioFocus = true;
-                if (isDucked) {
-                    sendActionToJS("unduck"); // Restore volume
-                    isDucked = false;
-                }
-                if (wasPlayingBeforeFocusLoss) {
-                    sendActionToJS("play");
-                    wasPlayingBeforeFocusLoss = false;
-                }
-                break;
-
-            case AudioManager.AUDIOFOCUS_LOSS:
-                // Permanent loss — another app took over (e.g. phone call ended, opened Spotify)
-                hasAudioFocus = false;
-                wasPlayingBeforeFocusLoss = false;
-                if (currentIsPlaying) {
-                    sendActionToJS("pause");
-                }
-                break;
-
-            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                // Temporary loss — e.g. phone call, Google Assistant
-                hasAudioFocus = false;
-                if (currentIsPlaying) {
-                    wasPlayingBeforeFocusLoss = true;
-                    sendActionToJS("pause");
-                }
-                break;
-
-            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-                // Can duck (lower volume) — e.g. navigation voice, notification sound
-                hasAudioFocus = false;
-                isDucked = true;
-                sendActionToJS("duck");
-                break;
-        }
-    };
-
-    private void requestAudioFocus() {
-        if (hasAudioFocus) return;
-
-        AudioAttributes attrs = new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .build();
-
-        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(attrs)
-            .setOnAudioFocusChangeListener(focusChangeListener, handler)
-            .setWillPauseWhenDucked(false) // We handle ducking ourselves
-            .build();
-
-        int result = audioManager.requestAudioFocus(audioFocusRequest);
-        hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
-        Log.d(TAG, "Audio focus request: " + (hasAudioFocus ? "granted" : "denied"));
-    }
-
-    private void abandonAudioFocus() {
-        if (audioFocusRequest != null) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest);
-            hasAudioFocus = false;
-        }
     }
 
     // ──────────────────────────────────────────────────
@@ -364,13 +261,12 @@ public class AudioForegroundService extends Service {
             public void onReceive(Context context, Intent intent) {
                 if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(intent.getAction())) {
                     Log.d(TAG, "Bluetooth device reconnected");
-                    // Auto-resume only if we paused due to headphone/BT disconnect
                     if (pausedDueToNoisy && !currentIsPlaying) {
                         Log.d(TAG, "Resuming playback after BT reconnect");
                         handler.postDelayed(() -> {
                             pausedDueToNoisy = false;
                             sendActionToJS("play");
-                        }, 1500); // Small delay for BT audio to stabilize
+                        }, 1500);
                     }
                 }
             }
@@ -396,18 +292,16 @@ public class AudioForegroundService extends Service {
     // ──────────────────────────────────────────────────
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "Music Playback",
-                NotificationManager.IMPORTANCE_LOW
-            );
-            channel.setDescription("Shows current track and playback controls");
-            channel.setShowBadge(false);
-            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(channel);
-        }
+        NotificationChannel channel = new NotificationChannel(
+            CHANNEL_ID,
+            "Music Playback",
+            NotificationManager.IMPORTANCE_LOW
+        );
+        channel.setDescription("Shows current track and playback controls");
+        channel.setShowBadge(false);
+        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.createNotificationChannel(channel);
     }
 
     private Notification buildNotification() {
@@ -417,27 +311,24 @@ public class AudioForegroundService extends Service {
             this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        NotificationCompat.Action prevAction = makeAction(ACTION_PREV, android.R.drawable.ic_media_previous, "Previous");
+        NotificationCompat.Action prevAction = makeAction(ACTION_PREV, R.drawable.ic_notif_prev, "Previous");
         NotificationCompat.Action playPauseAction;
         if (currentIsPlaying) {
-            playPauseAction = makeAction(ACTION_PAUSE, android.R.drawable.ic_media_pause, "Pause");
+            playPauseAction = makeAction(ACTION_PAUSE, R.drawable.ic_notif_pause, "Pause");
         } else {
-            playPauseAction = makeAction(ACTION_PLAY, android.R.drawable.ic_media_play, "Play");
+            playPauseAction = makeAction(ACTION_PLAY, R.drawable.ic_notif_play, "Play");
         }
-        NotificationCompat.Action nextAction = makeAction(ACTION_NEXT, android.R.drawable.ic_media_next, "Next");
-        NotificationCompat.Action likeAction = makeAction(ACTION_LIKE,
-            currentIsLiked ? android.R.drawable.btn_star_big_on : android.R.drawable.btn_star_big_off,
-            currentIsLiked ? "Unlike" : "Like");
+        NotificationCompat.Action nextAction = makeAction(ACTION_NEXT, R.drawable.ic_notif_next, "Next");
 
         MediaStyle mediaStyle = new MediaStyle()
             .setMediaSession(mediaSession.getSessionToken())
             .setShowActionsInCompactView(0, 1, 2);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(currentTitle.isEmpty() ? "Tunes by Mesob" : currentTitle)
+            .setContentTitle(currentTitle.isEmpty() ? "Tunes" : currentTitle)
             .setContentText(currentArtist)
             .setSubText(currentAlbum)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_notif_music)
             .setContentIntent(contentIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(currentIsPlaying)
@@ -445,8 +336,7 @@ public class AudioForegroundService extends Service {
             .setStyle(mediaStyle)
             .addAction(prevAction)
             .addAction(playPauseAction)
-            .addAction(nextAction)
-            .addAction(likeAction);
+            .addAction(nextAction);
 
         if (currentArtBitmap != null) {
             builder.setLargeIcon(currentArtBitmap);

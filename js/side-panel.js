@@ -7,8 +7,7 @@ export class SidePanelManager {
         this.currentView = null; // 'queue' or 'lyrics'
     }
 
-    open(view, title, renderControlsCallback, renderContentCallback, forceOpen = false) {
-        // If clicking the same view that is already open, close it
+    async open(view, title, renderControlsCallback, renderContentCallback, forceOpen = false) {
         if (!forceOpen && this.currentView === view && this.panel.classList.contains('active')) {
             this.close();
             return;
@@ -18,15 +17,16 @@ export class SidePanelManager {
         this.panel.dataset.view = view;
         this.titleElement.textContent = title;
 
-        // Clear previous content
         this.controlsElement.innerHTML = '';
         this.contentElement.innerHTML = '';
+        this.contentElement.scrollTop = 0;
 
-        // Render new content
         if (renderControlsCallback) renderControlsCallback(this.controlsElement);
-        if (renderContentCallback) renderContentCallback(this.contentElement);
 
         this.panel.classList.add('active');
+
+        if (renderContentCallback) await renderContentCallback(this.contentElement);
+        this.contentElement.scrollTop = 0;
     }
 
     close() {

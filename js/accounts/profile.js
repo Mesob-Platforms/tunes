@@ -50,11 +50,12 @@ export async function getUserStats(userId) {
     if (!supabase || !userId) return null;
 
     try {
-        // Get distinct counts + total
         const { data: events, error } = await supabase
             .from('listening_events')
             .select('track_id, artist_name, album_id, duration_sec, genre')
-            .eq('user_id', userId);
+            .eq('user_id', userId)
+            .order('listened_at', { ascending: false })
+            .limit(5000);
 
         if (error || !events) return { uniqueTracks: 0, uniqueArtists: 0, uniqueAlbums: 0, topGenres: [], totalMinutes: 0 };
 

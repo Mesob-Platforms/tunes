@@ -27,11 +27,15 @@ export function initializeUIInteractions(player, api, ui) {
     hamburgerBtn.addEventListener('click', () => {
         sidebar.classList.add('is-open');
         sidebarOverlay.classList.add('is-visible');
+        const backBtn = document.getElementById('mobile-back-btn');
+        if (backBtn) backBtn.style.display = 'none';
     });
 
     const closeSidebar = () => {
         sidebar.classList.remove('is-open');
         sidebarOverlay.classList.remove('is-visible');
+        const backBtn = document.getElementById('mobile-back-btn');
+        if (backBtn) backBtn.style.display = '';
     };
 
     sidebarOverlay.addEventListener('click', closeSidebar);
@@ -162,10 +166,6 @@ export function initializeUIInteractions(player, api, ui) {
                 const { showNotification } = await import('./downloads.js');
 
                 const playlists = await db.getPlaylists();
-                if (playlists.length === 0) {
-                    showNotification('No playlists yet. Create one first.');
-                    return;
-                }
 
                 const modal = document.createElement('div');
                 modal.className = 'modal active';
@@ -174,10 +174,13 @@ export function initializeUIInteractions(player, api, ui) {
                     <div class="modal-content">
                         <h3>Add Queue to Playlist</h3>
                         <div class="modal-list">
+                            <div class="modal-option create-new-option" style="border-bottom: 1px solid var(--border); margin-bottom: 0.5rem;">
+                                <span style="font-weight: 600; color: var(--primary);">+ Create New Playlist</span>
+                            </div>
                             ${playlists
                                 .map(
                                     (p) => `
-                                <div class="modal-option" data-id="${p.id}">${escapeHtml(p.name)}</div>
+                                <div class="modal-option" data-id="${p.id}"><span>${escapeHtml(p.name)}</span></div>
                             `
                                 )
                                 .join('')}
@@ -201,9 +204,38 @@ export function initializeUIInteractions(player, api, ui) {
                     }
 
                     const option = e.target.closest('.modal-option');
+                    if (!option) return;
+
+                    if (option.classList.contains('create-new-option')) {
+                        closeModal();
+                        const createModal = document.getElementById('playlist-modal');
+                        document.getElementById('playlist-modal-title').textContent = 'Create Playlist';
+                        document.getElementById('playlist-name-input').value = '';
+                        createModal.dataset.editingId = '';
+                        document.getElementById('csv-import-section').style.display = 'none';
+                        createModal.classList.add('active');
+                        document.getElementById('playlist-name-input').focus();
+                        const saveBtn = document.getElementById('save-playlist-btn');
+                        const origHandler = saveBtn.onclick;
+                        saveBtn.onclick = async () => {
+                            const name = document.getElementById('playlist-name-input').value.trim();
+                            if (!name) return;
+                            const newPlaylist = await db.createPlaylist(name);
+                            for (const track of currentQueue) {
+                                await db.addTrackToPlaylist(newPlaylist.id, track);
+                            }
+                            const updated = await db.getPlaylist(newPlaylist.id);
+                            syncManager.syncUserPlaylist(updated, 'create');
+                            showNotification(`Created "${name}" with ${currentQueue.length} tracks`);
+                            createModal.classList.remove('active');
+                            saveBtn.onclick = origHandler;
+                        };
+                        return;
+                    }
+
                     if (option) {
                         const playlistId = option.dataset.id;
-                        const playlistName = option.textContent;
+                        const playlistName = option.textContent.trim();
 
                         try {
                             let addedCount = 0;
@@ -251,6 +283,8 @@ export function initializeUIInteractions(player, api, ui) {
                 const trackArtists = getTrackArtists(track, { fallback: 'Unknown' });
                 const qualityBadge = createQualityBadgeHTML(track);
 
+                const canMoveUp = index > 0;
+                const canMoveDown = index < currentQueue.length - 1;
                 return `
                 <div class="queue-track-item ${isPlaying ? 'playing' : ''}" data-queue-index="${index}" data-track-id="${track.id}" draggable="true">
                     <div class="drag-handle">
@@ -268,12 +302,20 @@ export function initializeUIInteractions(player, api, ui) {
                         </div>
                     </div>
                     <div class="track-item-duration">${formatTime(track.duration)}</div>
-                    <button class="queue-like-btn" data-action="toggle-like" title="Add to Liked">
-                        ${SVG_HEART}
-                    </button>
-                    <button class="queue-remove-btn" data-track-index="${index}" title="Remove from queue">
-                        ${SVG_BIN}
-                    </button>
+                    <div class="queue-item-actions">
+                        <button class="queue-move-btn queue-move-up" data-queue-index="${index}" title="Move up" ${!canMoveUp ? 'disabled' : ''} aria-label="Move up">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+                        </button>
+                        <button class="queue-move-btn queue-move-down" data-queue-index="${index}" title="Move down" ${!canMoveDown ? 'disabled' : ''} aria-label="Move down">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                        <button class="queue-like-btn" data-action="toggle-like" title="Add to Liked">
+                            ${SVG_HEART}
+                        </button>
+                        <button class="queue-remove-btn" data-track-index="${index}" title="Remove from queue">
+                            ${SVG_BIN}
+                        </button>
+                    </div>
                 </div>
             `;
             })
@@ -301,6 +343,22 @@ export function initializeUIInteractions(player, api, ui) {
                 if (removeBtn) {
                     e.stopPropagation();
                     player.removeFromQueue(index);
+                    refreshQueuePanel();
+                    return;
+                }
+
+                const moveUpBtn = e.target.closest('.queue-move-up');
+                if (moveUpBtn && !moveUpBtn.disabled) {
+                    e.stopPropagation();
+                    player.moveInQueue(index, index - 1);
+                    refreshQueuePanel();
+                    return;
+                }
+
+                const moveDownBtn = e.target.closest('.queue-move-down');
+                if (moveDownBtn && !moveDownBtn.disabled) {
+                    e.stopPropagation();
+                    player.moveInQueue(index, index + 1);
                     refreshQueuePanel();
                     return;
                 }
@@ -395,6 +453,58 @@ export function initializeUIInteractions(player, api, ui) {
                     refreshQueuePanel();
                 }
             });
+
+            // Touch-based drag reorder for mobile
+            const handle = item.querySelector('.drag-handle');
+            if (handle) {
+                let _touchDragging = false;
+                let _touchStartY = 0;
+                let _touchCurrentOverIndex = null;
+
+                handle.addEventListener('touchstart', (e) => {
+                    _touchDragging = true;
+                    _touchStartY = e.touches[0].clientY;
+                    item.style.opacity = '0.5';
+                    item.style.zIndex = '100';
+                    draggedQueueIndex = index;
+                    e.preventDefault();
+                }, { passive: false });
+
+                handle.addEventListener('touchmove', (e) => {
+                    if (!_touchDragging) return;
+                    e.preventDefault();
+                    const touchY = e.touches[0].clientY;
+                    const allItems = container.querySelectorAll('.queue-track-item');
+                    let overIndex = null;
+                    allItems.forEach((el, i) => {
+                        const rect = el.getBoundingClientRect();
+                        if (touchY >= rect.top && touchY <= rect.bottom) {
+                            overIndex = i;
+                        }
+                    });
+                    if (overIndex !== null && overIndex !== _touchCurrentOverIndex) {
+                        allItems.forEach(el => el.style.borderTop = '');
+                        if (overIndex !== index) {
+                            allItems[overIndex].style.borderTop = '2px solid var(--highlight)';
+                        }
+                        _touchCurrentOverIndex = overIndex;
+                    }
+                }, { passive: false });
+
+                handle.addEventListener('touchend', () => {
+                    if (!_touchDragging) return;
+                    _touchDragging = false;
+                    item.style.opacity = '1';
+                    item.style.zIndex = '';
+                    container.querySelectorAll('.queue-track-item').forEach(el => el.style.borderTop = '');
+                    if (_touchCurrentOverIndex !== null && _touchCurrentOverIndex !== index) {
+                        player.moveInQueue(index, _touchCurrentOverIndex);
+                        refreshQueuePanel();
+                    }
+                    _touchCurrentOverIndex = null;
+                    draggedQueueIndex = null;
+                });
+            }
         });
     };
 
@@ -579,4 +689,148 @@ export function initializeUIInteractions(player, api, ui) {
             }
         }
     });
+
+    // Tap active nav tab to scroll to top
+    document.querySelectorAll('.bottom-nav a, #sidebar-nav a').forEach(link => {
+        link.addEventListener('click', (e) => {
+            const href = link.getAttribute('href');
+            const isActive = window.location.hash === href || window.location.pathname === href;
+            if (isActive) {
+                e.preventDefault();
+                const mainContent = document.getElementById('main-content');
+                if (mainContent) {
+                    mainContent.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }
+        });
+    });
+
+    // Swipe down to dismiss fullscreen player
+    (function initFullscreenSwipeDismiss() {
+        const overlay = document.getElementById('fullscreen-cover-overlay');
+        if (!overlay) return;
+        let startY = 0, startX = 0, dragging = false, dist = 0;
+        const THRESHOLD = 100;
+
+        overlay.addEventListener('touchstart', (e) => {
+            const t = e.target;
+            if (t.closest('#fs-progress-bar') || t.closest('#fs-volume-bar') || t.closest('.fullscreen-buttons')) return;
+            startY = e.touches[0].clientY;
+            startX = e.touches[0].clientX;
+            dragging = true;
+            dist = 0;
+        }, { passive: true });
+
+        overlay.addEventListener('touchmove', (e) => {
+            if (!dragging) return;
+            const dy = e.touches[0].clientY - startY;
+            const dx = Math.abs(e.touches[0].clientX - startX);
+            if (dx > 40 && dist === 0) { dragging = false; return; }
+            dist = Math.max(0, dy);
+            if (dist > 0) {
+                const pct = Math.min(dist / 300, 1);
+                overlay.style.transform = `translateY(${dist}px)`;
+                overlay.style.opacity = String(1 - pct * 0.5);
+            }
+        }, { passive: true });
+
+        overlay.addEventListener('touchend', () => {
+            if (!dragging) return;
+            dragging = false;
+            if (dist >= THRESHOLD) {
+                overlay.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+                overlay.style.transform = 'translateY(100%)';
+                overlay.style.opacity = '0';
+                overlay.addEventListener('transitionend', function onEnd() {
+                    overlay.removeEventListener('transitionend', onEnd);
+                    overlay.style.transition = '';
+                    overlay.style.transform = '';
+                    overlay.style.opacity = '';
+                    ui.closeFullscreenCover();
+                }, { once: true });
+            } else {
+                overlay.style.transition = 'transform 0.15s ease-out, opacity 0.15s ease-out';
+                overlay.style.transform = '';
+                overlay.style.opacity = '';
+                overlay.addEventListener('transitionend', function onEnd() {
+                    overlay.removeEventListener('transitionend', onEnd);
+                    overlay.style.transition = '';
+                }, { once: true });
+            }
+            dist = 0;
+        }, { passive: true });
+    })();
+
+    // Swipe left/right to toggle cover and lyrics in fullscreen
+    (function initFullscreenSwipeLyrics() {
+        const overlay = document.getElementById('fullscreen-cover-overlay');
+        if (!overlay) return;
+        let startX = 0, startY = 0, active = false;
+        const THRESHOLD = 60;
+
+        overlay.addEventListener('touchstart', (e) => {
+            const t = e.target;
+            if (t.closest('#fs-progress-bar') || t.closest('#fs-volume-bar') || t.closest('.fullscreen-buttons')) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            active = true;
+        }, { passive: true });
+
+        overlay.addEventListener('touchend', (e) => {
+            if (!active) return;
+            active = false;
+            const dx = e.changedTouches[0].clientX - startX;
+            const dy = Math.abs(e.changedTouches[0].clientY - startY);
+            if (dy > Math.abs(dx)) return;
+            if (Math.abs(dx) < THRESHOLD) return;
+            const lyricsBtn = document.getElementById('toggle-fullscreen-lyrics-btn');
+            if (!lyricsBtn) return;
+            const lyricsContainer = document.getElementById('fullscreen-lyrics-container');
+            const isLyricsVisible = lyricsContainer && lyricsContainer.style.display !== 'none';
+            if (dx < 0 && !isLyricsVisible) lyricsBtn.click();
+            else if (dx > 0 && isLyricsVisible) lyricsBtn.click();
+        }, { passive: true });
+    })();
+
+    // Long-press on track items for context menu
+    (function initLongPressContextMenu() {
+        let timer = null, sx = 0, sy = 0;
+        const HOLD_MS = 500, MOVE_THRESHOLD = 10;
+
+        document.addEventListener('touchstart', (e) => {
+            const row = e.target.closest('.track-list-item, .dl-track-item, .search-result-item');
+            if (!row) return;
+            sx = e.touches[0].clientX;
+            sy = e.touches[0].clientY;
+            timer = setTimeout(() => {
+                timer = null;
+                e.preventDefault?.();
+                const rect = row.getBoundingClientRect();
+                const menuBtn = row.querySelector('.more-btn, .three-dot-btn, [data-track-id]');
+                if (menuBtn) {
+                    const evt = new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 });
+                    menuBtn.dispatchEvent(evt);
+                } else {
+                    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
+                }
+            }, HOLD_MS);
+        }, { passive: false });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!timer) return;
+            if (Math.abs(e.touches[0].clientX - sx) > MOVE_THRESHOLD || Math.abs(e.touches[0].clientY - sy) > MOVE_THRESHOLD) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchend', () => {
+            if (timer) { clearTimeout(timer); timer = null; }
+        }, { passive: true });
+
+        document.addEventListener('touchcancel', () => {
+            if (timer) { clearTimeout(timer); timer = null; }
+        }, { passive: true });
+    })();
+
 }

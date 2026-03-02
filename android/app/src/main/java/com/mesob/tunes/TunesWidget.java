@@ -65,9 +65,8 @@ public class TunesWidget extends AppWidgetProvider {
         views.setTextViewText(R.id.widget_title, title);
         views.setTextViewText(R.id.widget_artist, artist);
 
-        // Play/Pause icon
         views.setImageViewResource(R.id.widget_play_pause,
-                isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+                isPlaying ? R.drawable.ic_notif_pause : R.drawable.ic_notif_play);
 
         // ── Button PendingIntents → send to AudioForegroundService ──
         views.setOnClickPendingIntent(R.id.widget_prev,
@@ -117,7 +116,7 @@ public class TunesWidget extends AppWidgetProvider {
                         artViews.setTextViewText(R.id.widget_title, title);
                         artViews.setTextViewText(R.id.widget_artist, artist);
                         artViews.setImageViewResource(R.id.widget_play_pause,
-                                isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+                                isPlaying ? R.drawable.ic_notif_pause : R.drawable.ic_notif_play);
                         artViews.setOnClickPendingIntent(R.id.widget_prev,
                                 makeServiceIntent(context, "com.mesob.tunes.ACTION_PREV", 1));
                         artViews.setOnClickPendingIntent(R.id.widget_play_pause,

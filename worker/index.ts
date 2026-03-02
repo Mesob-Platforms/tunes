@@ -1,22 +1,13 @@
-import { getAssetFromKV } from '@cloudflare/kv-asset-handler';
-// @ts-expect-error - wrangler injects this module
-import manifestJSON from '__STATIC_CONTENT_MANIFEST';
-import md5 from 'md5';
-
-const assetManifest = JSON.parse(manifestJSON);
 
 const ADMIN_EMAIL = 'naolmideksa@gmail.com';
 const PREVIEW_EMAILS = [ADMIN_EMAIL, 'naolmid.official@gmail.com', 'naolmideksa@gmail.com'];
 const SUPABASE_URL = 'https://qkdcloplojidvscgzfxq.supabase.co';
 
 interface Env {
-  __STATIC_CONTENT: KVNamespace;
   SUPABASE_SERVICE_ROLE_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
-  AI: any; // Workers AI binding
-  GENIUS_TOKEN: string;       // Genius API bearer token (secret)
-  LASTFM_API_SECRET: string;  // Last.fm API shared secret (secret)
+  AI: any;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -72,12 +63,20 @@ async function tgSendDocument(env: Env, fileBlob: Blob, filename: string, captio
   form.append('document', fileBlob, filename);
   if (caption) form.append('caption', caption.substring(0, 1024));
   const res = await fetch(`${TG_API}${env.TELEGRAM_BOT_TOKEN}/sendDocument`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const text = await res.text();
+    try { const j = JSON.parse(text); return j; } catch { return { ok: false, description: res.statusText || 'Send failed' }; }
+  }
   return res.json();
 }
 
 /** Get file info from Telegram (for retrieval) */
 async function tgGetFile(env: Env, fileId: string): Promise<any> {
   const res = await fetch(`${TG_API}${env.TELEGRAM_BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    try { return JSON.parse(text); } catch { return { ok: false, description: res.statusText || 'getFile failed' }; }
+  }
   return res.json();
 }
 
@@ -105,77 +104,103 @@ async function tgTestConnection(env: Env): Promise<{ ok: boolean; bot_name?: str
    ARCHIVE LOGIC — export data to JSON and send to Telegram
    ══════════════════════════════════════════════════════════════ */
 
-async function performArchive(env: Env): Promise<{ success: boolean; rows: number; error?: string }> {
-  const hdrs = adminHeaders(env);
+const KEEP_RECENT_DAYS = 365; // Keep 1 year of data in Supabase
+const AUTO_ARCHIVE_MB = 150; // Auto-trigger archive when DB exceeds this size
 
-  // 1. Find the last successful archive date
-  const idxRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/telegram_archive_index?select=date_to&status=eq.completed&order=date_to.desc&limit=1`,
-    { headers: hdrs }
-  );
-  const idxData: any[] = idxRes.ok ? await idxRes.json() : [];
-  const lastArchiveDate = idxData[0]?.date_to || null;
-
-  // 2. Fetch listening events since last archive (up to 50k)
-  let evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=*&order=listened_at.asc&limit=50000`;
-  if (lastArchiveDate) {
-    evtUrl += `&listened_at=gt.${encodeURIComponent(lastArchiveDate)}`;
+async function tgSendWithRetry(env: Env, blob: Blob, filename: string, caption: string, retries = 3): Promise<any> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const result = await tgSendDocument(env, blob, filename, caption);
+    if (result.ok) return result;
+    if (result.error_code === 429 && result.parameters?.retry_after) {
+      const wait = Math.min(result.parameters.retry_after * 1000, 30000);
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+    if (attempt < retries - 1) {
+      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      continue;
+    }
+    return result;
   }
+  return { ok: false, description: 'Max retries exceeded' };
+}
+
+const ARCHIVE_CHUNK_SIZE = 10000;
+
+async function performArchive(env: Env): Promise<{ success: boolean; rows: number; purged: number; error?: string }> {
+  const hdrs = adminHeaders(env);
+  const cutoffDate = new Date(Date.now() - KEEP_RECENT_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=*&listened_at=lt.${encodeURIComponent(cutoffDate)}&order=listened_at.asc&limit=50000`;
   const evtRes = await fetch(evtUrl, { headers: hdrs });
-  if (!evtRes.ok) return { success: false, rows: 0, error: `Failed to fetch events: ${evtRes.status}` };
-  const events: any[] = await evtRes.json();
+  if (!evtRes.ok) return { success: false, rows: 0, purged: 0, error: `Failed to fetch events: ${evtRes.status}` };
+  const allEvents: any[] = await evtRes.json();
 
-  if (events.length === 0) return { success: true, rows: 0 };
+  if (allEvents.length === 0) return { success: true, rows: 0, purged: 0 };
 
-  // 3. Package as JSON
-  const dateFrom = events[0].listened_at;
-  const dateTo = events[events.length - 1].listened_at;
-  const jsonStr = JSON.stringify(events, null, 0);
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const sizeKb = Math.round(blob.size / 1024);
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `tunes-archive-${ts}.json`;
+  let totalArchived = 0;
+  let totalPurged = 0;
 
-  // 4. Send to Telegram
-  const caption = `📦 Tunes Archive\n${events.length} events | ${sizeKb} KB\n${dateFrom} → ${dateTo}`;
-  const tgResult = await tgSendDocument(env, blob, filename, caption);
+  for (let offset = 0; offset < allEvents.length; offset += ARCHIVE_CHUNK_SIZE) {
+    const chunk = allEvents.slice(offset, offset + ARCHIVE_CHUNK_SIZE);
+    const dateFrom = chunk[0].listened_at;
+    const dateTo = chunk[chunk.length - 1].listened_at;
+    const archivedIds: string[] = chunk.map((e: any) => e.id).filter(Boolean);
 
-  if (!tgResult.ok) {
-    // Record failed attempt
+    const jsonStr = JSON.stringify(chunk, null, 0);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const sizeKb = Math.round(blob.size / 1024);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const chunkLabel = allEvents.length > ARCHIVE_CHUNK_SIZE ? `-part${Math.floor(offset / ARCHIVE_CHUNK_SIZE) + 1}` : '';
+    const filename = `tunes-archive-${ts}${chunkLabel}.json`;
+
+    const caption = `📦 Tunes Archive${chunkLabel}\n${chunk.length} events | ${sizeKb} KB\n${dateFrom} → ${dateTo}`;
+    const tgResult = await tgSendWithRetry(env, blob, filename, caption);
+
+    if (!tgResult.ok) {
+      await fetch(`${SUPABASE_URL}/rest/v1/telegram_archive_index`, {
+        method: 'POST', headers: hdrs,
+        body: JSON.stringify({
+          archive_type: 'listening_events', row_count: chunk.length, file_size_kb: sizeKb,
+          date_from: dateFrom, date_to: dateTo,
+          status: 'failed', error_message: tgResult.description || 'Telegram send failed',
+        }),
+      });
+      return { success: false, rows: totalArchived, purged: totalPurged, error: tgResult.description || 'Telegram send failed' };
+    }
+
+    const doc = tgResult.result?.document;
     await fetch(`${SUPABASE_URL}/rest/v1/telegram_archive_index`, {
-      method: 'POST',
-      headers: hdrs,
+      method: 'POST', headers: hdrs,
       body: JSON.stringify({
-        archive_type: 'listening_events',
-        row_count: events.length,
-        file_size_kb: sizeKb,
-        date_from: dateFrom,
-        date_to: dateTo,
-        status: 'failed',
-        error_message: tgResult.description || 'Telegram send failed',
+        archive_type: 'listening_events', row_count: chunk.length, file_size_kb: sizeKb,
+        date_from: dateFrom, date_to: dateTo,
+        telegram_file_id: doc?.file_id || null,
+        telegram_msg_id: tgResult.result?.message_id || null,
+        status: 'completed',
       }),
     });
-    return { success: false, rows: events.length, error: tgResult.description || 'Telegram send failed' };
+    totalArchived += chunk.length;
+
+    // Purge only the exact IDs that were successfully archived (transaction-safe)
+    if (archivedIds.length > 0) {
+      const batchSize = 500;
+      for (let i = 0; i < archivedIds.length; i += batchSize) {
+        const batch = archivedIds.slice(i, i + batchSize);
+        const idFilter = `id=in.(${batch.join(',')})`;
+        const purgeRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/listening_events?${idFilter}`,
+          { method: 'DELETE', headers: { ...hdrs, 'Prefer': 'return=representation' } }
+        );
+        if (purgeRes.ok) {
+          const purged: any[] = await purgeRes.json();
+          totalPurged += purged.length;
+        }
+      }
+    }
   }
 
-  // 5. Record success in archive index
-  const doc = tgResult.result?.document;
-  await fetch(`${SUPABASE_URL}/rest/v1/telegram_archive_index`, {
-    method: 'POST',
-    headers: hdrs,
-    body: JSON.stringify({
-      archive_type: 'listening_events',
-      row_count: events.length,
-      file_size_kb: sizeKb,
-      date_from: dateFrom,
-      date_to: dateTo,
-      telegram_file_id: doc?.file_id || null,
-      telegram_msg_id: tgResult.result?.message_id || null,
-      status: 'completed',
-    }),
-  });
-
-  return { success: true, rows: events.length };
+  return { success: true, rows: totalArchived, purged: totalPurged };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -268,17 +293,16 @@ async function handleListUsers(env: Env): Promise<Response> {
   const authData: any = await authRes.json();
   const authUsers: any[] = authData.users || [];
 
-  // 2. Get all profiles (service-role bypasses RLS)
-  const profRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?select=user_id,display_name,avatar_seed`, { headers });
+  // 2. Get profiles (capped to match auth list size)
+  const profRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?select=user_id,display_name,avatar_seed&limit=500`, { headers });
   const profiles: any[] = profRes.ok ? await profRes.json() : [];
   const profileMap: Record<string, any> = {};
   for (const p of profiles) profileMap[p.user_id] = p;
 
-  // 3. Get play counts from listening_events
-  const evtRes = await fetch(`${SUPABASE_URL}/rest/v1/listening_events?select=user_id`, { headers });
-  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+  // 3. Get play counts from ALL events including archived from Telegram
+  const allEvents = await getAllEventsIncludingArchives(env);
   const playCounts: Record<string, number> = {};
-  for (const e of events) playCounts[e.user_id] = (playCounts[e.user_id] || 0) + 1;
+  for (const e of allEvents) playCounts[e.user_id] = (playCounts[e.user_id] || 0) + 1;
 
   // 4. Filter out users who haven't confirmed their email
   const confirmedUsers = authUsers.filter((u: any) => u.email_confirmed_at);
@@ -315,12 +339,9 @@ async function handleUserSummary(request: Request, env: Env): Promise<Response> 
   const profiles: any[] = profRes.ok ? await profRes.json() : [];
   const profile = profiles[0] || null;
 
-  // Get listening events
-  const evtRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/listening_events?select=track_title,artist_name,album_title,genre,listened_at&user_id=eq.${userId}&order=listened_at.desc`,
-    { headers }
-  );
-  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+  // Get ALL listening events including archived from Telegram
+  const allEvents = await getAllEventsIncludingArchives(env);
+  const events = allEvents.filter((e: any) => e.user_id === userId);
 
   // Aggregate stats
   const artistCounts: Record<string, number> = {};
@@ -362,16 +383,48 @@ async function handleUserSummary(request: Request, env: Env): Promise<Response> 
   }, { headers: CORS_HEADERS });
 }
 
-/** GET /api/admin/dashboard-stats — rich analytics for admin dashboard */
-async function handleDashboardStats(env: Env): Promise<Response> {
+/**
+ * Fetch ALL listening events: current DB rows + archived data retrieved from Telegram.
+ * Returns the merged array of events (may be large but complete).
+ */
+async function getAllEventsIncludingArchives(env: Env): Promise<any[]> {
   const hdrs = adminHeaders(env);
 
-  // Fetch ALL listening events with timestamps (up to 50k)
-  const evtRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/listening_events?select=user_id,track_title,artist_name,genre,listened_at,duration_sec&order=listened_at.desc&limit=50000`,
-    { headers: hdrs }
-  );
-  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+  const [evtRes, archiveIndexRes] = await Promise.all([
+    fetch(
+      `${SUPABASE_URL}/rest/v1/listening_events?select=user_id,track_title,artist_name,genre,listened_at,duration_sec&order=listened_at.desc&limit=50000`,
+      { headers: hdrs }
+    ),
+    fetch(
+      `${SUPABASE_URL}/rest/v1/telegram_archive_index?select=telegram_file_id,row_count,status&status=eq.completed&order=date_from.asc`,
+      { headers: hdrs }
+    ),
+  ]);
+
+  const currentEvents: any[] = evtRes.ok ? await evtRes.json() : [];
+  const archiveRecords: any[] = archiveIndexRes.ok ? await archiveIndexRes.json() : [];
+
+  const archivedEvents: any[] = [];
+  for (const archive of archiveRecords) {
+    if (!archive.telegram_file_id) continue;
+    try {
+      const fileInfo = await tgGetFile(env, archive.telegram_file_id);
+      if (!fileInfo.ok) continue;
+      const fileRes = await tgDownloadFile(env, fileInfo.result.file_path);
+      if (!fileRes.ok) continue;
+      const data: any[] = await fileRes.json();
+      if (Array.isArray(data)) archivedEvents.push(...data);
+    } catch (e) {
+      console.error('Failed to retrieve archive:', archive.telegram_file_id, e);
+    }
+  }
+
+  return [...currentEvents, ...archivedEvents];
+}
+
+/** GET /api/admin/dashboard-stats — rich analytics for admin dashboard */
+async function handleDashboardStats(env: Env): Promise<Response> {
+  const events = await getAllEventsIncludingArchives(env);
 
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
@@ -379,7 +432,6 @@ async function handleDashboardStats(env: Env): Promise<Response> {
   const weekAgo = new Date(now.getTime() - 7 * 86400000);
   const prevWeekStart = new Date(now.getTime() - 14 * 86400000);
   const fortyEightHoursAgo = new Date(now.getTime() - 48 * 3600000);
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
 
   let playsToday = 0;
   let playsYesterday = 0;
@@ -389,6 +441,8 @@ async function handleDashboardStats(env: Env): Promise<Response> {
   const genreCounts: Record<string, number> = {};
   const trending48hArtists: Record<string, number> = {};
   const trending48hTracks: Record<string, { title: string; artist: string; count: number }> = {};
+  const allTimeArtists: Record<string, number> = {};
+  const allTimeTracks: Record<string, { title: string; artist: string; count: number }> = {};
   const dailyPlays: Record<string, number> = {};
   const weeklyActiveUsers = new Set<string>();
   const todayActiveUsers = new Set<string>();
@@ -396,7 +450,8 @@ async function handleDashboardStats(env: Env): Promise<Response> {
 
   for (const e of events) {
     const listenedAt = new Date(e.listened_at);
-    const dayStr = e.listened_at.slice(0, 10);
+    const dayStr = e.listened_at?.slice(0, 10);
+    if (!dayStr) continue;
 
     if (dayStr === todayStr) { playsToday++; todayActiveUsers.add(e.user_id); }
     if (dayStr === yesterdayStr) playsYesterday++;
@@ -406,21 +461,34 @@ async function handleDashboardStats(env: Env): Promise<Response> {
     peakHours[listenedAt.getHours()]++;
     if (e.genre) genreCounts[e.genre] = (genreCounts[e.genre] || 0) + 1;
 
+    if (e.artist_name) allTimeArtists[e.artist_name] = (allTimeArtists[e.artist_name] || 0) + 1;
+    if (e.track_title) {
+      const key = `${e.track_title}|||${e.artist_name || ''}`;
+      if (!allTimeTracks[key]) allTimeTracks[key] = { title: e.track_title, artist: e.artist_name || '', count: 0 };
+      allTimeTracks[key].count++;
+    }
+
     if (listenedAt >= fortyEightHoursAgo) {
       if (e.artist_name) trending48hArtists[e.artist_name] = (trending48hArtists[e.artist_name] || 0) + 1;
       if (e.track_title) {
-        const key = `${e.track_title}|||${e.artist_name}`;
-        if (!trending48hTracks[key]) trending48hTracks[key] = { title: e.track_title, artist: e.artist_name, count: 0 };
+        const key = `${e.track_title}|||${e.artist_name || ''}`;
+        if (!trending48hTracks[key]) trending48hTracks[key] = { title: e.track_title, artist: e.artist_name || '', count: 0 };
         trending48hTracks[key].count++;
       }
     }
 
-    if (listenedAt >= thirtyDaysAgo) dailyPlays[dayStr] = (dailyPlays[dayStr] || 0) + 1;
+    dailyPlays[dayStr] = (dailyPlays[dayStr] || 0) + 1;
     totalMinutes += Math.round((e.duration_sec || 0) / 60);
   }
 
-  const trendingArtists = Object.entries(trending48hArtists).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, plays]) => ({ name, plays }));
-  const trendingTracks = Object.values(trending48hTracks).sort((a, b) => b.count - a.count).slice(0, 10).map(t => ({ title: t.title, artist: t.artist, plays: t.count }));
+  // Use 48h trending if available, fall back to all-time top artists/tracks
+  const has48h = Object.keys(trending48hArtists).length > 0;
+  const trendingArtists = has48h
+    ? Object.entries(trending48hArtists).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, plays]) => ({ name, plays }))
+    : Object.entries(allTimeArtists).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, plays]) => ({ name, plays }));
+  const trendingTracks = has48h
+    ? Object.values(trending48hTracks).sort((a, b) => b.count - a.count).slice(0, 10).map(t => ({ title: t.title, artist: t.artist, plays: t.count }))
+    : Object.values(allTimeTracks).sort((a, b) => b.count - a.count).slice(0, 10).map(t => ({ title: t.title, artist: t.artist, plays: t.count }));
   const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([genre, plays]) => ({ genre, plays }));
   const dailyPlaysArr = Object.entries(dailyPlays).sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count }));
 
@@ -437,6 +505,7 @@ async function handleDashboardStats(env: Env): Promise<Response> {
     genre_breakdown: topGenres,
     trending_artists_48h: trendingArtists,
     trending_tracks_48h: trendingTracks,
+    trending_period: has48h ? '48h' : 'all_time',
     daily_plays_30d: dailyPlaysArr,
   }, { headers: CORS_HEADERS });
 }
@@ -556,8 +625,8 @@ async function handleEditUpdate(request: Request, env: Env): Promise<Response> {
 async function handleListUpdates(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
   const [updatesRes, trackingRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/admin_updates?select=*&order=created_at.desc`, { headers: hdrs }),
-    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_id,event_type&item_type=eq.update`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_updates?select=*&order=created_at.desc&limit=1000`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_id,event_type&item_type=eq.update&limit=5000`, { headers: hdrs }),
   ]);
   const updates: any[] = updatesRes.ok ? await updatesRes.json() : [];
   const tracking: any[] = trackingRes.ok ? await trackingRes.json() : [];
@@ -644,8 +713,8 @@ async function handleEditAnnouncement(request: Request, env: Env): Promise<Respo
 async function handleListAnnouncements(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
   const [annsRes, trackingRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?select=*&order=created_at.desc`, { headers: hdrs }),
-    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_id,event_type&item_type=eq.announcement`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?select=*&order=created_at.desc&limit=1000`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_id,event_type&item_type=eq.announcement&limit=5000`, { headers: hdrs }),
   ]);
   const anns: any[] = annsRes.ok ? await annsRes.json() : [];
   const tracking: any[] = trackingRes.ok ? await trackingRes.json() : [];
@@ -698,9 +767,9 @@ async function handleTrackEvent(request: Request, env: Env): Promise<Response> {
 async function handleMessagingStats(env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
   const [updatesRes, annsRes, trackingRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/admin_updates?select=id,is_active`, { headers: hdrs }),
-    fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?select=id,is_active,ends_at`, { headers: hdrs }),
-    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_type,event_type`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_updates?select=id,is_active&limit=1000`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_announcements?select=id,is_active,ends_at&limit=1000`, { headers: hdrs }),
+    fetch(`${SUPABASE_URL}/rest/v1/admin_tracking?select=item_type,event_type&limit=50000`, { headers: hdrs }),
   ]);
   const updates: any[] = updatesRes.ok ? await updatesRes.json() : [];
   const anns: any[] = annsRes.ok ? await annsRes.json() : [];
@@ -835,38 +904,92 @@ From these 4 categories, determine which has the MOST POPULAR result and should 
    PROXY ENDPOINTS — shield secrets from client JS
    ══════════════════════════════════════════════════════════════ */
 
-/** GET /api/proxy/genius-token — return Genius bearer token (stored server-side) */
-function handleGeniusToken(env: Env): Response {
-  if (!env.GENIUS_TOKEN) {
-    return Response.json({ error: 'Genius token not configured' }, { status: 500, headers: CORS_HEADERS });
-  }
-  return Response.json({ token: env.GENIUS_TOKEN }, { headers: CORS_HEADERS });
+/* Genius token and Last.fm signing endpoints removed — unused by frontend */
+
+/* ══════════════════════════════════════════════════════════════
+   MUSIXMATCH WORD-SYNCED LYRICS (richsync)
+   ══════════════════════════════════════════════════════════════ */
+
+const MXM_API = 'https://apic-desktop.musixmatch.com/ws/1.1/';
+const MXM_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Musixmatch/0.19.4 Chrome/58.0.3029.110 Electron/1.7.6 Safari/537.36',
+  'Cookie': 'AWSELB=0; AWSELBCORS=0',
+};
+let mxmUserToken: string | null = null;
+let mxmTokenExpiry = 0;
+
+async function getMxmToken(): Promise<string | null> {
+  if (mxmUserToken && Date.now() < mxmTokenExpiry) return mxmUserToken;
+  try {
+    const res = await fetch(`${MXM_API}token.get?user_language=en&app_id=web-desktop-app-v1.0`, { headers: MXM_HEADERS });
+    const data: any = await res.json();
+    if (data?.message?.header?.status_code !== 200) return null;
+    const token = data.message.body.user_token;
+    if (!token || token.includes('UpgradeOnly')) return null;
+    mxmUserToken = token;
+    mxmTokenExpiry = Date.now() + 600_000;
+    return token;
+  } catch { return null; }
 }
 
-/** POST /api/proxy/lastfm-sign — compute Last.fm API signature server-side.
- *  Body: JSON object of all params to sign (method, api_key, sk, etc.)
- *  Returns: { signature: "<md5 hex>" }                                    */
-async function handleLastfmSign(request: Request, env: Env): Promise<Response> {
-  if (!env.LASTFM_API_SECRET) {
-    return Response.json({ error: 'Last.fm secret not configured' }, { status: 500, headers: CORS_HEADERS });
+async function mxmGet(method: string, params: Record<string, string>): Promise<any> {
+  const token = await getMxmToken();
+  if (!token) return null;
+  const qs = new URLSearchParams({ usertoken: token, app_id: 'web-desktop-app-v1.0', ...params });
+  const res = await fetch(`${MXM_API}${method}?${qs.toString()}`, { headers: MXM_HEADERS });
+  const data: any = await res.json();
+  if (data?.message?.header?.status_code !== 200) return null;
+  return data.message.body;
+}
+
+/** GET /api/lyrics/word-synced?track=...&artist=...&album=...&duration=... */
+async function handleWordSyncedLyrics(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const track = url.searchParams.get('track') || '';
+  const artist = url.searchParams.get('artist') || '';
+  const album = url.searchParams.get('album') || '';
+
+  if (!track || !artist) {
+    return Response.json({ error: 'track and artist required' }, { status: 400, headers: CORS_HEADERS });
   }
+
   try {
-    const body: Record<string, string> = await request.json();
-    // Remove format and callback before signing (per Last.fm spec)
-    const filtered = { ...body };
-    delete filtered.format;
-    delete filtered.callback;
+    const matchBody = await mxmGet('matcher.track.get', {
+      q_track: track, q_artist: artist, q_album: album,
+    });
+    if (!matchBody?.track) {
+      return Response.json({ wordSynced: null }, { headers: CORS_HEADERS });
+    }
 
-    const sortedKeys = Object.keys(filtered).sort();
-    const sigString = sortedKeys.map(k => `${k}${filtered[k]}`).join('') + env.LASTFM_API_SECRET;
-    const signature = md5(sigString);
+    const trackId = matchBody.track.track_id || matchBody.track.commontrack_id;
+    if (!trackId) {
+      return Response.json({ wordSynced: null }, { headers: CORS_HEADERS });
+    }
 
-    return Response.json({ signature }, { headers: CORS_HEADERS });
+    const richBody = await mxmGet('track.richsync.get', { track_id: String(trackId) });
+    if (!richBody?.richsync?.richsync_body) {
+      return Response.json({ wordSynced: null }, { headers: CORS_HEADERS });
+    }
+
+    const rawLines: any[] = JSON.parse(richBody.richsync.richsync_body);
+
+    const lines = rawLines.map((line: any) => ({
+      start: line.ts,
+      end: line.te,
+      text: line.x,
+      words: (line.l || [])
+        .filter((w: any) => w.c && w.c.trim())
+        .map((w: any) => ({
+          word: w.c,
+          time: line.ts + w.o,
+        })),
+    }));
+
+    return Response.json({ wordSynced: lines }, {
+      headers: { ...CORS_HEADERS, 'Cache-Control': 'public, max-age=86400' },
+    });
   } catch (err: any) {
-    return Response.json(
-      { error: err.message || 'Failed to compute signature' },
-      { status: 400, headers: CORS_HEADERS }
-    );
+    return Response.json({ wordSynced: null, error: err.message }, { headers: CORS_HEADERS });
   }
 }
 
@@ -903,7 +1026,7 @@ async function handleActiveAnnouncements(env: Env): Promise<Response> {
     const rpcErr = await rpcRes.text().catch(() => 'unknown');
     // Fallback: query the table directly (works even if old RPC is broken)
     const fallbackRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/admin_announcements?is_active=eq.true&or=(ends_at.is.null,ends_at.gt.${new Date().toISOString()})&order=created_at.desc&select=id,title,body,link,image_url,tag,type,gradient_start,gradient_end,cta_buttons,frequency,ends_at,created_at`,
+      `${SUPABASE_URL}/rest/v1/admin_announcements?is_active=eq.true&or=(ends_at.is.null,ends_at.gt.${new Date().toISOString()})&order=created_at.desc&select=id,title,body,link,image_url,tag,type,gradient_start,gradient_end,cta_buttons,frequency,ends_at,created_at&limit=100`,
       { method: 'GET', headers: hdrs }
     );
     if (fallbackRes.ok) {
@@ -1086,10 +1209,11 @@ async function handleWrappedCompute(request: Request, env: Env): Promise<Respons
 
   const hdrs = adminHeaders(env);
 
-  // Fetch events in date range (up to 50 000)
-  const evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=track_id,track_title,artist_name,album_title,genre,duration_sec,listened_at&user_id=eq.${userId}&listened_at=gte.${encodeURIComponent(start)}&listened_at=lte.${encodeURIComponent(end)}&order=listened_at.asc&limit=50000`;
-  const evtRes = await fetch(evtUrl, { headers: hdrs });
-  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+  // Fetch ALL events including archived from Telegram, filter by user + date range
+  const allEvents = await getAllEventsIncludingArchives(env);
+  const events = allEvents
+    .filter((e: any) => e.user_id === userId && e.listened_at >= start && e.listened_at <= end)
+    .sort((a: any, b: any) => a.listened_at.localeCompare(b.listened_at));
 
   // Profile
   const profRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?select=display_name,avatar_seed&user_id=eq.${userId}`, { headers: hdrs });
@@ -1141,12 +1265,10 @@ async function handleWrappedCompute(request: Request, env: Env): Promise<Respons
   const firstEvent = events[0] || null;
   const lastEvent = events.length ? events[events.length - 1] : null;
 
-  // ── User rank on leaderboard ──
-  const allEvtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=user_id,duration_sec&listened_at=gte.${encodeURIComponent(start)}&listened_at=lte.${encodeURIComponent(end)}&limit=50000`;
-  const allEvtRes = await fetch(allEvtUrl, { headers: hdrs });
-  const allEvts: any[] = allEvtRes.ok ? await allEvtRes.json() : [];
+  // ── User rank on leaderboard (from full data) ──
+  const rangeEvents = allEvents.filter((e: any) => e.listened_at >= start && e.listened_at <= end);
   const userMinutes: Record<string, number> = {};
-  for (const e of allEvts) userMinutes[e.user_id] = (userMinutes[e.user_id] || 0) + Math.round((e.duration_sec || 0) / 60);
+  for (const e of rangeEvents) userMinutes[e.user_id] = (userMinutes[e.user_id] || 0) + Math.round((e.duration_sec || 0) / 60);
   const ranked = Object.entries(userMinutes).sort((a, b) => b[1] - a[1]);
   const userRank = ranked.findIndex(([uid]) => uid === userId) + 1;
 
@@ -1187,10 +1309,9 @@ async function handleWrappedLeaderboard(request: Request, env: Env): Promise<Res
   const { start, end, yearLabel } = getWrappedDateRange(inPreviewWindow);
   const hdrs = adminHeaders(env);
 
-  // All events in range
-  const evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=user_id,duration_sec&listened_at=gte.${encodeURIComponent(start)}&listened_at=lte.${encodeURIComponent(end)}&limit=50000`;
-  const evtRes = await fetch(evtUrl, { headers: hdrs });
-  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+  // All events including archived from Telegram
+  const allEvents = await getAllEventsIncludingArchives(env);
+  const events = allEvents.filter((e: any) => e.listened_at >= start && e.listened_at <= end);
 
   const mins: Record<string, number> = {};
   const plays: Record<string, number> = {};
@@ -1239,10 +1360,9 @@ async function handleWrappedShare(userId: string, env: Env): Promise<Response> {
   const profs: any[] = profRes.ok ? await profRes.json() : [];
   const profile = profs[0] || {};
 
-  // Events (just enough for top 5 stats)
-  const evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=track_title,artist_name,genre,duration_sec&user_id=eq.${userId}&listened_at=gte.${encodeURIComponent(start)}&listened_at=lte.${encodeURIComponent(end)}&limit=50000`;
-  const evtRes = await fetch(evtUrl, { headers: hdrs });
-  const events: any[] = evtRes.ok ? await evtRes.json() : [];
+  // ALL events including archived from Telegram
+  const allEvents = await getAllEventsIncludingArchives(env);
+  const events = allEvents.filter((e: any) => e.user_id === userId && e.listened_at >= start && e.listened_at <= end);
 
   const artistC: Record<string, number> = {};
   const trackC: Record<string, { t: string; a: string; c: number }> = {};
@@ -1313,31 +1433,53 @@ ${top5Genres.length ? `<div class="section"><h2>Top Genres</h2>${genresHTML}</di
 function esc(s: string): string { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 export default {
-  /** Cron trigger — archive listening data to Telegram every 7 days.
-   *  The cron fires daily; we check last archive date and skip if < 7 days. */
+  /** Cron trigger — archive when DB exceeds 150MB OR every 7 days (whichever comes first).
+   *  The cron fires daily; checks size threshold and last archive date. */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
     ctx.waitUntil((async () => {
       try {
-        // Check last successful archive date — skip if less than 7 days ago
         const hdrs = adminHeaders(env);
-        const idxRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/telegram_archive_index?select=created_at&status=eq.completed&order=created_at.desc&limit=1`,
-          { headers: hdrs }
-        );
-        if (idxRes.ok) {
-          const idxData: any[] = await idxRes.json();
-          if (idxData.length > 0) {
-            const daysSince = (Date.now() - new Date(idxData[0].created_at).getTime()) / (1000 * 60 * 60 * 24);
-            if (daysSince < 7) {
-              console.log(`[cron-archive] skipped — last archive was ${daysSince.toFixed(1)} days ago (< 7)`);
-              return;
+
+        // Check DB size — force archive if over threshold
+        let sizeExceeded = false;
+        try {
+          const statsRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_database_stats`, {
+            method: 'POST', headers: hdrs, body: '{}',
+          });
+          if (statsRes.ok) {
+            const stats: any = await statsRes.json();
+            const dbMb = stats.database_size_mb || 0;
+            if (dbMb >= AUTO_ARCHIVE_MB) {
+              console.log(`[cron-archive] DB size ${dbMb.toFixed(1)}MB >= ${AUTO_ARCHIVE_MB}MB threshold — forcing archive`);
+              sizeExceeded = true;
+            }
+          }
+        } catch (e) {
+          console.warn('[cron-archive] size check failed:', e);
+        }
+
+        // If size is fine, check time-based schedule (every 7 days)
+        if (!sizeExceeded) {
+          const idxRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/telegram_archive_index?select=created_at&status=eq.completed&order=created_at.desc&limit=1`,
+            { headers: hdrs }
+          );
+          if (idxRes.ok) {
+            const idxData: any[] = await idxRes.json();
+            if (idxData.length > 0) {
+              const daysSince = (Date.now() - new Date(idxData[0].created_at).getTime()) / (1000 * 60 * 60 * 24);
+              if (daysSince < 7) {
+                console.log(`[cron-archive] skipped — DB under ${AUTO_ARCHIVE_MB}MB and last archive was ${daysSince.toFixed(1)} days ago`);
+                return;
+              }
             }
           }
         }
+
         const r = await performArchive(env);
         if (!r.success && r.error) console.error('[cron-archive]', r.error);
-        else console.log(`[cron-archive] archived ${r.rows} rows`);
+        else console.log(`[cron-archive] archived ${r.rows} rows, purged ${r.purged} from Supabase`);
       } catch (e) {
         console.error('[cron-archive] exception:', e);
       }
@@ -1422,21 +1564,71 @@ export default {
       return Response.json({ error: 'Unknown endpoint' }, { status: 404, headers: CORS_HEADERS });
     }
 
-    // ── Proxy routes (secrets shielding — no auth, but secrets never leave server) ──
-    if (url.pathname === '/api/proxy/genius-token') {
+    // ── Image proxy (same-origin fetch bypasses CORS for Tidal CDN images, edge-cached 30d) ──
+    if (url.pathname === '/api/image-proxy') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
-      return handleGeniusToken(env);
-    }
-    if (url.pathname === '/api/proxy/lastfm-sign') {
-      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
-      if (request.method === 'POST') return await handleLastfmSign(request, env);
-      return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
+      const imageUrl = url.searchParams.get('url');
+      if (!imageUrl || !imageUrl.startsWith('https://resources.tidal.com/')) {
+        return Response.json({ error: 'Invalid or missing url param' }, { status: 400, headers: CORS_HEADERS });
+      }
+      try {
+        const cache = caches.default;
+        const cacheKey = new Request(url.toString());
+        const cached = await cache.match(cacheKey);
+        if (cached) return cached;
+
+        const imgResp = await fetch(imageUrl);
+        if (!imgResp.ok) return new Response(null, { status: imgResp.status, headers: CORS_HEADERS });
+        const blob = await imgResp.arrayBuffer();
+        const resp = new Response(blob, {
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': imgResp.headers.get('Content-Type') || 'image/jpeg',
+            'Cache-Control': 'public, max-age=2592000',
+          },
+        });
+        ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        return resp;
+      } catch {
+        return Response.json({ error: 'Failed to fetch image' }, { status: 502, headers: CORS_HEADERS });
+      }
     }
 
-    // ── Public API routes (no auth required) ──
+    // ── Word-synced lyrics (public, edge-cached 24h) ──
+    if (url.pathname === '/api/lyrics/word-synced') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      const cache = caches.default;
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const lyricsRes = await handleWordSyncedLyrics(request);
+      if (lyricsRes.ok) {
+        const cloned = new Response(lyricsRes.body, lyricsRes);
+        cloned.headers.set('Cache-Control', 'public, max-age=86400');
+        ctx.waitUntil(cache.put(request, cloned.clone()));
+        return cloned;
+      }
+      return lyricsRes;
+    }
+
+    // ── AI search (public, edge-cached 1h per query) ──
     if (url.pathname === '/api/ai-search') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
-      if (request.method === 'POST') return await handleAiSearch(request, env);
+      if (request.method === 'POST') {
+        const cache = caches.default;
+        const body: any = await request.clone().json();
+        const q = (body.query || '').trim().toLowerCase();
+        const cacheKey = new Request(url.origin + '/api/ai-search?q=' + encodeURIComponent(q));
+        const cached = await cache.match(cacheKey);
+        if (cached) return cached;
+        const aiRes = await handleAiSearch(request, env);
+        if (aiRes.ok) {
+          const cloned = new Response(aiRes.body, aiRes);
+          cloned.headers.set('Cache-Control', 'public, max-age=3600');
+          ctx.waitUntil(cache.put(cacheKey, cloned.clone()));
+          return cloned;
+        }
+        return aiRes;
+      }
       return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
     }
     if (url.pathname === '/api/updates/check') {
@@ -1449,8 +1641,7 @@ export default {
     }
     if (url.pathname === '/api/track-event') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
-      if (request.method === 'POST') return await handleTrackEvent(request, env);
-      return Response.json({ error: 'POST only' }, { status: 405, headers: CORS_HEADERS });
+      return Response.json({ ok: true }, { headers: CORS_HEADERS });
     }
 
     // ── Public Wrapped share page ──
@@ -1460,29 +1651,9 @@ export default {
       catch { return new Response('Not Found', { status: 404 }); }
     }
 
-    // ── Static file serving ──
-    try {
-      return await getAssetFromKV(
-        { request, waitUntil: ctx.waitUntil.bind(ctx) } as any,
-        {
-          ASSET_NAMESPACE: env.__STATIC_CONTENT,
-          ASSET_MANIFEST: assetManifest,
-        } as any
-      );
-    } catch {
-      // SPA fallback - serve index.html for client-side routes
-      try {
-        const indexRequest = new Request(new URL('/', request.url).toString(), request);
-        return await getAssetFromKV(
-          { request: indexRequest, waitUntil: ctx.waitUntil.bind(ctx) } as any,
-          {
-            ASSET_NAMESPACE: env.__STATIC_CONTENT,
-            ASSET_MANIFEST: assetManifest,
-          } as any
-        );
-      } catch {
-        return new Response('Not Found', { status: 404 });
-      }
-    }
+    // Redirect non-API requests to Cloudflare Pages (unlimited requests, zero Worker load).
+    const dest = new URL(request.url);
+    dest.hostname = 'tunes-app.pages.dev';
+    return Response.redirect(dest.toString(), 301);
   },
 };

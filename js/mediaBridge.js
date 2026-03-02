@@ -17,7 +17,7 @@ let _audioElement = null;
 let _api = null;
 let _lastSentTrackId = null;
 let _positionInterval = null;
-let _preDuckVolume = null; // Volume before audio ducking
+let _preDuckVolume = null;
 
 /**
  * Initialize the media bridge. Call once after the Player is ready.
