@@ -78,6 +78,7 @@ export class UIRenderer {
         this.vibrantColorCache = new Map();
         this.visualizer = null;
         this._pageHtmlCache = new Map();
+        this._pageDataCache = new Map();
         this._homeDataCache = { songs: null, albums: null, artists: null, songsTime: 0, albumsTime: 0, artistsTime: 0 };
         this._scrollPositions = {};
         this._currentPageId = null;
@@ -1272,15 +1273,20 @@ export class UIRenderer {
         });
 
         const mainContent = document.querySelector('.main-content');
-        if (this._currentPageId) {
+        const detailPages = new Set(['album', 'artist', 'playlist', 'mix']);
+        if (this._currentPageId && !detailPages.has(this._currentPageId)) {
             this._scrollPositions[this._currentPageId] = mainContent.scrollTop;
         }
         this._currentPageId = pageId;
-        const saved = this._scrollPositions[pageId];
-        if (saved != null) {
-            requestAnimationFrame(() => { mainContent.scrollTop = saved; });
-        } else {
+        if (detailPages.has(pageId)) {
             mainContent.scrollTop = 0;
+        } else {
+            const saved = this._scrollPositions[pageId];
+            if (saved != null) {
+                requestAnimationFrame(() => { mainContent.scrollTop = saved; });
+            } else {
+                mainContent.scrollTop = 0;
+            }
         }
 
         // Toggle search bar visibility — only show on explore/search page
@@ -2527,8 +2533,8 @@ export class UIRenderer {
         });
     }
 
-    /** Show a premium hero detail view of downloaded tracks from a specific album */
-    _showDownloadedAlbumDetail(albumInfo, tracks) {
+    /** Show downloaded album detail — mirrors the regular album page layout */
+    async _showDownloadedAlbumDetail(albumInfo, tracks) {
         const dlView = document.getElementById('library-downloaded-detail');
         if (!dlView) return;
 
@@ -2537,59 +2543,112 @@ export class UIRenderer {
             detailEl = document.createElement('div');
             detailEl.id = 'dl-album-detail-overlay';
             detailEl.className = 'dl-detail-overlay';
-            detailEl.style.cssText = 'background:var(--background);overflow-y:auto;padding:1rem var(--content-padding,1rem);';
+            detailEl.style.cssText = 'background:var(--background);overflow-y:auto;padding:0;';
             dlView.style.position = 'relative';
             dlView.appendChild(detailEl);
         }
         detailEl.style.display = 'block';
 
-        const coverUrl = albumInfo?.cover ? this.api.getCoverUrl(albumInfo.cover, '320') : 'assets/everywhere.png';
+        const coverUrl = albumInfo?.cover ? this.api.getCoverUrl(albumInfo.cover, '640') : 'assets/everywhere.png';
+        const totalDuration = calculateTotalDuration(tracks);
+        const sortedTracks = [...tracks].sort((a, b) => {
+            const discA = a.discNumber ?? 1;
+            const discB = b.discNumber ?? 1;
+            if (discA !== discB) return discA - discB;
+            return (a.trackNumber || 0) - (b.trackNumber || 0);
+        });
+
+        const artistName = escapeHtml(albumInfo?.artist || 'Unknown');
+        const artistId = tracks[0]?.artistId || null;
+        const artistLink = artistId
+            ? `<a href="#" class="dl-album-artist-link" data-dl-artist-id="${artistId}">${artistName}</a>`
+            : artistName;
+
         detailEl.innerHTML = `
-            <div class="dl-detail-nav">
-                <button class="dl-detail-nav-back" id="dl-album-detail-back">
-                    <span class="material-symbols-rounded">arrow_back</span>
-                </button>
-                <span class="dl-detail-nav-title">Downloads</span>
-            </div>
-            <div class="dl-detail-hero">
-                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/everywhere.png'">
-                <div class="dl-detail-hero-title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</div>
-                <div class="dl-detail-hero-meta">${escapeHtml(albumInfo?.artist || 'Unknown')} · ${tracks.length} track${tracks.length !== 1 ? 's' : ''}</div>
-                <div class="dl-detail-actions">
-                    <button class="dl-detail-play-btn" id="dl-album-play-all">
-                        <span class="material-symbols-rounded">play_arrow</span> Play All
-                    </button>
-                    <button class="dl-detail-delete-btn" id="dl-album-delete">
-                        <span class="material-symbols-rounded">delete_outline</span> Delete
-                    </button>
+            <header class="detail-header" style="padding:1rem var(--content-padding,1rem);">
+                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" onerror="this.src='assets/everywhere.png'" />
+                <div class="detail-header-info">
+                    <h1 class="title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</h1>
+                    <div class="meta">${sortedTracks.length} track${sortedTracks.length !== 1 ? 's' : ''} · ${formatDuration(totalDuration)}</div>
+                    <div class="meta">By ${artistLink}</div>
+                    <div class="detail-header-actions">
+                        <button id="dl-album-play-all" class="btn-primary">${SVG_PLAY}<span>Play</span></button>
+                        <button id="dl-album-like-btn" class="btn-secondary like-btn">${this.createHeartIcon(false)}</button>
+                        <button id="dl-album-delete" class="btn-secondary"><span class="material-symbols-rounded" style="font-size:18px;">delete_outline</span><span>Delete</span></button>
+                    </div>
                 </div>
-            </div>
-            <div class="dl-detail-divider"></div>
-            <div class="dl-detail-tracks">
-                ${tracks.map((t, i) => {
-                    const cUrl = t.cover ? this.api.getCoverUrl(t.cover) : 'assets/everywhere.png';
-                    const dur = t.duration ? formatTime(t.duration) : '';
-                    const trackNum = t.trackNumber !== null && t.trackNumber !== undefined ? t.trackNumber : '';
-                    return `
-                    <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
-                        <span class="dl-track-number">${trackNum}</span>
-                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
-                        <div class="dl-detail-track-info">
-                            <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
-                            <div class="dl-detail-track-meta">${escapeHtml(t.artist || 'Unknown')}</div>
-                        </div>
-                        <span class="dl-detail-track-duration">${dur}</span>
-                    </div>`;
-                }).join('')}
+            </header>
+            <div class="album-content-layout" style="padding:0 var(--content-padding,1rem) 2rem;">
+                <div class="track-list" id="dl-album-tracklist">
+                    <div class="track-list-header">
+                        <span style="width: 40px; text-align: center;">#</span>
+                        <span>Title</span>
+                        <span class="duration-header"></span>
+                    </div>
+                    ${sortedTracks.map((t, i) => {
+                        const dur = t.duration ? formatTime(t.duration) : '';
+                        const num = t.trackNumber ?? '';
+                        return `
+                        <div class="track-item" data-dl-detail-idx="${i}">
+                            <div class="track-number">${num}</div>
+                            <div class="track-item-info">
+                                <div class="track-item-details">
+                                    <div class="title">${escapeHtml(t.title || 'Unknown')}</div>
+                                    <div class="artist">${escapeHtml(t.artist || 'Unknown')}</div>
+                                </div>
+                            </div>
+                            <div class="track-item-duration">${dur}</div>
+                            <div class="track-item-actions"></div>
+                        </div>`;
+                    }).join('')}
+                </div>
             </div>`;
 
+        // Cache-first cover image
+        if (albumInfo?.cover) {
+            const coverKey = `cover-${String(albumInfo.cover).replace(/\//g, '-')}`;
+            try {
+                const cached = await db.getCachedImage(coverKey);
+                if (cached) {
+                    const img = detailEl.querySelector('#dl-album-cover-img');
+                    if (img) img.src = URL.createObjectURL(cached);
+                }
+            } catch {}
+        }
+
+        // Like button
+        const likeBtn = detailEl.querySelector('#dl-album-like-btn');
+        if (likeBtn && albumInfo?.id) {
+            const isLiked = await db.isFavorite('album', albumInfo.id);
+            likeBtn.innerHTML = this.createHeartIcon(isLiked);
+            likeBtn.classList.toggle('active', isLiked);
+            likeBtn.addEventListener('click', async () => {
+                const albumObj = { id: albumInfo.id, title: albumInfo.title, cover: albumInfo.cover, artist: { name: albumInfo.artist, id: artistId } };
+                const nowLiked = await db.toggleFavorite('album', albumObj);
+                likeBtn.innerHTML = this.createHeartIcon(nowLiked);
+                likeBtn.classList.toggle('active', nowLiked);
+                showNotification(nowLiked ? 'Added to favorites' : 'Removed from favorites');
+            });
+        }
+
         // Back button
-        detailEl.querySelector('#dl-album-detail-back')?.addEventListener('click', () => {
-            detailEl.style.display = 'none';
+        // Artist link → navigate to downloaded artist detail
+        detailEl.querySelector('.dl-album-artist-link')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const aId = e.currentTarget.dataset.dlArtistId;
+            if (!aId) return;
+            const catalog = getDownloadedCatalog();
+            const artistTracks = catalog.filter((t) => String(t.artistId) === String(aId));
+            if (artistTracks.length === 0) {
+                showNotification('No downloaded content for this artist');
+                return;
+            }
+            const artistPic = artistTracks[0]?.artistPicture || null;
+            this._showDownloadedArtistDetail({ id: aId, name: albumInfo?.artist, picture: artistPic, cover: artistTracks[0]?.cover }, artistTracks);
         });
 
         // Play all
-        const playerTracks = tracks.map((t) => ({
+        const playerTracks = sortedTracks.map((t) => ({
             id: t.id, title: t.title,
             artist: { name: t.artist, id: t.artistId },
             album: { title: t.album, id: t.albumId, cover: t.cover },
@@ -2617,7 +2676,7 @@ export class UIRenderer {
         });
 
         // Track clicks
-        detailEl.querySelectorAll('.dl-detail-track-item[data-dl-detail-idx]').forEach((item) => {
+        detailEl.querySelectorAll('.track-item[data-dl-detail-idx]').forEach((item) => {
             item.addEventListener('click', () => {
                 const idx = parseInt(item.dataset.dlDetailIdx, 10);
                 this.player.setQueue(playerTracks, idx);
@@ -2654,31 +2713,31 @@ export class UIRenderer {
             return;
         }
 
-        container.innerHTML = `<div class="dl-artists-grid">${artists.map((a) => {
-            const avatarUrl = a.picture 
-                ? this.api.getArtistPictureUrl(a.picture, '160')
-                : (a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png');
-            return `
+        container.innerHTML = `<div class="dl-artists-grid">${artists.map((a) => `
                 <div class="dl-artist-card" data-artist-id="${a.id}" data-artist-picture="${a.picture || ''}">
-                    <img class="dl-artist-card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                    <img class="dl-artist-card-avatar" src="assets/everywhere.png" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
                     <div class="dl-artist-card-name">${escapeHtml(a.name || 'Unknown')}</div>
                     <div class="dl-artist-card-count">${a.count} track${a.count !== 1 ? 's' : ''}</div>
-                </div>`;
-        }).join('')}</div>`;
+                </div>`
+        ).join('')}</div>`;
 
-        // Load cached artist images from IndexedDB for offline
+        // Cache-first artist image loading (check IndexedDB before network)
         container.querySelectorAll('.dl-artist-card').forEach(async (card) => {
             const picId = card.dataset.artistPicture;
             if (!picId) return;
             const img = card.querySelector('.dl-artist-card-avatar');
-            if (!img || (img.complete && img.naturalWidth > 0)) return;
+            if (!img) return;
+            const normalizedKey = `artist-${String(picId).replace(/\//g, '-')}`;
             try {
                 await db.open();
-                const cached = await db.getCachedImage(`artist-${picId}`);
+                let cached = await db.getCachedImage(normalizedKey);
+                if (!cached) cached = await db.getCachedImage(`artist-${picId}`);
                 if (cached) {
                     img.src = URL.createObjectURL(cached);
+                    return;
                 }
-            } catch (e) { /* ignore */ }
+            } catch {}
+            img.src = this.api.getArtistPictureUrl(picId, '160');
         });
 
         // Click → show only downloaded tracks from this artist (offline view)
@@ -2692,8 +2751,8 @@ export class UIRenderer {
         });
     }
 
-    /** Show a premium hero detail view of downloaded tracks from a specific artist */
-    _showDownloadedArtistDetail(artistInfo, tracks) {
+    /** Show downloaded artist detail — cache-first images, clickable albums */
+    async _showDownloadedArtistDetail(artistInfo, tracks) {
         const dlView = document.getElementById('library-downloaded-detail');
         if (!dlView) return;
 
@@ -2717,6 +2776,7 @@ export class UIRenderer {
                 albumMap.set(key, {
                     id: t.albumId,
                     title: t.album || 'Unknown Album',
+                    artist: t.artist || artistInfo?.name || 'Unknown',
                     cover: t.cover || null,
                     tracks: []
                 });
@@ -2725,18 +2785,9 @@ export class UIRenderer {
         });
         const albums = Array.from(albumMap.values());
 
-        const artistPictureUrl = artistInfo?.picture 
-            ? this.api.getArtistPictureUrl(artistInfo.picture, '320')
-            : (artistInfo?.cover ? this.api.getCoverUrl(artistInfo.cover, '320') : 'assets/everywhere.png');
         detailEl.innerHTML = `
-            <div class="dl-detail-nav">
-                <button class="dl-detail-nav-back" id="dl-artist-detail-back">
-                    <span class="material-symbols-rounded">arrow_back</span>
-                </button>
-                <span class="dl-detail-nav-title">Downloads</span>
-            </div>
             <div class="dl-detail-hero dl-detail-hero--artist">
-                <img class="dl-detail-cover-lg dl-detail-cover--round" src="${artistPictureUrl}" alt="" onerror="this.src='assets/everywhere.png'">
+                <img class="dl-detail-cover-lg dl-detail-cover--round" id="dl-artist-hero-img" src="assets/everywhere.png" alt="" onerror="this.src='assets/everywhere.png'">
                 <div class="dl-detail-hero-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -2745,8 +2796,7 @@ export class UIRenderer {
                     </button>
                 </div>
             </div>
-            <div class="dl-detail-divider"></div>
-            <div class="search-tabs" style="margin-top: 0.5rem;">
+            <div class="search-tabs" style="margin-top: 0.5rem; justify-content: center;">
                 <button class="search-tab active" data-tab="albums">Albums</button>
                 <button class="search-tab" data-tab="tracks">Tracks</button>
             </div>
@@ -2772,6 +2822,23 @@ export class UIRenderer {
                     }).join('')}
                 </div>
             </div>`;
+
+        // Cache-first artist hero image
+        if (artistInfo?.picture) {
+            const normalizedKey = `artist-${String(artistInfo.picture).replace(/\//g, '-')}`;
+            const heroImg = detailEl.querySelector('#dl-artist-hero-img');
+            try {
+                let cached = await db.getCachedImage(normalizedKey);
+                if (!cached) cached = await db.getCachedImage(`artist-${artistInfo.picture}`);
+                if (cached && heroImg) {
+                    heroImg.src = URL.createObjectURL(cached);
+                } else if (heroImg) {
+                    heroImg.src = this.api.getArtistPictureUrl(artistInfo.picture, '320');
+                }
+            } catch {
+                if (heroImg) heroImg.src = this.api.getArtistPictureUrl(artistInfo.picture, '320');
+            }
+        }
 
         // Populate albums grid
         const albumsGrid = detailEl.querySelector('#dl-artist-albums-grid');
@@ -2817,10 +2884,6 @@ export class UIRenderer {
             });
         });
 
-        // Back button
-        detailEl.querySelector('#dl-artist-detail-back')?.addEventListener('click', () => {
-            detailEl.style.display = 'none';
-        });
 
         // Play all
         const playerTracks = tracks.map((t) => ({
@@ -3141,6 +3204,33 @@ export class UIRenderer {
         }, 5000);
     }
 
+    _savePageDataToCache(cacheKey, data) {
+        this._pageDataCache.set(cacheKey, data);
+        try { db.savePageCache(cacheKey, data); } catch {}
+    }
+
+    async _getPageDataFromCache(cacheKey) {
+        const mem = this._pageDataCache.get(cacheKey);
+        if (mem) return mem;
+        try {
+            const dbData = await db.getPageCache(cacheKey);
+            if (dbData) {
+                this._pageDataCache.set(cacheKey, dbData);
+                return dbData;
+            }
+        } catch {}
+        return null;
+    }
+
+    _applyCacheReveal(pageId) {
+        const el = document.getElementById(`page-${pageId}`);
+        if (!el) return;
+        el.classList.remove('page-cache-reveal');
+        void el.offsetWidth;
+        el.classList.add('page-cache-reveal');
+        el.addEventListener('animationend', () => el.classList.remove('page-cache-reveal'), { once: true });
+    }
+
     async _renderHomeShortcuts() {
         const grid = document.getElementById('home-shortcuts-grid');
         if (!grid) return;
@@ -3243,7 +3333,7 @@ export class UIRenderer {
                 return;
             }
 
-            if (songsContainer.children.length === 0 || forceRefresh) {
+            if (songsContainer.children.length === 0) {
                 songsContainer.innerHTML = this.createSkeletonTracks(5, true);
             }
 
@@ -3322,7 +3412,7 @@ export class UIRenderer {
                 return;
             }
 
-            if (albumsContainer.children.length === 0 || forceRefresh) {
+            if (albumsContainer.children.length === 0) {
                 albumsContainer.innerHTML = this.createSkeletonScrollCards(6, false);
             }
 
@@ -3463,7 +3553,7 @@ export class UIRenderer {
                 return;
             }
 
-            if (artistsContainer.children.length === 0 || forceRefresh) {
+            if (artistsContainer.children.length === 0) {
                 artistsContainer.innerHTML = this.createSkeletonScrollCards(6, true);
             }
 
@@ -4158,6 +4248,10 @@ export class UIRenderer {
     async renderAlbumPage(albumId) {
         this.showPage('album');
 
+        const cacheKey = `album-${albumId}`;
+        const cachedResult = await this._getPageDataFromCache(cacheKey);
+        if (cachedResult) this._applyCacheReveal('album');
+
         const imageEl = document.getElementById('album-detail-image');
         const titleEl = document.getElementById('album-detail-title');
         const metaEl = document.getElementById('album-detail-meta');
@@ -4170,23 +4264,34 @@ export class UIRenderer {
         const mixBtn = document.getElementById('album-mix-btn');
         if (mixBtn) mixBtn.style.display = 'none';
 
-        imageEl.src = '';
-        imageEl.style.backgroundColor = 'var(--muted)';
-        titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
-        metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
-        prodEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
-        tracklistContainer.innerHTML = `
-            <div class="track-list-header">
-                <span style="width: 40px; text-align: center;">#</span>
-                <span>Title</span>
-                <span class="duration-header"></span>
-                <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
-            </div>
-            ${this.createSkeletonTracks(10, false)}
-        `;
+        if (!cachedResult) {
+            imageEl.src = '';
+            imageEl.style.backgroundColor = 'var(--muted)';
+            titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
+            metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
+            prodEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
+            tracklistContainer.innerHTML = `
+                <div class="track-list-header">
+                    <span style="width: 40px; text-align: center;">#</span>
+                    <span>Title</span>
+                    <span class="duration-header"></span>
+                    <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
+                </div>
+                ${this.createSkeletonTracks(10, false)}
+            `;
+        }
 
         try {
-            const { album, tracks } = await this.api.getAlbum(albumId);
+            let album, tracks;
+            if (cachedResult) {
+                album = cachedResult.album;
+                tracks = cachedResult.tracks;
+            } else {
+                const result = await this.api.getAlbum(albumId);
+                album = result.album;
+                tracks = result.tracks;
+                this._savePageDataToCache(cacheKey, { album, tracks });
+            }
 
             const coverUrl = this.api.getCoverUrl(album.cover);
             imageEl.src = coverUrl;
@@ -4464,6 +4569,11 @@ export class UIRenderer {
     async renderPlaylistPage(playlistId, source = null) {
         this.showPage('playlist');
 
+        const cacheKey = `playlist-${playlistId}`;
+        const isUUIDCheck = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(playlistId);
+        const cachedResult = (source !== 'user' && !isUUIDCheck) ? await this._getPageDataFromCache(cacheKey) : null;
+        if (cachedResult) this._applyCacheReveal('playlist');
+
         // Reset search input for new playlist
         const searchInput = document.getElementById('track-list-search-input');
         if (searchInput) searchInput.value = '';
@@ -4478,24 +4588,24 @@ export class UIRenderer {
         const dlBtn = document.getElementById('download-playlist-btn');
         if (dlBtn) dlBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span>';
 
-        imageEl.src = '';
-        imageEl.style.backgroundColor = 'var(--muted)';
-        titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
-        metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
-        descEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 100%;"></div>';
-        tracklistContainer.innerHTML = `
-            <div class="track-list-header">
-                <span style="width: 40px; text-align: center;">#</span>
-                <span>Title</span>
-                <span class="duration-header"></span>
-                <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
-            </div>
-            ${this.createSkeletonTracks(10, true)}
-        `;
+        if (!cachedResult) {
+            imageEl.src = '';
+            imageEl.style.backgroundColor = 'var(--muted)';
+            titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
+            metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
+            descEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 100%;"></div>';
+            tracklistContainer.innerHTML = `
+                <div class="track-list-header">
+                    <span style="width: 40px; text-align: center;">#</span>
+                    <span>Title</span>
+                    <span class="duration-header"></span>
+                    <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
+                </div>
+                ${this.createSkeletonTracks(10, true)}
+            `;
+        }
 
         try {
-            // Check if it's a user playlist (UUID format)
-            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(playlistId);
 
             let playlistData = null;
             let ownedPlaylist = null;
@@ -4506,7 +4616,7 @@ export class UIRenderer {
             // 2. If source is 'api', check API.
             // 3. If no source, check DB if UUID, then API.
 
-            if (source === 'user' || (!source && isUUID)) {
+            if (source === 'user' || (!source && isUUIDCheck)) {
                 ownedPlaylist = await db.getPlaylist(playlistId);
                 playlistData = ownedPlaylist;
 
@@ -4649,7 +4759,13 @@ export class UIRenderer {
                 }
 
                 // Render API playlist
-                let apiResult = await this.api.getPlaylist(playlistId);
+                let apiResult;
+                if (cachedResult) {
+                    apiResult = cachedResult;
+                } else {
+                    apiResult = await this.api.getPlaylist(playlistId);
+                    this._savePageDataToCache(cacheKey, apiResult);
+                }
 
                 const { playlist, tracks } = apiResult;
 
@@ -4792,6 +4908,10 @@ export class UIRenderer {
     async renderMixPage(mixId) {
         this.showPage('mix');
 
+        const cacheKey = `mix-${mixId}`;
+        const cachedResult = await this._getPageDataFromCache(cacheKey);
+        if (cachedResult) this._applyCacheReveal('mix');
+
         const imageEl = document.getElementById('mix-detail-image');
         const titleEl = document.getElementById('mix-detail-title');
         const metaEl = document.getElementById('mix-detail-meta');
@@ -4802,24 +4922,34 @@ export class UIRenderer {
         const dlBtn = document.getElementById('download-mix-btn');
         if (dlBtn) dlBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span>';
 
-        // Skeleton loading
-        imageEl.src = '';
-        imageEl.style.backgroundColor = 'var(--muted)';
-        titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
-        metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
-        descEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 100%;"></div>';
-        tracklistContainer.innerHTML = `
-            <div class="track-list-header">
-                <span style="width: 40px; text-align: center;">#</span>
-                <span>Title</span>
-                <span class="duration-header"></span>
-                <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
-            </div>
-            ${this.createSkeletonTracks(10, true)}
-        `;
+        if (!cachedResult) {
+            imageEl.src = '';
+            imageEl.style.backgroundColor = 'var(--muted)';
+            titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
+            metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
+            descEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 100%;"></div>';
+            tracklistContainer.innerHTML = `
+                <div class="track-list-header">
+                    <span style="width: 40px; text-align: center;">#</span>
+                    <span>Title</span>
+                    <span class="duration-header"></span>
+                    <span style="display: flex; justify-content: flex-end; opacity: 0.8;">Menu</span>
+                </div>
+                ${this.createSkeletonTracks(10, true)}
+            `;
+        }
 
         try {
-            const { mix, tracks } = await this.api.getMix(mixId);
+            let mix, tracks;
+            if (cachedResult) {
+                mix = cachedResult.mix;
+                tracks = cachedResult.tracks;
+            } else {
+                const result = await this.api.getMix(mixId);
+                mix = result.mix;
+                tracks = result.tracks;
+                this._savePageDataToCache(cacheKey, { mix, tracks });
+            }
 
             if (mix.cover) {
                 imageEl.src = mix.cover;
@@ -4887,6 +5017,10 @@ export class UIRenderer {
     async renderArtistPage(artistId) {
         this.showPage('artist');
 
+        const cacheKey = `artist-${artistId}`;
+        const cachedResult = await this._getPageDataFromCache(cacheKey);
+        if (cachedResult) this._applyCacheReveal('artist');
+
         const imageEl = document.getElementById('artist-detail-image');
         const nameEl = document.getElementById('artist-detail-name');
         const metaEl = document.getElementById('artist-detail-meta');
@@ -4899,21 +5033,29 @@ export class UIRenderer {
         const dlBtn = document.getElementById('download-discography-btn');
         if (dlBtn) dlBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download Discography</span>';
 
-        imageEl.src = '';
-        imageEl.style.backgroundColor = 'var(--muted)';
-        nameEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
-        metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 150px;"></div>';
-        tracksContainer.innerHTML = this.createSkeletonTracks(5, true);
-        albumsContainer.innerHTML = this.createSkeletonCards(6, false);
-        if (epsContainer) epsContainer.innerHTML = this.createSkeletonCards(6, false);
-        if (epsSection) epsSection.style.display = 'none';
+        if (!cachedResult) {
+            imageEl.src = '';
+            imageEl.style.backgroundColor = 'var(--muted)';
+            nameEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
+            metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 150px;"></div>';
+            tracksContainer.innerHTML = this.createSkeletonTracks(5, true);
+            albumsContainer.innerHTML = this.createSkeletonCards(6, false);
+            if (epsContainer) epsContainer.innerHTML = this.createSkeletonCards(6, false);
+            if (epsSection) epsSection.style.display = 'none';
+            if (similarContainer) similarContainer.innerHTML = this.createSkeletonCards(6, true);
+            if (similarSection) similarSection.style.display = 'block';
+        }
         const loadUnreleasedSection = document.getElementById('artist-section-load-unreleased');
         if (loadUnreleasedSection) loadUnreleasedSection.style.display = 'none';
-        if (similarContainer) similarContainer.innerHTML = this.createSkeletonCards(6, true);
-        if (similarSection) similarSection.style.display = 'block';
 
         try {
-            const artist = await this.api.getArtist(artistId);
+            let artist;
+            if (cachedResult) {
+                artist = cachedResult;
+            } else {
+                artist = await this.api.getArtist(artistId);
+                this._savePageDataToCache(cacheKey, artist);
+            }
 
             // Handle Artist Mix Button
             const mixBtn = document.getElementById('artist-mix-btn');

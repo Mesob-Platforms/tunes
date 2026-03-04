@@ -312,6 +312,8 @@ export class Player {
             return;
         }
 
+        if (!this.audio.paused) this.audio.pause();
+
         this._playGeneration = (this._playGeneration || 0) + 1;
         const gen = this._playGeneration;
 

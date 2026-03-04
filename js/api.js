@@ -1009,7 +1009,7 @@ export class LosslessAPI {
 
                     console.log(`Found ${newTracks.length} new tracks from ${artist.name}`);
                     recommendedTracks.push(...newTracks);
-                    seenTrackIds.add(...newTracks.map((t) => t.id));
+                    newTracks.forEach((t) => seenTrackIds.add(t.id));
                 } else {
                     console.warn(`No tracks found for artist ${artist.name}`);
                 }

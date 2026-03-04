@@ -1,7 +1,7 @@
 export class MusicDatabase {
     constructor() {
         this.dbName = 'MonochromeDB';
-        this.version = 13; // Bumped for cached_images store (offline covers + artist pics)
+        this.version = 14; // Bumped for page_cache store (instant page loads)
         this.db = null;
     }
 
@@ -82,6 +82,10 @@ export class MusicDatabase {
                 // Cached images for offline album covers + artist pictures
                 if (!db.objectStoreNames.contains('cached_images')) {
                     db.createObjectStore('cached_images', { keyPath: 'id' });
+                }
+                // Page-level data cache for instant page loads on revisit
+                if (!db.objectStoreNames.contains('page_cache')) {
+                    db.createObjectStore('page_cache', { keyPath: 'key' });
                 }
             };
         });
@@ -839,6 +843,33 @@ export class MusicDatabase {
         return entry.data;
     }
 
+    /* ── Page data cache (instant page loads) ──────────────────────── */
+
+    async savePageCache(key, data) {
+        const entry = { key, data, timestamp: Date.now() };
+        await this.performTransaction('page_cache', 'readwrite', (store) => store.put(entry));
+    }
+
+    async getPageCache(key) {
+        const entry = await this.performTransaction('page_cache', 'readonly', (store) => store.get(key));
+        if (!entry) return null;
+        const age = Date.now() - entry.timestamp;
+        const ttl = 30 * 60 * 1000; // 30 minutes
+        if (age > ttl && navigator.onLine) {
+            await this.performTransaction('page_cache', 'readwrite', (store) => store.delete(key));
+            return null;
+        }
+        return entry.data;
+    }
+
+    async clearPageCache(key) {
+        if (key) {
+            await this.performTransaction('page_cache', 'readwrite', (store) => store.delete(key));
+        } else {
+            await this.performTransaction('page_cache', 'readwrite', (store) => store.clear());
+        }
+    }
+
     /* ── Cached-audio helpers (in-app download / offline playback) ──── */
 
     /**
@@ -1045,7 +1076,7 @@ export class MusicDatabase {
             const transaction = db.transaction('offline_events', 'readwrite');
             const store = transaction.objectStore('offline_events');
             const index = store.index('synced');
-            const request = index.openCursor(true); // Get all where synced = true
+            const request = index.openCursor(IDBKeyRange.only(true));
 
             request.onsuccess = (e) => {
                 const cursor = e.target.result;

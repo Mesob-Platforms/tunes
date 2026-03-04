@@ -111,6 +111,21 @@ function createDownloadNotification() {
 
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
+            const activeTasks = downloadNotificationContainer.querySelectorAll('.download-task');
+            const hasActive = Array.from(activeTasks).some(t => {
+                const status = t.querySelector('.download-status');
+                return status && !status.textContent.startsWith('✓') && !status.textContent.startsWith('✗');
+            });
+            if (!hasActive && activeTasks.length === 0) {
+                downloadNotificationContainer.remove();
+                downloadNotificationContainer = null;
+                return;
+            }
+            if (!hasActive && downloadNotificationContainer.classList.contains('collapsed')) {
+                downloadNotificationContainer.remove();
+                downloadNotificationContainer = null;
+                return;
+            }
             downloadNotificationContainer.classList.toggle('collapsed');
         });
 
@@ -280,14 +295,12 @@ function removeDownloadTask(trackId) {
 }
 
 function removeBulkDownloadTask(notifEl) {
-    const task = bulkDownloadTasks.get(notifEl);
-    if (!task) return;
+    bulkDownloadTasks.delete(notifEl);
 
     notifEl.style.animation = 'slide-out 0.3s ease forwards';
 
     setTimeout(() => {
         notifEl.remove();
-        bulkDownloadTasks.delete(notifEl);
         _updateNotifHeader();
 
         if (downloadNotificationContainer && downloadNotificationContainer.querySelectorAll('.download-task').length === 0) {
@@ -844,6 +857,9 @@ function updateBulkDownloadProgress(notifEl, current, total, currentItem) {
 function completeBulkDownload(notifEl, success = true, message = null) {
     const progressFill = notifEl.querySelector('.download-progress-fill');
     const statusEl = notifEl.querySelector('.download-status');
+    const cancelBtn = notifEl.querySelector('.download-cancel');
+
+    if (cancelBtn) cancelBtn.remove();
 
     if (success) {
         progressFill.style.width = '100%';
@@ -851,19 +867,13 @@ function completeBulkDownload(notifEl, success = true, message = null) {
         statusEl.textContent = '✓ Download complete';
         statusEl.style.color = '#10b981';
 
-        setTimeout(() => {
-            notifEl.style.animation = 'slide-out 0.3s ease forwards';
-            setTimeout(() => notifEl.remove(), 300);
-        }, 3000);
+        setTimeout(() => removeBulkDownloadTask(notifEl), 3000);
     } else {
         progressFill.style.background = '#ef4444';
         statusEl.textContent = message || '✗ Download failed';
         statusEl.style.color = '#ef4444';
 
-        setTimeout(() => {
-            notifEl.style.animation = 'slide-out 0.3s ease forwards';
-            setTimeout(() => notifEl.remove(), 300);
-        }, 5000);
+        setTimeout(() => removeBulkDownloadTask(notifEl), 5000);
     }
 }
 

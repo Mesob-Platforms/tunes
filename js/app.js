@@ -610,32 +610,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     {
         const mainContent = document.querySelector('.main-content');
         const ptrIndicator = document.getElementById('pull-to-refresh-indicator');
-        const THRESHOLD = 70; // px to pull before triggering refresh
+        const THRESHOLD = 110;
+        const PULL_START = 30;
         let startY = 0;
+        let startTime = 0;
         let pulling = false;
+        let cooldown = false;
 
         if (mainContent && ptrIndicator) {
             mainContent.addEventListener('touchstart', (e) => {
-                // Only start tracking if scrolled to top
+                if (cooldown) return;
                 if (mainContent.scrollTop > 5) return;
-                // Don't activate inside lyrics panel or fullscreen overlay
                 const target = e.target;
                 if (target.closest('#lyrics-side-panel') || target.closest('#fullscreen-cover-overlay')) return;
+                if (target.closest('#page-library') || target.closest('.dl-detail-overlay') || target.closest('.library-subview')) return;
+                const path = window.location.pathname;
+                if (path === '/library') return;
                 startY = e.touches[0].clientY;
+                startTime = Date.now();
                 pulling = false;
             }, { passive: true });
 
             mainContent.addEventListener('touchmove', (e) => {
-                if (!startY) return;
+                if (!startY || cooldown) return;
                 if (mainContent.scrollTop > 5) { startY = 0; return; }
                 const currentY = e.touches[0].clientY;
                 const diff = currentY - startY;
-                if (diff > 10) {
+                if (diff > PULL_START) {
                     pulling = true;
                     const pullDist = Math.min(diff, THRESHOLD + 30);
                     ptrIndicator.classList.add('pulling');
                     ptrIndicator.classList.toggle('threshold', diff >= THRESHOLD);
-                    ptrIndicator.style.height = Math.min(pullDist * 0.6, 50) + 'px';
+                    ptrIndicator.style.height = Math.min(pullDist * 0.5, 55) + 'px';
                 } else {
                     pulling = false;
                     ptrIndicator.classList.remove('pulling', 'threshold');
@@ -643,53 +649,62 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }, { passive: true });
 
+            const _ptrReset = () => {
+                startY = 0;
+                startTime = 0;
+                pulling = false;
+                ptrIndicator.classList.remove('pulling', 'threshold');
+                ptrIndicator.style.height = '0';
+            };
+
+            mainContent.addEventListener('touchcancel', _ptrReset, { passive: true });
+
             mainContent.addEventListener('touchend', async () => {
                 if (!pulling) { startY = 0; return; }
+                const elapsed = Date.now() - startTime;
+                if (elapsed > 800) { _ptrReset(); return; }
                 const indicator = ptrIndicator;
                 if (indicator.classList.contains('threshold')) {
+                    cooldown = true;
                     indicator.classList.add('refreshing');
                     indicator.style.height = '40px';
                     try {
                         const path = window.location.pathname;
-                        if (path === '/' || path === '/home') {
-                            if (window.__tunesRefs?.ui) {
-                                window.__tunesRefs.ui._pageHtmlCache?.delete('home');
-                                window.__tunesRefs.ui._invalidateHomeDataCache?.();
+                        const ui = window.__tunesRefs?.ui;
+                        if (ui) {
+                            if (path === '/' || path === '/home') {
+                                ui._pageHtmlCache?.delete('home');
+                                ui._invalidateHomeDataCache?.();
                                 try { const { db } = await import('./db.js'); await db.open(); await db.performTransaction('home_cache', 'readwrite', (s) => s.clear()); } catch {}
-                                await window.__tunesRefs.ui.renderHomePage();
-                            }
-                        } else if (path.startsWith('/search/') || path === '/search' || path === '/explore') {
-                            if (window.__tunesRefs?.ui) {
+                                await ui.renderHomePage();
+                                _refreshUpdatesAndAnnouncements();
+                            } else if (path.startsWith('/search/') || path === '/search' || path === '/explore') {
                                 const q = path.startsWith('/search/') ? decodeURIComponent(path.replace('/search/', '')) : '';
-                                await window.__tunesRefs.ui.renderSearchPage(q);
-                            }
-                        } else if (path === '/library') {
-                            if (window.__tunesRefs?.ui) {
-                                await window.__tunesRefs.ui.renderLibraryPage();
-                            }
-                        } else if (path === '/account') {
-                            if (window.__tunesRefs?.ui) {
-                                await window.__tunesRefs.ui.renderAccountPage();
-                            }
-                        } else if (path.startsWith('/album/')) {
-                            if (window.__tunesRefs?.ui) {
+                                await ui.renderSearchPage(q);
+                            } else if (path === '/library') {
+                                await ui.renderLibraryPage();
+                            } else if (path === '/account') {
+                                await ui.renderAccountPage();
+                            } else if (path.startsWith('/album/')) {
                                 const id = path.replace('/album/', '');
-                                await window.__tunesRefs.ui.renderAlbumPage(id);
-                            }
-                        } else if (path.startsWith('/artist/')) {
-                            if (window.__tunesRefs?.ui) {
+                                ui._pageDataCache?.delete(`album-${id}`);
+                                try { const { db } = await import('./db.js'); await db.clearPageCache(`album-${id}`); } catch {}
+                                await ui.renderAlbumPage(id);
+                            } else if (path.startsWith('/artist/')) {
                                 const id = path.replace('/artist/', '');
-                                await window.__tunesRefs.ui.renderArtistPage(id);
-                            }
-                        } else if (path.startsWith('/playlist/')) {
-                            if (window.__tunesRefs?.ui) {
+                                ui._pageDataCache?.delete(`artist-${id}`);
+                                try { const { db } = await import('./db.js'); await db.clearPageCache(`artist-${id}`); } catch {}
+                                await ui.renderArtistPage(id);
+                            } else if (path.startsWith('/playlist/')) {
                                 const id = path.replace('/playlist/', '');
-                                await window.__tunesRefs.ui.renderPlaylistPage(id);
-                            }
-                        } else if (path.startsWith('/mix/')) {
-                            if (window.__tunesRefs?.ui) {
+                                ui._pageDataCache?.delete(`playlist-${id}`);
+                                try { const { db } = await import('./db.js'); await db.clearPageCache(`playlist-${id}`); } catch {}
+                                await ui.renderPlaylistPage(id);
+                            } else if (path.startsWith('/mix/')) {
                                 const id = path.replace('/mix/', '');
-                                await window.__tunesRefs.ui.renderMixPage(id);
+                                ui._pageDataCache?.delete(`mix-${id}`);
+                                try { const { db } = await import('./db.js'); await db.clearPageCache(`mix-${id}`); } catch {}
+                                await ui.renderMixPage(id);
                             }
                         }
                     } catch (e) {
@@ -699,6 +714,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         indicator.classList.remove('pulling', 'threshold', 'refreshing');
                         indicator.style.height = '0';
                     }, 400);
+                    setTimeout(() => { cooldown = false; }, 2000);
                 } else {
                     indicator.classList.remove('pulling', 'threshold');
                     indicator.style.height = '0';
@@ -2105,6 +2121,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     _initUpdateNotificationBar();
     _initAnnouncementBanners();
 });
+
+function _refreshUpdatesAndAnnouncements() {
+    try { _initUpdateNotificationBar(); } catch {}
+    try { _initAnnouncementBanners(); } catch {}
+}
 
 /* ══════════════════════════════════════════════════════════════
    UPDATE NOTIFICATION BAR — gradient bar BELOW mobile tab bar

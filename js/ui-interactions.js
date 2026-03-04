@@ -44,6 +44,17 @@ export function initializeUIInteractions(player, api, ui) {
     const mobileBackBtn = document.getElementById('mobile-back-btn');
     if (mobileBackBtn) {
         mobileBackBtn.addEventListener('click', () => {
+            const dlAlbumOverlay = document.getElementById('dl-album-detail-overlay');
+            if (dlAlbumOverlay && dlAlbumOverlay.style.display !== 'none') {
+                dlAlbumOverlay.style.display = 'none';
+                return;
+            }
+            const dlArtistOverlay = document.getElementById('dl-artist-detail-overlay');
+            if (dlArtistOverlay && dlArtistOverlay.style.display !== 'none') {
+                dlArtistOverlay.style.display = 'none';
+                return;
+            }
+
             // Close playlist modal if open
             const playlistModal = document.getElementById('playlist-modal');
             if (playlistModal && playlistModal.classList.contains('active')) {
@@ -111,9 +122,6 @@ export function initializeUIInteractions(player, api, ui) {
                     <rect x="3" y="3" width="18" height="18" rx="3"/>
                     <path d="M12 8v8"/><path d="M8 12h8"/>
                 </svg>
-            </button>
-            <button id="clear-queue-btn" class="btn-icon" title="Clear Queue" style="display: ${showActionBtns ? 'flex' : 'none'}">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
             </button>
             <button id="close-side-panel-btn" class="btn-icon" title="Close">
                 ${SVG_CLOSE}
@@ -259,13 +267,6 @@ export function initializeUIInteractions(player, api, ui) {
             });
         }
 
-        const clearBtn = container.querySelector('#clear-queue-btn');
-        if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
-                player.clearQueue();
-                refreshQueuePanel();
-            });
-        }
     };
 
     const renderQueueContent = (container) => {
@@ -514,6 +515,10 @@ export function initializeUIInteractions(player, api, ui) {
 
     const openQueuePanel = () => {
         sidePanelManager.open('queue', 'Queue', renderQueueControls, renderQueueContent);
+        requestAnimationFrame(() => {
+            const playing = sidePanelManager.contentElement?.querySelector('.queue-track-item.playing');
+            if (playing) playing.scrollIntoView({ block: 'center', behavior: 'instant' });
+        });
     };
 
     queueBtn.addEventListener('click', openQueuePanel);

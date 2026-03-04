@@ -1356,38 +1356,6 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
 
     mainContent.addEventListener('contextmenu', async (e) => {
         const trackItem = e.target.closest('.track-item, .queue-track-item');
-        if (trackItem) {
-            e.preventDefault();
-            if (trackItem.classList.contains('queue-track-item')) {
-                // For queue items, get track from player's queue
-                const queueIndex = parseInt(trackItem.dataset.queueIndex);
-                contextTrack = player.getCurrentQueue()[queueIndex];
-            } else {
-                // For regular track items
-                contextTrack = trackDataStore.get(trackItem);
-            }
-
-            if (contextTrack) {
-                if (contextTrack.isLocal) return;
-
-                // Hide actions for unavailable tracks
-                const unavailableActions = ['play-next', 'add-to-queue', 'download', 'track-mix'];
-                contextMenu.querySelectorAll('[data-action]').forEach((btn) => {
-                    if (unavailableActions.includes(btn.dataset.action)) {
-                        btn.style.display = contextTrack.isUnavailable ? 'none' : 'block';
-                    }
-                });
-
-                contextMenu._contextTrack = contextTrack;
-                contextMenu._contextType = 'track';
-                await updateContextMenuLikeState(contextMenu, contextTrack);
-                positionMenu(contextMenu, e.pageX, e.pageY);
-            }
-        }
-    });
-
-    mainContent.addEventListener('contextmenu', async (e) => {
-        const trackItem = e.target.closest('.track-item, .queue-track-item');
         const card = e.target.closest('.card');
 
         if (trackItem) {
@@ -1401,6 +1369,14 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
 
             if (contextTrack) {
                 if (contextTrack.isLocal) return;
+
+                const unavailableActions = ['play-next', 'add-to-queue', 'download', 'track-mix'];
+                contextMenu.querySelectorAll('[data-action]').forEach((btn) => {
+                    if (unavailableActions.includes(btn.dataset.action)) {
+                        btn.style.display = contextTrack.isUnavailable ? 'none' : 'block';
+                    }
+                });
+
                 contextMenu._contextTrack = contextTrack;
                 contextMenu._contextType = 'track';
                 await updateContextMenuLikeState(contextMenu, contextTrack);

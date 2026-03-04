@@ -2,7 +2,6 @@
 import { getTrackTitle, getTrackArtists, buildTrackFilename, SVG_CLOSE } from './utils.js';
 import { sidePanelManager } from './side-panel.js';
 import { db as musicDB } from './db.js';
-import { apiUrl } from './platform.js';
 
 class LyricsStorageCache {
     constructor(storageKey = 'lyricsCache', maxEntries = 200) {
@@ -17,7 +16,15 @@ class LyricsStorageCache {
             const raw = localStorage.getItem(this.storageKey);
             if (raw) {
                 const entries = JSON.parse(raw);
-                for (const [k, v] of entries) this._mem.set(k, v);
+                let purged = false;
+                for (const [k, v] of entries) {
+                    if (v && v.lyricsProvider === 'LRCLIB' && !v.wordSynced) {
+                        this._mem.set(k, v);
+                    } else {
+                        purged = true;
+                    }
+                }
+                if (purged) this._saveToStorage();
             }
         } catch { /* ignore corrupt data */ }
     }
@@ -73,38 +80,6 @@ export class LyricsManager {
         return `${sign}${(Math.abs(offsetMs) / 1000).toFixed(1)}s`;
     }
 
-    wordSyncedToLRC(wordSynced) {
-        if (!Array.isArray(wordSynced) || wordSynced.length === 0) return '';
-        return wordSynced.map(line => {
-            const ms = (typeof line.start === 'number' ? line.start : 0) * 1000;
-            const m = Math.floor(ms / 60000);
-            const s = Math.floor((ms % 60000) / 1000);
-            const c = Math.floor((ms % 1000) / 10);
-            const tag = `[${m}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}]`;
-            return `${tag} ${(line.text || '').trim()}`;
-        }).join('\n');
-    }
-
-    async fetchWordSyncedLyrics(track) {
-        const artist = Array.isArray(track.artists)
-            ? track.artists.map(a => a.name || a).join(', ')
-            : track.artist?.name || '';
-        const title = track.title || '';
-        const album = track.album?.title || '';
-        if (!title || !artist) return null;
-        try {
-            const params = new URLSearchParams({ track: title, artist });
-            if (album) params.append('album', album);
-            const response = await fetch(apiUrl(`/api/lyrics/word-synced?${params.toString()}`));
-            if (!response.ok) return null;
-            const data = await response.json();
-            return (data.wordSynced && data.wordSynced.length > 0) ? data.wordSynced : null;
-        } catch (e) {
-            console.warn('Word-synced lyrics fetch failed:', e);
-            return null;
-        }
-    }
-
     async fetchLrclib(track) {
         const artist = Array.isArray(track.artists)
             ? track.artists.map(a => a.name || a).join(', ')
@@ -131,40 +106,39 @@ export class LyricsManager {
         return null;
     }
 
-    /**
-     * Fetch order: cache -> IndexedDB -> Musixmatch word-synced -> LRCLIB fallback
-     */
+    _isValidLrclibData(data) {
+        if (!data || data.lyricsProvider !== 'LRCLIB') return false;
+        if (data.wordSynced) return false;
+        return true;
+    }
+
     async fetchLyrics(trackId, track = null) {
         if (!track) return null;
 
-        if (this.lyricsCache.has(trackId)) return this.lyricsCache.get(trackId);
+        if (this.lyricsCache.has(trackId)) {
+            const memCached = this.lyricsCache.get(trackId);
+            if (this._isValidLrclibData(memCached)) return memCached;
+        }
 
         try {
             await musicDB.open();
             const cached = await musicDB.getCachedLyrics(trackId);
-            if (cached) { this.lyricsCache.set(trackId, cached); return cached; }
+            if (cached && this._isValidLrclibData(cached)) {
+                this.lyricsCache.set(trackId, cached);
+                return cached;
+            }
+            if (cached) {
+                try { await musicDB.deleteCachedLyrics?.(trackId); } catch {}
+            }
         } catch (e) { console.warn('IndexedDB lyrics read failed:', e); }
 
         if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
 
-        // 1) Musixmatch word-synced first (better matching, word-level timing)
-        try {
-            const wordSynced = await this.fetchWordSyncedLyrics(track);
-            if (wordSynced) {
-                const subtitles = this.wordSyncedToLRC(wordSynced);
-                const data = { wordSynced, subtitles: subtitles || null, lyricsProvider: 'Musixmatch' };
-                this.lyricsCache.set(trackId, data);
-                try { await musicDB.cacheLyrics(trackId, data); } catch { /* ignore */ }
-                return data;
-            }
-        } catch (e) { console.warn('Musixmatch fetch failed:', e); }
-
-        // 2) LRCLIB fallback (free, no API key)
         try {
             const lrclib = await this.fetchLrclib(track);
             if (lrclib) {
                 this.lyricsCache.set(trackId, lrclib);
-                try { await musicDB.cacheLyrics(trackId, lrclib); } catch { /* ignore */ }
+                try { await musicDB.cacheLyrics(trackId, lrclib); } catch {}
                 return lrclib;
             }
         } catch (e) { console.warn('LRCLIB fetch failed:', e); }
@@ -311,7 +285,7 @@ export function openLyricsPanel(track, audioPlayer, lyricsManager, forceOpen = f
 }
 
 /* ================================================================
-   CUSTOM LYRICS RENDERER (replaces am-lyrics)
+   LYRICS RENDERER
    ================================================================ */
 
 async function renderCustomLyrics(container, track, audioPlayer, lyricsManager) {
@@ -335,11 +309,14 @@ async function renderCustomLyrics(container, track, audioPlayer, lyricsManager) 
     const lyricsData = await lyricsManager.fetchLyrics(track.id, track);
     if (!lyricsData) return errorMsg('No lyrics found');
 
-    const wordSynced = lyricsData.wordSynced || null;
-    const subtitles = wordSynced
-        ? lyricsManager.wordSyncedToLRC(wordSynced)
-        : lyricsData.subtitles;
-    const parsed = lyricsManager.parseSyncedLyrics(subtitles);
+    const subtitles = lyricsData.subtitles;
+    let parsed = lyricsManager.parseSyncedLyrics(subtitles);
+
+    if (parsed.length > 1) {
+        const uniqueTimes = new Set(parsed.map(l => l.time));
+        if (uniqueTimes.size === 1) parsed = [];
+    }
+
     const hasSync = parsed.length > 0;
 
     container.innerHTML = '';
@@ -362,26 +339,12 @@ async function renderCustomLyrics(container, track, audioPlayer, lyricsManager) 
 
     if (!hasSync) return errorMsg('No synced lyrics found');
 
-    let wordMap = buildWordMap(wordSynced, parsed);
-
     const lineEls = [];
     for (let i = 0; i < parsed.length; i++) {
         const el = document.createElement('p');
         el.className = 'tl-line';
         el.dataset.idx = i;
-
-        if (wordMap && wordMap[i]) {
-            for (const w of wordMap[i]) {
-                const span = document.createElement('span');
-                span.className = 'tl-word tl-word-future';
-                span.innerHTML = wrapParenthesized(w.text);
-                span.dataset.start = w.start;
-                span.dataset.end = w.end;
-                el.appendChild(span);
-            }
-        } else {
-            el.innerHTML = wrapParenthesized(parsed[i].text);
-        }
+        el.innerHTML = wrapParenthesized(parsed[i].text);
 
         el.addEventListener('click', () => {
             audioPlayer.currentTime = parsed[i].time;
@@ -395,42 +358,10 @@ async function renderCustomLyrics(container, track, audioPlayer, lyricsManager) 
     container.appendChild(root);
     container.scrollTop = 0;
 
-    const cleanup = setupThrottledSync(parsed, () => wordMap, lineEls, container, audioPlayer, lyricsManager);
+    const cleanup = setupSyncEngine(parsed, lineEls, container, audioPlayer, lyricsManager);
 
     container.lyricsCleanup = cleanup;
     container.lyricsManager = lyricsManager;
-
-    if (!wordSynced && typeof navigator !== 'undefined' && navigator.onLine) {
-        let aborted = false;
-        lyricsManager.fetchWordSyncedLyrics(track).then(ws => {
-            if (aborted || !ws) return;
-            const cached = lyricsManager.lyricsCache.get(track.id);
-            if (cached) {
-                cached.wordSynced = ws;
-                lyricsManager.lyricsCache.set(track.id, cached);
-                try { musicDB.cacheLyrics(track.id, cached); } catch {}
-            }
-            const newMap = buildWordMap(ws, parsed);
-            if (!newMap) return;
-            wordMap = newMap;
-            for (const [idxStr, words] of Object.entries(newMap)) {
-                const idx = parseInt(idxStr, 10);
-                const el = lineEls[idx];
-                if (!el || el.querySelector('.tl-word')) continue;
-                el.textContent = '';
-                for (const w of words) {
-                    const span = document.createElement('span');
-                    span.className = 'tl-word tl-word-future';
-                    span.innerHTML = wrapParenthesized(w.text);
-                    span.dataset.start = w.start;
-                    span.dataset.end = w.end;
-                    el.appendChild(span);
-                }
-            }
-        }).catch(() => {});
-        const origCleanup = container.lyricsCleanup;
-        container.lyricsCleanup = () => { aborted = true; origCleanup(); };
-    }
 
     return root;
 }
@@ -444,54 +375,11 @@ function wrapParenthesized(text) {
     return escaped.replace(/(\([^)]*\))/g, '<span class="tl-bg-vocal">$1</span>');
 }
 
-/**
- * Build a map of line index -> word timing objects for word-level highlight.
- * Matches word-synced lines to parsed LRC lines by approximate timestamp.
- */
-function buildWordMap(wordSynced, parsed) {
-    if (!wordSynced || !parsed || parsed.length === 0) return null;
-    const map = {};
-    for (const wsLine of wordSynced) {
-        const startSec = wsLine.start || 0;
-        let bestIdx = -1;
-        let bestDiff = Infinity;
-        for (let i = 0; i < parsed.length; i++) {
-            const diff = Math.abs(parsed[i].time - startSec);
-            if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-        }
-        if (bestIdx >= 0 && bestDiff < 2.0) {
-            const words = [];
-            if (wsLine.words && wsLine.words.length > 0) {
-                for (let wi = 0; wi < wsLine.words.length; wi++) {
-                    const w = wsLine.words[wi];
-                    const wStart = w.time ?? w.startTime ?? w.start ?? 0;
-                    const nextStart = wi + 1 < wsLine.words.length
-                        ? (wsLine.words[wi + 1].time ?? wsLine.words[wi + 1].startTime ?? wsLine.words[wi + 1].start ?? 0)
-                        : (wsLine.end || startSec + 5);
-                    words.push({
-                        text: (w.word || w.text || w.c || '') + ' ',
-                        start: wStart,
-                        end: w.endTime ?? w.end ?? nextStart,
-                    });
-                }
-            } else {
-                words.push({
-                    text: wsLine.text || '',
-                    start: startSec,
-                    end: wsLine.end || startSec + 5,
-                });
-            }
-            if (words.length > 0) map[bestIdx] = words;
-        }
-    }
-    return Object.keys(map).length > 0 ? map : null;
-}
-
 /* ================================================================
-   THROTTLED SYNC ENGINE (no rAF)
+   SYNC ENGINE — rAF lerp scroll, multi-line active
    ================================================================ */
 
-function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, lyricsManager) {
+function setupSyncEngine(parsed, lineEls, scrollEl, audioPlayer, lyricsManager) {
     let activeLineIdx = -1;
     let intervalId = null;
     let isUserScrolling = false;
@@ -522,18 +410,17 @@ function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, 
 
     const getTimingOffset = () => lyricsManager?.timingOffset || 0;
 
-    const scrollToActive = (instant) => {
-        if (activeLineIdx >= 0 && activeLineIdx < lineEls.length && !isUserScrolling) {
-            const lineTop = lineEls[activeLineIdx].offsetTop;
-            const offset = window.innerHeight * 0.30;
-            scrollEl.scrollTo({
-                top: lineTop - offset,
-                behavior: instant ? 'instant' : 'smooth'
-            });
-        }
+    const setScrollTarget = (lineIdx, instant) => {
+        if (lineIdx < 0 || lineIdx >= lineEls.length || isUserScrolling) return;
+        const lineRect = lineEls[lineIdx].getBoundingClientRect();
+        const containerRect = scrollEl.getBoundingClientRect();
+        const lineTop = scrollEl.scrollTop + (lineRect.top - containerRect.top);
+        const target = Math.max(0, lineTop - scrollEl.clientHeight * 0.25);
+        scrollEl.scrollTop = target;
     };
 
     const LYRICS_LEAD_SEC = 0.3;
+    const MULTI_LINE_GAP = 1.0;
 
     const update = () => {
         const t = audioPlayer.currentTime - getTimingOffset() / 1000 + LYRICS_LEAD_SEC;
@@ -546,29 +433,38 @@ function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, 
         }
 
         if (newIdx !== activeLineIdx) {
-            if (activeLineIdx >= 0 && activeLineIdx < lineEls.length) {
-                lineEls[activeLineIdx].classList.remove('tl-active');
-                lineEls[activeLineIdx].classList.add('tl-past');
-                resetWordSpans(lineEls[activeLineIdx], true);
-            }
-            for (let i = Math.max(0, activeLineIdx + 1); i < newIdx; i++) {
+            for (let i = 0; i < lineEls.length; i++) {
                 lineEls[i].classList.remove('tl-active');
-                lineEls[i].classList.add('tl-past');
+                if (i < newIdx) {
+                    lineEls[i].classList.add('tl-past');
+                } else {
+                    lineEls[i].classList.remove('tl-past');
+                }
             }
 
             activeLineIdx = newIdx;
 
             if (activeLineIdx >= 0 && activeLineIdx < lineEls.length) {
-                lineEls[activeLineIdx].classList.remove('tl-past');
                 lineEls[activeLineIdx].classList.add('tl-active');
 
-                if (canScroll) scrollToActive(false);
+                let multiStart = activeLineIdx;
+                while (multiStart > 0 && (parsed[multiStart].time - parsed[multiStart - 1].time) < MULTI_LINE_GAP) {
+                    const prevTime = parsed[multiStart - 1].time;
+                    if (t >= prevTime && (t - prevTime) < MULTI_LINE_GAP) {
+                        multiStart--;
+                        lineEls[multiStart].classList.remove('tl-past');
+                        lineEls[multiStart].classList.add('tl-active');
+                    } else {
+                        break;
+                    }
+                }
+
+                if (canScroll) setScrollTarget(activeLineIdx, false);
             }
         }
-
     };
 
-    const startInterval = () => { if (!intervalId) intervalId = setInterval(update, 100); };
+    const startInterval = () => { if (!intervalId) intervalId = setInterval(update, 80); };
     const stopInterval = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
 
     const onPlay = () => startInterval();
@@ -576,10 +472,7 @@ function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, 
     const onPause = () => stopInterval();
     const onSeeked = () => {
         activeLineIdx = -1;
-        for (const el of lineEls) {
-            el.classList.remove('tl-active', 'tl-past');
-            resetWordSpans(el, false);
-        }
+        for (const el of lineEls) el.classList.remove('tl-active', 'tl-past');
         if (!audioPlayer.paused) startInterval();
         update();
     };
@@ -602,10 +495,9 @@ function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, 
     update();
 
     initialScrollTimer = setTimeout(() => {
-        scrollEl.scrollTop = 0;
-        update();
         canScroll = true;
-        scrollToActive(true);
+        update();
+        setScrollTarget(activeLineIdx, true);
     }, 400);
 
     return () => {
@@ -619,11 +511,6 @@ function setupThrottledSync(parsed, getWordMap, lineEls, scrollEl, audioPlayer, 
         audioPlayer.removeEventListener('seeked', onSeeked);
         audioPlayer.removeEventListener('timeupdate', onTimeUpdate);
     };
-}
-
-function resetWordSpans(lineEl, markPast) {
-    const spans = lineEl.querySelectorAll('.tl-word');
-    for (const s of spans) s.className = 'tl-word';
 }
 
 /* ================================================================
