@@ -382,10 +382,13 @@ function wrapParenthesized(text) {
 function setupSyncEngine(parsed, lineEls, scrollEl, audioPlayer, lyricsManager) {
     let activeLineIdx = -1;
     let intervalId = null;
+    let rafId = null;
     let isUserScrolling = false;
     let userScrollTimer = null;
     let canScroll = false;
     let initialScrollTimer = null;
+    let scrollCurrent = 0;
+    let scrollTarget = 0;
 
     scrollEl.addEventListener('touchstart', () => {
         isUserScrolling = true;
@@ -410,13 +413,36 @@ function setupSyncEngine(parsed, lineEls, scrollEl, audioPlayer, lyricsManager) 
 
     const getTimingOffset = () => lyricsManager?.timingOffset || 0;
 
+    const LERP_FACTOR = 0.45;
+
+    const animateScroll = () => {
+        if (isUserScrolling) {
+            scrollCurrent = scrollEl.scrollTop;
+            rafId = requestAnimationFrame(animateScroll);
+            return;
+        }
+        const diff = scrollTarget - scrollCurrent;
+        if (Math.abs(diff) < 1) {
+            scrollCurrent = scrollTarget;
+            scrollEl.scrollTop = scrollTarget;
+        } else {
+            scrollCurrent += diff * LERP_FACTOR;
+            scrollEl.scrollTop = scrollCurrent;
+        }
+        rafId = requestAnimationFrame(animateScroll);
+    };
+
     const setScrollTarget = (lineIdx, instant) => {
         if (lineIdx < 0 || lineIdx >= lineEls.length || isUserScrolling) return;
         const lineRect = lineEls[lineIdx].getBoundingClientRect();
         const containerRect = scrollEl.getBoundingClientRect();
         const lineTop = scrollEl.scrollTop + (lineRect.top - containerRect.top);
         const target = Math.max(0, lineTop - scrollEl.clientHeight * 0.25);
-        scrollEl.scrollTop = target;
+        scrollTarget = target;
+        if (instant) {
+            scrollCurrent = target;
+            scrollEl.scrollTop = target;
+        }
     };
 
     const LYRICS_LEAD_SEC = 0.3;
@@ -491,8 +517,11 @@ function setupSyncEngine(parsed, lineEls, scrollEl, audioPlayer, lyricsManager) 
 
     if (!audioPlayer.paused && !intervalId) startInterval();
 
+    scrollCurrent = 0;
     scrollEl.scrollTop = 0;
     update();
+
+    rafId = requestAnimationFrame(animateScroll);
 
     initialScrollTimer = setTimeout(() => {
         canScroll = true;
@@ -505,6 +534,7 @@ function setupSyncEngine(parsed, lineEls, scrollEl, audioPlayer, lyricsManager) 
         clearTimeout(initialScrollTimer);
         stopInterval();
         clearTimeout(userScrollTimer);
+        if (rafId) cancelAnimationFrame(rafId);
         audioPlayer.removeEventListener('play', onPlay);
         audioPlayer.removeEventListener('playing', onPlaying);
         audioPlayer.removeEventListener('pause', onPause);

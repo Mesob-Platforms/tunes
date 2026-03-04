@@ -6671,6 +6671,9 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
     font-size: 2rem;
     line-height: 1.5;
     font-weight: 700;
+    transition: color 0.25s cubic-bezier(.42,.14,.51,.98), transform 0.3s cubic-bezier(.42,.14,.51,.98);
+    transform: scale(1);
+    transform-origin: left center;
     letter-spacing: -0.01em;
     padding: 0.45rem 0;
     margin: 0;
@@ -6681,10 +6684,12 @@ body:has(.now-playing-bar.npb-visible) #download-notifications {
 .tl-line.tl-active {
     color: #fff;
     text-shadow: 0 0 20px rgba(255, 255, 255, 0.2), 0 0 40px rgba(255, 255, 255, 0.05);
+    transform: scale(1.02);
 }
 .tl-line.tl-past {
     color: rgba(255, 255, 255, 0.06);
     text-shadow: none;
+    transform: scale(1);
 }
 .tl-plain-line {
     font-size: 1.5rem;
