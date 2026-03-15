@@ -104,7 +104,6 @@ async function tgTestConnection(env: Env): Promise<{ ok: boolean; bot_name?: str
    ARCHIVE LOGIC — export data to JSON and send to Telegram
    ══════════════════════════════════════════════════════════════ */
 
-const KEEP_RECENT_DAYS = 365; // Keep 1 year of data in Supabase
 const AUTO_ARCHIVE_MB = 150; // Auto-trigger archive when DB exceeds this size
 
 async function tgSendWithRetry(env: Env, blob: Blob, filename: string, caption: string, retries = 3): Promise<any> {
@@ -129,9 +128,8 @@ const ARCHIVE_CHUNK_SIZE = 10000;
 
 async function performArchive(env: Env): Promise<{ success: boolean; rows: number; purged: number; error?: string }> {
   const hdrs = adminHeaders(env);
-  const cutoffDate = new Date(Date.now() - KEEP_RECENT_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  const evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=*&listened_at=lt.${encodeURIComponent(cutoffDate)}&order=listened_at.asc&limit=50000`;
+  const evtUrl = `${SUPABASE_URL}/rest/v1/listening_events?select=*&order=listened_at.asc&limit=50000`;
   const evtRes = await fetch(evtUrl, { headers: hdrs });
   if (!evtRes.ok) return { success: false, rows: 0, purged: 0, error: `Failed to fetch events: ${evtRes.status}` };
   const allEvents: any[] = await evtRes.json();
@@ -586,6 +584,7 @@ async function handleCreateUpdate(request: Request, env: Env): Promise<Response>
       message: body.message || null,
       link: body.link || null,
       category: body.category || 'feature',
+      target_versions: Array.isArray(body.target_versions) ? body.target_versions : [],
       is_active: true,
     }),
   });
@@ -607,6 +606,7 @@ async function handleEditUpdate(request: Request, env: Env): Promise<Response> {
   if (body.message !== undefined) payload.message = body.message;
   if (body.link !== undefined) payload.link = body.link;
   if (body.category !== undefined) payload.category = body.category;
+  if (body.target_versions !== undefined) payload.target_versions = Array.isArray(body.target_versions) ? body.target_versions : [];
   if (body.is_active !== undefined) payload.is_active = body.is_active;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/admin_updates?id=eq.${body.id}`, {
     method: 'PATCH',
@@ -997,13 +997,15 @@ async function handleWordSyncedLyrics(request: Request): Promise<Response> {
    PUBLIC ENDPOINTS — updates/check, announcements/active
    ══════════════════════════════════════════════════════════════ */
 
-/** GET /api/updates/check — get active updates (public, no version filtering) */
+/** GET /api/updates/check?version=1.0.0 — get active updates, filtered by app version */
 async function handleCheckUpdates(request: Request, env: Env): Promise<Response> {
   const hdrs = adminHeaders(env);
+  const url = new URL(request.url);
+  const version = url.searchParams.get('version') || null;
   const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_active_updates`, {
     method: 'POST',
     headers: hdrs,
-    body: '{}',
+    body: JSON.stringify(version ? { app_version: version } : {}),
   });
   if (!rpcRes.ok) {
     return Response.json([], { headers: CORS_HEADERS });
@@ -1477,8 +1479,10 @@ export default {
           }
         }
 
+        console.log(`[cron-archive] starting full archive`);
         const r = await performArchive(env);
-        if (!r.success && r.error) console.error('[cron-archive]', r.error);
+        if (!r.success && r.error) console.error('[cron-archive] FAILED:', r.error);
+        else if (r.rows === 0) console.log('[cron-archive] no events older than cutoff — nothing to archive');
         else console.log(`[cron-archive] archived ${r.rows} rows, purged ${r.purged} from Supabase`);
       } catch (e) {
         console.error('[cron-archive] exception:', e);
@@ -1638,6 +1642,54 @@ export default {
     if (url.pathname === '/api/announcements/active') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
       return await handleActiveAnnouncements(env);
+    }
+    if (url.pathname === '/api/trending') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      try {
+        const cache = caches.default;
+        const cacheKey = new Request(url.origin + '/api/trending');
+        const cached = await cache.match(cacheKey);
+        if (cached) return cached;
+
+        const allEvents = await getAllEventsIncludingArchives(env);
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        let recentEvents = allEvents.filter((e: any) => e.listened_at >= sevenDaysAgo);
+        if (recentEvents.length === 0) recentEvents = allEvents;
+
+        const trackCounts: Record<string, { id: string; title: string; artist: string; album: string; albumId: string; count: number }> = {};
+        const artistCounts: Record<string, { name: string; count: number }> = {};
+        const albumCounts: Record<string, { id: string; title: string; artist: string; count: number }> = {};
+
+        for (const e of recentEvents) {
+          if (e.track_id && e.track_title) {
+            if (!trackCounts[e.track_id]) trackCounts[e.track_id] = { id: e.track_id, title: e.track_title, artist: e.artist_name, album: e.album_title, albumId: e.album_id, count: 0 };
+            trackCounts[e.track_id].count++;
+          }
+          if (e.artist_name && e.artist_name !== 'Unknown') {
+            if (!artistCounts[e.artist_name]) artistCounts[e.artist_name] = { name: e.artist_name, count: 0 };
+            artistCounts[e.artist_name].count++;
+          }
+          if (e.album_id && e.album_title) {
+            if (!albumCounts[e.album_id]) albumCounts[e.album_id] = { id: e.album_id, title: e.album_title, artist: e.artist_name, count: 0 };
+            albumCounts[e.album_id].count++;
+          }
+        }
+
+        const tracks = Object.values(trackCounts).sort((a, b) => b.count - a.count).slice(0, 20);
+        const artists = Object.values(artistCounts).sort((a, b) => b.count - a.count).slice(0, 12);
+        const albums = Object.values(albumCounts).sort((a, b) => b.count - a.count).slice(0, 12);
+
+        const resp = Response.json({ tracks, artists, albums }, {
+          headers: { ...CORS_HEADERS, 'Cache-Control': 'public, max-age=300' },
+        });
+        ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        return resp;
+      } catch (err: any) {
+        return Response.json({ tracks: [], artists: [], albums: [], error: err.message }, { headers: CORS_HEADERS });
+      }
+    }
+    if (url.pathname === '/api/ping') {
+      return new Response('pong', { status: 200, headers: CORS_HEADERS });
     }
     if (url.pathname === '/api/track-event') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });

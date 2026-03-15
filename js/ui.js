@@ -1,4 +1,5 @@
 //js/ui.js
+import { isOnline } from './networkMonitor.js';
 import { showNotification, getDownloadedCatalog, removeFromDownloadedCatalog, removeAlbumFromDownloadedCatalog } from './downloads.js';
 import {
     SVG_PLAY,
@@ -20,15 +21,16 @@ import {
     escapeHtml,
     showConfirmDialog,
     copyToClipboard,
+    hapticLight,
+    hapticMedium,
 } from './utils.js';
-import { openLyricsPanel } from './lyrics.js';
+import { openLyricsFullscreen, closeLyricsFullscreen, isLyricsOpen } from './lyrics.js';
 import {
     recentActivityManager,
     backgroundSettings,
     cardSettings,
     homePageSettings,
     streamingQualitySettings,
-    crossfadeSettings,
 } from './storage.js';
 import { authManager } from './accounts/auth.js';
 import { buildAccountPageData, getAvatarUrl } from './accounts/profile.js';
@@ -80,6 +82,8 @@ export class UIRenderer {
         this._pageHtmlCache = new Map();
         this._pageDataCache = new Map();
         this._homeDataCache = { songs: null, albums: null, artists: null, songsTime: 0, albumsTime: 0, artistsTime: 0 };
+        this._homeSessionRefreshed = false;
+        this._forceHomeRefresh = false;
         this._scrollPositions = {};
         this._currentPageId = null;
         this._activeRootTab = 'home';
@@ -250,7 +254,7 @@ export class UIRenderer {
     createTrackItemHTML(track, index, showCover = false, hasMultipleDiscs = false, useTrackNumber = false) {
         const isUnavailable = track.isUnavailable;
         const trackImageHTML = showCover
-            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy" onerror="this.src='/assets/everywhere.png'">`
+            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">`
             : '';
 
         let displayIndex;
@@ -373,7 +377,7 @@ export class UIRenderer {
             href: `/playlist/${playlist.uuid}`,
             title: playlist.title,
             subtitle: `${playlist.numberOfTracks || 0} tracks`,
-            imageHTML: `<img src="${coverUrl}" alt="${playlist.title}" class="card-image" loading="${loadingAttr}" ${fetchPriority} onerror="console.error('Playlist image failed:', '${coverUrl}'); this.src='/assets/everywhere.png';">`,
+            imageHTML: `<img src="${coverUrl}" alt="${playlist.title}" class="card-image" loading="${loadingAttr}" ${fetchPriority} onerror="this.onerror=null;this.src='assets/everywhere.png'">`,
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="playlist" title="Add to Liked">
                     ${this.createHeartIcon(false)}
@@ -400,7 +404,7 @@ export class UIRenderer {
     }
 
     createMixCardHTML(mix) {
-        const imageSrc = mix.cover || '/assets/everywhere.png';
+        const imageSrc = mix.cover || 'assets/everywhere.png';
         const description = mix.subTitle || mix.description || '';
         const isCompact = cardSettings.isCompactAlbum();
 
@@ -797,7 +801,7 @@ export class UIRenderer {
 
         const coverId = track.album?.cover || track.cover;
         const coverUrl = coverId ? this.api.getCoverUrl(coverId, '1280') : '';
-        const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+        const isOffline = !isOnline();
 
         const fsLikeBtn = document.getElementById('fs-like-btn');
         if (fsLikeBtn) {
@@ -825,7 +829,7 @@ export class UIRenderer {
             resolvedUrl = coverUrl;
         }
         if (!resolvedUrl) {
-            resolvedUrl = '/assets/everywhere.png';
+            resolvedUrl = 'assets/everywhere.png';
         }
 
         if (image.src !== resolvedUrl) {
@@ -865,7 +869,7 @@ export class UIRenderer {
         }
     }
 
-    async showFullscreenCover(track, nextTrack, lyricsManager, audioPlayer) {
+    async showFullscreenCover(track, nextTrack, api, audioPlayer) {
         if (!track) return;
         if (window.location.hash !== '#fullscreen') {
             window.history.pushState({ fullscreen: true }, '', '#fullscreen');
@@ -884,7 +888,7 @@ export class UIRenderer {
             nextTrackEl.classList.remove('animate-in');
         }
 
-        if (lyricsManager && audioPlayer) {
+        if (api && audioPlayer) {
             lyricsToggleBtn.style.display = 'flex';
             lyricsToggleBtn.classList.remove('active');
 
@@ -892,8 +896,13 @@ export class UIRenderer {
                 lyricsToggleBtn.removeEventListener('click', this._fsLyricsToggleHandler);
             }
             this._fsLyricsToggleHandler = () => {
-                openLyricsPanel(track, audioPlayer, lyricsManager);
-                lyricsToggleBtn.classList.toggle('active');
+                if (isLyricsOpen()) {
+                    closeLyricsFullscreen();
+                    lyricsToggleBtn.classList.remove('active');
+                } else {
+                    openLyricsFullscreen(track, audioPlayer, api);
+                    lyricsToggleBtn.classList.add('active');
+                }
             };
             lyricsToggleBtn.addEventListener('click', this._fsLyricsToggleHandler);
         } else {
@@ -1004,19 +1013,22 @@ export class UIRenderer {
         updatePlayBtn();
 
         playBtn.onclick = () => {
+            hapticMedium();
             this.player.handlePlayPause();
             updatePlayBtn();
         };
 
-        prevBtn.onclick = () => this.player.playPrev();
-        nextBtn.onclick = () => this.player.playNext();
+        prevBtn.onclick = () => { hapticLight(); this.player.playPrev(); };
+        nextBtn.onclick = () => { hapticLight(); this.player.playNext(); };
 
         shuffleBtn.onclick = () => {
+            hapticLight();
             this.player.toggleShuffle();
             shuffleBtn.classList.toggle('active', this.player.shuffleActive);
         };
 
         repeatBtn.onclick = () => {
+            hapticLight();
             const mode = this.player.toggleRepeat();
             repeatBtn.classList.toggle('active', mode !== 0);
             if (mode === 2) {
@@ -1114,7 +1126,7 @@ export class UIRenderer {
         });
 
         if (fsLikeBtn) {
-            fsLikeBtn.onclick = () => document.getElementById('now-playing-like-btn')?.click();
+            fsLikeBtn.onclick = () => { hapticMedium(); document.getElementById('now-playing-like-btn')?.click(); };
         }
         if (fsAddPlaylistBtn) {
             fsAddPlaylistBtn.onclick = () => document.getElementById('now-playing-add-playlist-btn')?.click();
@@ -1246,8 +1258,15 @@ export class UIRenderer {
             }
 
             updatePlayBtn();
-            this.fullscreenUpdateInterval = requestAnimationFrame(update);
+            if (!audioPlayer.paused) {
+                this.fullscreenUpdateInterval = requestAnimationFrame(update);
+            }
         };
+        audioPlayer.addEventListener('play', () => {
+            if (this._fsOverlayVisible && !this.fullscreenUpdateInterval) {
+                this.fullscreenUpdateInterval = requestAnimationFrame(update);
+            }
+        });
 
         if (this.fullscreenUpdateInterval) cancelAnimationFrame(this.fullscreenUpdateInterval);
         this.fullscreenUpdateInterval = requestAnimationFrame(update);
@@ -1256,6 +1275,15 @@ export class UIRenderer {
     showPage(pageId) {
         const targetEl = document.getElementById(`page-${pageId}`);
         if (!targetEl) { pageId = 'home'; }
+
+        // When leaving the library page, reset subview state and close overlays
+        if (pageId !== 'library') {
+            const mainView = document.getElementById('library-main-view');
+            if (mainView) mainView.style.display = '';
+            document.querySelectorAll('.library-subview').forEach(sv => { sv.style.display = 'none'; });
+            document.querySelectorAll('.dl-detail-overlay').forEach(o => { o.style.display = 'none'; });
+        }
+
         document.querySelectorAll('.page').forEach((page) => {
             const shouldBeActive = page.id === `page-${pageId}`;
             if (shouldBeActive) {
@@ -1342,6 +1370,10 @@ export class UIRenderer {
 
         if (pageId === 'settings') {
             this.renderApiSettings();
+        }
+
+        if (window.__TUNES_NATIVE__ && window.NativeBridge) {
+            window.NativeBridge.call('setRefreshEnabled', { enabled: pageId === 'home' }).catch(() => {});
         }
     }
 
@@ -1620,7 +1652,7 @@ export class UIRenderer {
 
         const thumbClass = isArtist ? 'library-row-thumb artist-thumb' : 'library-row-thumb';
         const coverHTML = cover
-            ? `<img class="${thumbClass}" src="${cover}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">`
+            ? `<img class="${thumbClass}" src="${cover}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">`
             : `<div class="library-row-icon library-row-icon--muted"><span class="material-symbols-rounded">${iconFallback}</span></div>`;
 
         return `
@@ -1641,13 +1673,17 @@ export class UIRenderer {
         if (sv) sv.style.display = 'block';
     }
 
-    /** Populate the Recently Played sub-view (consecutive duplicates collapsed) */
     async _populateRecentSubview() {
         const list = document.getElementById('library-recent-container');
         if (!list) return;
         const history = await db.getHistory();
-        // Remove consecutive duplicates – keep only the first occurrence in each run
-        const deduped = history.filter((t, i) => i === 0 || String(t.id) !== String(history[i - 1].id));
+        const seen = new Set();
+        const deduped = history.filter(t => {
+            const key = String(t.id);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
 
         if (deduped.length) {
             this.renderListWithTracks(list, deduped, true); // Changed to true to show covers instead of numbers
@@ -1663,10 +1699,10 @@ export class UIRenderer {
             if (likedAlbums && likedAlbums.length) {
                 // Use the same card structure as downloaded albums for consistency
                 albumsGrid.innerHTML = `<div class="dl-albums-grid">${likedAlbums.map((a) => {
-                    const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : '/assets/everywhere.png';
+                    const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-album-id="${a.id}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='/assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
                                 <div class="dl-album-card-subtitle">${escapeHtml(a.artist?.name || a.artist || 'Unknown')}${a.releaseDate ? ` • ${a.releaseDate}` : ''}</div>
@@ -1729,10 +1765,10 @@ export class UIRenderer {
                 // Use the same card structure as downloaded albums for consistency
                 playlistsGrid.innerHTML = `<div class="dl-albums-grid">${enrichedPlaylists.map((p) => {
                     const imageId = p.squareImage || p.image;
-                    const coverUrl = (imageId && imageId !== p.uuid) ? this.api.getCoverUrl(imageId, '480') : '/assets/everywhere.png';
+                    const coverUrl = (imageId && imageId !== p.uuid) ? this.api.getCoverUrl(imageId, '480') : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-playlist-id="${p.uuid}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="eager" fetchpriority="high" onerror="this.src='/assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="eager" fetchpriority="high" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(p.title || 'Unknown Playlist')}</div>
                                 <div class="dl-album-card-subtitle">${p.numberOfTracks || 0} track${(p.numberOfTracks || 0) !== 1 ? 's' : ''}</div>
@@ -1771,7 +1807,7 @@ export class UIRenderer {
             if (userPlaylists && userPlaylists.length) {
                 // Use the same card structure as downloaded albums for consistency
                 playlistsGrid.innerHTML = `<div class="dl-albums-grid">${userPlaylists.map((p) => {
-                    let coverUrl = '/assets/everywhere.png';
+                    let coverUrl = 'assets/everywhere.png';
                     if (p.cover && (p.cover.startsWith('http') || p.cover.startsWith('blob:') || p.cover.startsWith('data:'))) {
                         // Valid URL - use directly
                         coverUrl = p.cover;
@@ -1783,7 +1819,7 @@ export class UIRenderer {
                     const trackCount = p.numberOfTracks || (p.tracks ? p.tracks.length : 0);
                     return `
                         <div class="dl-album-card" data-user-playlist-id="${p.id}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='/assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(p.name || 'Unknown Playlist')}</div>
                                 <div class="dl-album-card-subtitle">${trackCount} track${trackCount !== 1 ? 's' : ''}</div>
@@ -1925,14 +1961,16 @@ export class UIRenderer {
             });
         }
         if (searchInput && container && searchData) {
+            let _libSearchTimer = null;
             searchInput.addEventListener('input', () => {
+                clearTimeout(_libSearchTimer);
                 const q = searchInput.value.trim().toLowerCase();
                 if (!q) {
                     resetSearch();
                     return;
                 }
+                _libSearchTimer = setTimeout(() => {
 
-                // Filter through all library data
                 const matches = [];
 
                 // Search liked tracks
@@ -2052,7 +2090,7 @@ export class UIRenderer {
                             const coverUrl = cover ? this.api.getCoverUrl(cover) : 'assets/everywhere.png';
                             html += `
                                 <div class="library-row library-row--search-result" data-track-id="${track.id}" data-source="${match.source}">
-                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(title)}</div>
                                         <div class="library-row-subtitle">${escapeHtml(artist)} · ${match.source}</div>
@@ -2069,7 +2107,7 @@ export class UIRenderer {
                             const albumId = album.id || album.albumId;
                             html += `
                                 <div class="library-row library-row--search-result" data-album-id="${albumId}" data-source="${match.source}">
-                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(title)}</div>
                                         <div class="library-row-subtitle">${escapeHtml(artist)} · ${match.source}</div>
@@ -2084,7 +2122,7 @@ export class UIRenderer {
                             const coverUrl = this.api.getCoverUrl(cover);
                             html += `
                                 <div class="library-row library-row--search-result" data-playlist-id="${playlist.uuid}" data-source="${match.source}">
-                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(title)}</div>
                                         <div class="library-row-subtitle">${playlist.numberOfTracks || 0} tracks · ${match.source}</div>
@@ -2099,7 +2137,7 @@ export class UIRenderer {
                             const pictureUrl = picture ? this.api.getArtistPictureUrl(picture) : 'assets/everywhere.png';
                             html += `
                                 <div class="library-row library-row--search-result" data-artist-id="${artist.id}" data-source="${match.source}">
-                                    <img src="${pictureUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="this.src='assets/everywhere.png'">
+                                    <img src="${pictureUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(name)}</div>
                                         <div class="library-row-subtitle">${artist.tracks?.length || 0} tracks · ${match.source}</div>
@@ -2169,6 +2207,7 @@ export class UIRenderer {
         } else {
                     if (container) container.innerHTML = createPlaceholder('No results found.');
                 }
+                }, 200);
             });
         }
 
@@ -2412,7 +2451,7 @@ export class UIRenderer {
             const dur = t.duration ? formatTime(t.duration) : '';
             return `
                 <div class="dl-track-item" data-track-id="${t.id}">
-                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                     <div class="dl-track-item-info">
                         <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
                         <div class="dl-track-item-meta">
@@ -2514,7 +2553,7 @@ export class UIRenderer {
             const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-album-id="${a.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
                         <div class="dl-album-card-subtitle">${escapeHtml(a.artist || 'Unknown')} · ${a.count} track${a.count !== 1 ? 's' : ''}</div>
@@ -2566,7 +2605,7 @@ export class UIRenderer {
 
         detailEl.innerHTML = `
             <header class="detail-header" style="padding:1rem var(--content-padding,1rem);">
-                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" onerror="this.src='assets/everywhere.png'" />
+                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" onerror="this.onerror=null;this.src='assets/everywhere.png'" />
                 <div class="detail-header-info">
                     <h1 class="title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</h1>
                     <div class="meta">${sortedTracks.length} track${sortedTracks.length !== 1 ? 's' : ''} · ${formatDuration(totalDuration)}</div>
@@ -2715,7 +2754,7 @@ export class UIRenderer {
 
         container.innerHTML = `<div class="dl-artists-grid">${artists.map((a) => `
                 <div class="dl-artist-card" data-artist-id="${a.id}" data-artist-picture="${a.picture || ''}">
-                    <img class="dl-artist-card-avatar" src="assets/everywhere.png" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                    <img class="dl-artist-card-avatar" src="assets/everywhere.png" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                     <div class="dl-artist-card-name">${escapeHtml(a.name || 'Unknown')}</div>
                     <div class="dl-artist-card-count">${a.count} track${a.count !== 1 ? 's' : ''}</div>
                 </div>`
@@ -2787,7 +2826,7 @@ export class UIRenderer {
 
         detailEl.innerHTML = `
             <div class="dl-detail-hero dl-detail-hero--artist">
-                <img class="dl-detail-cover-lg dl-detail-cover--round" id="dl-artist-hero-img" src="assets/everywhere.png" alt="" onerror="this.src='assets/everywhere.png'">
+                <img class="dl-detail-cover-lg dl-detail-cover--round" id="dl-artist-hero-img" src="assets/everywhere.png" alt="" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                 <div class="dl-detail-hero-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -2810,7 +2849,7 @@ export class UIRenderer {
                         const dur = t.duration ? formatTime(t.duration) : '';
                         return `
                         <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
-                            <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                            <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                             <div class="dl-detail-track-info">
                                 <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
                                 <div class="dl-detail-track-meta">
@@ -2848,7 +2887,7 @@ export class UIRenderer {
                     const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-album-id="${a.id}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(a.title)}</div>
                                 <div class="dl-album-card-subtitle">${a.tracks.length} track${a.tracks.length !== 1 ? 's' : ''}</div>
@@ -2933,7 +2972,7 @@ export class UIRenderer {
             const coverUrl = p.cover ? this.api.getCoverUrl(p.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-playlist-id="${p.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(p.name)}</div>
                         <div class="dl-album-card-subtitle">${p.count} track${p.count !== 1 ? 's' : ''}</div>
@@ -2976,7 +3015,7 @@ export class UIRenderer {
                 <span class="dl-detail-nav-title">Downloads</span>
             </div>
             <div class="dl-detail-hero">
-                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.src='assets/everywhere.png'">
+                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                 <div class="dl-detail-hero-title">${escapeHtml(playlistInfo?.name || 'Unknown Playlist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -2994,7 +3033,7 @@ export class UIRenderer {
                     return `
                     <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
                         <span class="dl-track-number">${trackNum}</span>
-                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                         <div class="dl-detail-track-info">
                             <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
                             <div class="dl-detail-track-meta">
@@ -3118,6 +3157,11 @@ export class UIRenderer {
 
     async renderHomePage() {
         this.showPage('home');
+
+        if (this._homeSessionRefreshed && !this._forceHomeRefresh) {
+            return;
+        }
+
         this._showWrappedBannerIfAvailable();
 
         const welcomeEl = document.getElementById('home-welcome');
@@ -3126,40 +3170,64 @@ export class UIRenderer {
         if (welcomeEl) welcomeEl.style.display = 'none';
         if (contentEl) contentEl.style.display = 'block';
 
-        const hasActualData = contentEl && contentEl.querySelector('.album-card, .track-item, .artist-card, .trending-card') !== null;
-        if (hasActualData && !contentEl.querySelector('.skeleton')) {
-            this._bindHomeRefreshButtons();
-            return;
-        }
-
-        const memCached = this._pageHtmlCache.get('home');
-        if (memCached && contentEl) {
-            contentEl.innerHTML = memCached;
-            this._bindHomeRefreshButtons();
-            this._refreshHomeInBackground();
-            return;
-        }
-
-        let dbCached = null;
-        try { dbCached = await db.getHomeCache(); } catch {}
-        if (dbCached && contentEl) {
-            contentEl.innerHTML = dbCached;
-            this._pageHtmlCache.set('home', dbCached);
-            this._bindHomeRefreshButtons();
-            this._refreshHomeInBackground();
-            return;
-        }
-
-        this._renderHomeShortcuts();
         this._bindHomeRefreshButtons();
-        await Promise.all([
-            this.renderHomeSongs(),
-            this.renderHomeAlbums(),
-            this.renderHomeArtists(),
-            this.renderHomeTrending()
-        ]);
 
-        this._saveHomeCache(contentEl);
+        let cached = null;
+        try { cached = await db.getHomeCache(); } catch {}
+
+        if (cached) {
+            this._renderHomeSectionsFromCache(cached);
+            this._forceHomeRefresh = false;
+            if (!window.__TUNES_NATIVE__) {
+                this._refreshHomeAndPersistCache();
+            }
+            this._homeSessionRefreshed = true;
+        } else {
+            const shell = document.getElementById('app-loading-shell');
+            if (shell) {
+                shell.style.display = 'flex';
+                let statusEl = shell.querySelector('.loading-status');
+                if (!statusEl) {
+                    statusEl = document.createElement('div');
+                    statusEl.className = 'loading-status';
+                    statusEl.style.cssText = 'color:rgba(255,255,255,0.5);font-size:0.75rem;letter-spacing:0.03em;';
+                    shell.appendChild(statusEl);
+                }
+                statusEl.textContent = 'Preparing your homepage\u2026';
+            }
+
+            this._renderHomeShortcuts();
+            this._renderHomeRecentlyPlayed();
+            try {
+                await Promise.all([
+                    this.renderHomeSongs(),
+                    this.renderHomeAlbums(),
+                    this.renderHomeArtists(),
+                    this.renderHomeTrending()
+                ]);
+            } catch (e) {
+                console.warn('[Home] Initial load failed, retrying in 3s:', e);
+                await new Promise(r => setTimeout(r, 3000));
+                try {
+                    await Promise.all([
+                        this.renderHomeSongs(),
+                        this.renderHomeAlbums(),
+                        this.renderHomeArtists(),
+                        this.renderHomeTrending()
+                    ]);
+                } catch (e2) {
+                    console.warn('[Home] Retry also failed:', e2);
+                }
+            }
+
+            if (shell) {
+                shell.style.opacity = '0';
+                shell.style.transition = 'opacity 0.25s';
+                setTimeout(() => shell.remove(), 300);
+            }
+
+            this._persistHomeCache();
+        }
     }
 
     _bindHomeRefreshButtons() {
@@ -3173,16 +3241,18 @@ export class UIRenderer {
     }
 
     async _refreshHomeInBackground() {
-        const contentEl = document.getElementById('home-content');
         this._invalidateHomeDataCache();
         this._renderHomeShortcuts();
-        await Promise.all([
-            this.renderHomeSongs(true),
-            this.renderHomeAlbums(true),
-            this.renderHomeArtists(true),
-            this.renderHomeTrending()
-        ]);
-        this._saveHomeCache(contentEl);
+        try {
+            await Promise.all([
+                this.renderHomeSongs(true),
+                this.renderHomeAlbums(true),
+                this.renderHomeArtists(true),
+                this.renderHomeTrending()
+            ]);
+        } catch (e) {
+            console.warn('[Home] Background refresh partially failed:', e);
+        }
     }
 
     _invalidateHomeDataCache() {
@@ -3191,17 +3261,163 @@ export class UIRenderer {
         this._seedsCacheTime = 0;
     }
 
-    _saveHomeCache(contentEl) {
-        setTimeout(() => {
-            if (contentEl) {
-                const clone = contentEl.cloneNode(true);
-                const annBanner = clone.querySelector('#home-announcement-banner');
-                if (annBanner) { annBanner.innerHTML = ''; annBanner.style.display = 'none'; }
-                const html = clone.innerHTML;
-                this._pageHtmlCache.set('home', html);
-                try { db.saveHomeCache(html); } catch {}
+    _renderHomeSectionsFromCache(cached) {
+        if (cached.shortcuts?.length) {
+            this._renderHomeShortcuts(cached.shortcuts);
+        } else {
+            this._renderHomeShortcuts();
+        }
+
+        if (cached.recentlyPlayed?.length) {
+            this._renderHomeRecentlyPlayedFromCache(cached.recentlyPlayed);
+        } else {
+            this._renderHomeRecentlyPlayed();
+        }
+
+        if (cached.songs?.length) {
+            const c = document.getElementById('home-recommended-songs');
+            const s = c?.closest('.content-section');
+            if (c) {
+                if (s) s.style.display = '';
+                this._homeDataCache.songs = cached.songs;
+                this._homeDataCache.songsTime = Date.now();
+                this.renderListWithTracks(c, cached.songs, true);
             }
-        }, 5000);
+        }
+
+        if (cached.albums?.length) {
+            const c = document.getElementById('home-recommended-albums');
+            const s = c?.closest('.content-section');
+            if (c) {
+                if (s) s.style.display = '';
+                this._homeDataCache.albums = cached.albums;
+                this._homeDataCache.albumsTime = Date.now();
+                c.innerHTML = cached.albums.map(a => this.createAlbumCardHTML(a)).join('');
+                cached.albums.forEach(a => {
+                    const el = c.querySelector(`[data-album-id="${a.id}"]`);
+                    if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
+                });
+            }
+        }
+
+        if (cached.artists?.length) {
+            const c = document.getElementById('home-recommended-artists');
+            const s = c?.closest('.home-section') || c?.closest('.content-section') || document.getElementById('home-artists-section');
+            if (c) {
+                if (s) s.style.display = '';
+                this._homeDataCache.artists = cached.artists;
+                this._homeDataCache.artistsTime = Date.now();
+                c.innerHTML = cached.artists.map(a => this.createArtistCardHTML(a)).join('');
+                cached.artists.forEach(a => {
+                    const el = c.querySelector(`[data-artist-id="${a.id}"]`);
+                    if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
+                });
+            }
+        }
+
+        if (cached.trendingAlbums?.length) {
+            const sec = document.getElementById('home-trending-albums-section');
+            const c = document.getElementById('home-trending-albums');
+            if (sec && c) {
+                sec.style.display = '';
+                c.classList.toggle('few-items', cached.trendingAlbums.length <= 3);
+                c.innerHTML = cached.trendingAlbums.map(a => this.createAlbumCardHTML(a)).join('');
+                cached.trendingAlbums.forEach(a => {
+                    const el = c.querySelector(`[data-album-id="${a.id}"]`);
+                    if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
+                });
+            }
+        }
+
+        if (cached.trendingTracks?.length) {
+            const sec = document.getElementById('home-trending-tracks-section');
+            const c = document.getElementById('home-trending-tracks');
+            if (sec && c) {
+                sec.style.display = '';
+                this.renderListWithTracks(c, cached.trendingTracks, true);
+            }
+        }
+
+        if (cached.trendingArtists?.length) {
+            const sec = document.getElementById('home-trending-artists-section');
+            const c = document.getElementById('home-trending-artists');
+            if (sec && c) {
+                sec.style.display = '';
+                c.classList.toggle('few-items', cached.trendingArtists.length <= 3);
+                c.innerHTML = cached.trendingArtists.map(a => this.createArtistCardHTML(a)).join('');
+                cached.trendingArtists.forEach(a => {
+                    const el = c.querySelector(`[data-artist-id="${a.id}"]`);
+                    if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
+                });
+            }
+        }
+    }
+
+    _renderHomeRecentlyPlayedFromCache(tracks) {
+        const container = document.getElementById('home-recently-played');
+        const section = document.getElementById('home-recently-played-section');
+        if (!container || !section) return;
+
+        if (tracks.length < 3) { section.style.display = 'none'; return; }
+        section.style.display = '';
+
+        container.innerHTML = tracks.map(t => {
+            const coverUrl = t.album?.cover ? this.api.getCoverUrl(t.album.cover, '160') : 'assets/everywhere.png';
+            const title = escapeHtml(getTrackTitle(t));
+            const artist = escapeHtml(getTrackArtists(t));
+            return `<div class="card recent-play-card" data-href="/album/${t.album?.id || ''}" data-track-id="${t.id}" style="min-width:130px;max-width:130px;">
+                <div class="card-cover" style="border-radius:10px;overflow:hidden;aspect-ratio:1;"><img src="${coverUrl}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;"></div>
+                <div class="card-title" style="font-size:0.78rem;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+                <div class="card-subtitle" style="font-size:0.68rem;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}</div>
+            </div>`;
+        }).join('');
+
+        container.querySelectorAll('.recent-play-card').forEach(card => {
+            const trackId = card.dataset.trackId;
+            const track = tracks.find(t => String(t.id) === String(trackId));
+            if (track) trackDataStore.set(card, track);
+            card.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (track) {
+                    this.player.setQueue(tracks, tracks.indexOf(track));
+                    this.player.playAtIndex(tracks.indexOf(track));
+                }
+            });
+        });
+    }
+
+    async _persistHomeCache() {
+        try {
+            const data = {
+                songs: this._homeDataCache.songs || null,
+                albums: this._homeDataCache.albums || null,
+                artists: this._homeDataCache.artists || null,
+                shortcuts: this._lastShortcutItems || null,
+                recentlyPlayed: this._lastRecentlyPlayed || null,
+                trendingAlbums: this._lastTrendingAlbums || null,
+                trendingTracks: this._lastTrendingTracks || null,
+                trendingArtists: this._lastTrendingArtists || null,
+            };
+            await db.saveHomeCache(data);
+        } catch {}
+    }
+
+    async _refreshHomeAndPersistCache() {
+        this._invalidateHomeDataCache();
+        this._renderHomeShortcuts();
+        this._renderHomeRecentlyPlayed();
+        try {
+            await Promise.all([
+                this.renderHomeSongs(true),
+                this.renderHomeAlbums(true),
+                this.renderHomeArtists(true),
+                this.renderHomeTrending()
+            ]);
+        } catch (e) {
+            console.warn('[Home] Background refresh partially failed:', e);
+        }
+        this._persistHomeCache();
     }
 
     _savePageDataToCache(cacheKey, data) {
@@ -3231,32 +3447,41 @@ export class UIRenderer {
         el.addEventListener('animationend', () => el.classList.remove('page-cache-reveal'), { once: true });
     }
 
-    async _renderHomeShortcuts() {
+    async _renderHomeShortcuts(cachedItems) {
         const grid = document.getElementById('home-shortcuts-grid');
         if (!grid) return;
 
-        const items = [];
-        items.push({ label: 'Liked Songs', icon: 'favorite', iconClass: 'liked', action: 'liked' });
-        items.push({ label: 'Recently Played', icon: 'history', iconClass: 'recent', action: 'history' });
+        let items;
+        if (cachedItems?.length) {
+            items = cachedItems;
+        } else {
+            items = [];
+            items.push({ label: 'Liked Songs', icon: 'favorite', iconClass: 'liked', action: 'liked' });
+            items.push({ label: 'Recently Played', icon: 'history', iconClass: 'recent', action: 'history' });
 
-        const { getDownloadedCatalog } = await import('./downloads.js');
-        const dlCount = getDownloadedCatalog().length;
-        if (dlCount > 0) items.push({ label: 'Downloads', icon: 'download', iconClass: 'downloads', action: 'downloads' });
+            try {
+                const { getDownloadedCatalog } = await import('./downloads.js');
+                const dlCount = getDownloadedCatalog().length;
+                if (dlCount > 0) items.push({ label: 'Downloads', icon: 'download', iconClass: 'downloads', action: 'downloads' });
+            } catch {}
 
-        const history = await db.getHistory();
-        const albumCounts = {};
-        history.forEach(t => {
-            if (t.album?.id) albumCounts[t.album.id] = (albumCounts[t.album.id] || 0) + 1;
-        });
-        const topAlbumIds = Object.entries(albumCounts).sort((a, b) => b[1] - a[1]).slice(0, 8 - items.length).map(e => e[0]);
+            const history = await db.getHistory();
+            const albumCounts = {};
+            history.forEach(t => {
+                if (t.album?.id) albumCounts[t.album.id] = (albumCounts[t.album.id] || 0) + 1;
+            });
+            const topAlbumIds = Object.entries(albumCounts).sort((a, b) => b[1] - a[1]).slice(0, 8 - items.length).map(e => e[0]);
 
-        for (const aid of topAlbumIds) {
-            const t = history.find(h => String(h.album?.id) === String(aid));
-            if (t) {
-                const coverUrl = t.album.cover ? this.api.getCoverUrl(t.album.cover, '80') : 'assets/everywhere.png';
-                items.push({ label: t.album.title || 'Album', art: coverUrl, action: 'album', id: aid });
+            for (const aid of topAlbumIds) {
+                const t = history.find(h => String(h.album?.id) === String(aid));
+                if (t) {
+                    const coverUrl = t.album.cover ? this.api.getCoverUrl(t.album.cover, '80') : 'assets/everywhere.png';
+                    items.push({ label: t.album.title || 'Album', art: coverUrl, action: 'album', id: aid });
+                }
             }
         }
+
+        this._lastShortcutItems = items;
 
         grid.innerHTML = items.slice(0, 8).map(item => {
             const artHtml = item.art
@@ -3289,6 +3514,51 @@ export class UIRenderer {
         });
         grid._shortcutHandlerAttached = true;
         }
+    }
+
+    async _renderHomeRecentlyPlayed() {
+        const container = document.getElementById('home-recently-played');
+        const section = document.getElementById('home-recently-played-section');
+        if (!container || !section) return;
+
+        const history = await db.getHistory();
+        const seen = new Set();
+        const unique = history.filter(t => {
+            const key = String(t.id);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        }).slice(0, 12);
+
+        this._lastRecentlyPlayed = unique;
+
+        if (unique.length < 3) { section.style.display = 'none'; return; }
+        section.style.display = '';
+
+        container.innerHTML = unique.map(t => {
+            const coverUrl = t.album?.cover ? this.api.getCoverUrl(t.album.cover, '160') : 'assets/everywhere.png';
+            const title = escapeHtml(getTrackTitle(t));
+            const artist = escapeHtml(getTrackArtists(t));
+            return `<div class="card recent-play-card" data-href="/album/${t.album?.id || ''}" data-track-id="${t.id}" style="min-width:130px;max-width:130px;">
+                <div class="card-cover" style="border-radius:10px;overflow:hidden;aspect-ratio:1;"><img src="${coverUrl}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;"></div>
+                <div class="card-title" style="font-size:0.78rem;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+                <div class="card-subtitle" style="font-size:0.68rem;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}</div>
+            </div>`;
+        }).join('');
+
+        container.querySelectorAll('.recent-play-card').forEach(card => {
+            const trackId = card.dataset.trackId;
+            const track = unique.find(t => String(t.id) === String(trackId));
+            if (track) trackDataStore.set(card, track);
+            card.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (track) {
+                    this.player.setQueue(unique, unique.indexOf(track));
+                    this.player.playAtIndex(unique.indexOf(track));
+                }
+            });
+        });
     }
 
     async getSeeds() {
@@ -3643,28 +3913,29 @@ export class UIRenderer {
         const trendingAlbumsContainer = document.getElementById('home-trending-albums');
         const trendingTracksSection = document.getElementById('home-trending-tracks-section');
         const trendingTracksContainer = document.getElementById('home-trending-tracks');
+        const trendingArtistsSection = document.getElementById('home-trending-artists-section');
+        const trendingArtistsContainer = document.getElementById('home-trending-artists');
 
         if (!trendingAlbumsSection || !trendingTracksSection) return;
 
         try {
             const trending = await syncManager.getGlobalTrending(15);
-
-            const validTrendingAlbums = (trending.albums || []).filter(a => a.count >= 1).slice(0, 12);
-            const validTrendingTracks = (trending.tracks || []).filter(t => t.count >= 1).slice(0, 10);
-            const trendingArtistsSection = document.getElementById('home-trending-artists-section');
-            const trendingArtistsContainer = document.getElementById('home-trending-artists');
-            const validTrendingArtists = (trending.artists || []).filter(a => a.count >= 1).slice(0, 12);
+            const trendingAlbumIds = (trending.albums || []).filter(a => a.count >= 1).slice(0, 12);
+            const trendingTrackIds = (trending.tracks || []).filter(t => t.count >= 1).slice(0, 10);
+            const trendingArtistNames = (trending.artists || []).filter(a => a.count >= 1).slice(0, 12);
 
             const albumsTask = (async () => {
-                if (validTrendingAlbums.length < 1 || !trendingAlbumsContainer) {
+                if (trendingAlbumIds.length < 1 || !trendingAlbumsContainer) {
                     if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
                     return;
                 }
                 trendingAlbumsSection.style.display = '';
                 const albums = (await Promise.all(
-                    validTrendingAlbums.map(t => this.api.getAlbum(t.id).then(d => d?.album || null).catch(() => null))
+                    trendingAlbumIds.map(t => this.api.getAlbum(t.id).then(d => d?.album || null).catch(() => null))
                 )).filter(Boolean);
                 if (albums.length > 0) {
+                    this._lastTrendingAlbums = albums;
+                    trendingAlbumsContainer.classList.toggle('few-items', albums.length <= 3);
                     trendingAlbumsContainer.innerHTML = albums.map(a => this.createAlbumCardHTML(a)).join('');
                     albums.forEach(a => {
                         const el = trendingAlbumsContainer.querySelector(`[data-album-id="${a.id}"]`);
@@ -3676,16 +3947,17 @@ export class UIRenderer {
             })();
 
             const tracksTask = (async () => {
-                if (validTrendingTracks.length < 1 || !trendingTracksContainer) {
+                if (trendingTrackIds.length < 1 || !trendingTracksContainer) {
                     if (trendingTracksSection) trendingTracksSection.style.display = 'none';
                     return;
                 }
                 trendingTracksSection.style.display = '';
                 const fallback = (t) => t.id && t.title ? { id: t.id, title: t.title, artist: { name: t.artist || 'Unknown Artist' }, album: null, duration: 0 } : null;
                 const tracks = (await Promise.all(
-                    validTrendingTracks.map(t => this.api.getTrackMetadata(t.id).then(m => (m?.title ? m : fallback(t))).catch(() => fallback(t)))
+                    trendingTrackIds.map(t => this.api.getTrackMetadata(t.id).then(m => (m?.title ? m : fallback(t))).catch(() => fallback(t)))
                 )).filter(Boolean);
                 if (tracks.length > 0) {
+                    this._lastTrendingTracks = tracks;
                     this.renderListWithTracks(trendingTracksContainer, tracks, true);
                 } else {
                     trendingTracksSection.style.display = 'none';
@@ -3693,17 +3965,19 @@ export class UIRenderer {
             })();
 
             const artistsTask = (async () => {
-                if (validTrendingArtists.length < 1 || !trendingArtistsContainer || !trendingArtistsSection) {
+                if (trendingArtistNames.length < 1 || !trendingArtistsContainer || !trendingArtistsSection) {
                     if (trendingArtistsSection) trendingArtistsSection.style.display = 'none';
                     return;
                 }
                 trendingArtistsSection.style.display = '';
                 const artists = (await Promise.all(
-                    validTrendingArtists.map(t =>
+                    trendingArtistNames.map(t =>
                         this.api.searchArtists(t.name).then(r => r?.items?.[0] || null).catch(() => null)
                     )
                 )).filter(Boolean);
                 if (artists.length > 0) {
+                    this._lastTrendingArtists = artists;
+                    trendingArtistsContainer.classList.toggle('few-items', artists.length <= 3);
                     trendingArtistsContainer.innerHTML = artists.map(a => this.createArtistCardHTML(a)).join('');
                     artists.forEach(a => {
                         const el = trendingArtistsContainer.querySelector(`[data-artist-id="${a.id}"]`);
@@ -3719,8 +3993,7 @@ export class UIRenderer {
             console.error('Failed to load trending data:', e);
             if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
             if (trendingTracksSection) trendingTracksSection.style.display = 'none';
-            const tas = document.getElementById('home-trending-artists-section');
-            if (tas) tas.style.display = 'none';
+            if (trendingArtistsSection) trendingArtistsSection.style.display = 'none';
         }
     }
 
@@ -3925,26 +4198,35 @@ export class UIRenderer {
         artistsContainer.innerHTML = finalArtists.length
             ? finalArtists.map((artist) => this.createArtistCardHTML(artist)).join('')
             : createPlaceholder('No artists found.');
-        finalArtists.forEach((artist) => {
-            const el = artistsContainer.querySelector(`[data-artist-id="${artist.id}"]`);
-            if (el) { trackDataStore.set(el, artist); this.updateLikeState(el, 'artist', artist.id); }
-        });
+        if (finalArtists.length) {
+            const artistEls = artistsContainer.querySelectorAll('[data-artist-id]');
+            artistEls.forEach((el) => {
+                const artist = finalArtists.find(a => String(a.id) === el.dataset.artistId);
+                if (artist) { trackDataStore.set(el, artist); this.updateLikeState(el, 'artist', artist.id); }
+            });
+        }
 
         albumsContainer.innerHTML = finalAlbums.length
             ? finalAlbums.map((album) => this.createAlbumCardHTML(album)).join('')
             : createPlaceholder('No albums found.');
-        finalAlbums.forEach((album) => {
-            const el = albumsContainer.querySelector(`[data-album-id="${album.id}"]`);
-            if (el) { trackDataStore.set(el, album); this.updateLikeState(el, 'album', album.id); }
-        });
+        if (finalAlbums.length) {
+            const albumEls = albumsContainer.querySelectorAll('[data-album-id]');
+            albumEls.forEach((el) => {
+                const album = finalAlbums.find(a => String(a.id) === el.dataset.albumId);
+                if (album) { trackDataStore.set(el, album); this.updateLikeState(el, 'album', album.id); }
+            });
+        }
 
         playlistsContainer.innerHTML = finalPlaylists.length
             ? finalPlaylists.map((playlist) => this.createPlaylistCardHTML(playlist, true)).join('')
             : createPlaceholder('No playlists found.');
-        finalPlaylists.forEach((playlist) => {
-            const el = playlistsContainer.querySelector(`[data-playlist-id="${playlist.uuid}"]`);
-            if (el) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
-        });
+        if (finalPlaylists.length) {
+            const playlistEls = playlistsContainer.querySelectorAll('[data-playlist-id]');
+            playlistEls.forEach((el) => {
+                const playlist = finalPlaylists.find(p => String(p.uuid) === el.dataset.playlistId);
+                if (playlist) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
+            });
+        }
     }
 
     // AI refinement: runs AFTER initial results are shown, updates in-place if AI finds better results
@@ -4634,7 +4916,7 @@ export class UIRenderer {
                 // ... (rest of the logic)
 
                 // Render user or public Pocketbase playlist
-                imageEl.src = playlistData.cover || '/assets/everywhere.png';
+                imageEl.src = playlistData.cover || 'assets/everywhere.png';
                 imageEl.style.backgroundColor = '';
 
                 titleEl.textContent = playlistData.name || playlistData.title;
@@ -4776,7 +5058,7 @@ export class UIRenderer {
 
                     this.extractAndApplyColor(this.api.getCoverUrl(imageId, '160'));
                 } else {
-                    imageEl.src = '/assets/everywhere.png';
+                    imageEl.src = 'assets/everywhere.png';
                     this.setPageBackground(null);
                     this.resetVibrantColor();
                 }
@@ -4962,7 +5244,7 @@ export class UIRenderer {
                     this.setPageBackground(imageEl.src);
                     this.extractAndApplyColor(this.api.getCoverUrl(tracks[0].album.cover, '160'));
                 } else {
-                    imageEl.src = '/assets/everywhere.png';
+                    imageEl.src = 'assets/everywhere.png';
                     this.setPageBackground(null);
                     this.resetVibrantColor();
                 }
@@ -6056,7 +6338,6 @@ export class UIRenderer {
 
         // Streaming Quality options — always wire up regardless of data fetch
         this._initQualityButtons();
-        this._initCrossfadeSettings();
     }
 
     _initQualityButtons() {
@@ -6080,41 +6361,6 @@ export class UIRenderer {
                 });
             });
             btn.parentNode.replaceChild(newBtn, btn);
-        });
-    }
-
-    _initCrossfadeSettings() {
-        const toggle = document.getElementById('crossfade-toggle');
-        const durationRow = document.getElementById('crossfade-duration-row');
-        const slider = document.getElementById('crossfade-duration-slider');
-        const valueLabel = document.getElementById('crossfade-duration-value');
-        if (!toggle || !slider) return;
-
-        const enabled = crossfadeSettings.getEnabled();
-        const duration = crossfadeSettings.getDuration();
-        toggle.checked = enabled;
-        slider.value = duration;
-        valueLabel.textContent = duration + 's';
-        durationRow.style.display = enabled ? 'block' : 'none';
-
-        const updateSliderStyle = () => {
-            const parent = toggle.parentElement;
-            const sliderEl = parent.querySelector('.toggle-slider');
-            if (sliderEl) {
-                sliderEl.style.background = toggle.checked ? 'var(--highlight, #6366f1)' : 'rgba(255,255,255,0.12)';
-            }
-        };
-        updateSliderStyle();
-
-        toggle.addEventListener('change', () => {
-            crossfadeSettings.setEnabled(toggle.checked);
-            durationRow.style.display = toggle.checked ? 'block' : 'none';
-            updateSliderStyle();
-        });
-
-        slider.addEventListener('input', () => {
-            valueLabel.textContent = slider.value + 's';
-            crossfadeSettings.setDuration(parseInt(slider.value, 10));
         });
     }
 
@@ -6597,6 +6843,38 @@ export class UIRenderer {
             };
         });
 
+        // ── Version Tag Input ──
+        const _getVersionChips = () => {
+            const chips = document.querySelectorAll('#admin-update-versions-container .version-chip');
+            return Array.from(chips).map(c => c.dataset.version);
+        };
+        const _addVersionChip = (ver) => {
+            ver = ver.trim();
+            if (!ver || _getVersionChips().includes(ver)) return;
+            const container = document.getElementById('admin-update-versions-container');
+            const input = document.getElementById('admin-update-version-input');
+            const chip = document.createElement('span');
+            chip.className = 'version-chip';
+            chip.dataset.version = ver;
+            chip.innerHTML = `${ver}<button type="button">&times;</button>`;
+            chip.querySelector('button').onclick = () => chip.remove();
+            container.insertBefore(chip, input);
+            input.value = '';
+        };
+        const _clearVersionChips = () => {
+            document.querySelectorAll('#admin-update-versions-container .version-chip').forEach(c => c.remove());
+        };
+        const _setVersionChips = (arr) => {
+            _clearVersionChips();
+            if (Array.isArray(arr)) arr.forEach(v => _addVersionChip(v));
+        };
+        document.getElementById('admin-update-version-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                _addVersionChip(e.target.value);
+            }
+        });
+
         // ── Updates CRUD ──
         const loadUpdates = async () => {
             const list = document.getElementById('admin-updates-list');
@@ -6615,11 +6893,12 @@ export class UIRenderer {
                                 <span style="font-size:0.55rem;padding:0.1rem 0.35rem;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--muted-foreground);font-weight:500;">${categoryLabels[u.category] || u.category}</span>
                             </div>
                             ${u.message ? `<p style="margin:0.2rem 0 0;font-size:0.75rem;opacity:0.5;line-height:1.35;">${escapeHtml(u.message)}</p>` : ''}
-                            <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.3rem;">
+                            <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.3rem;flex-wrap:wrap;">
                                 <span style="font-size:0.6rem;opacity:0.2;">${new Date(u.created_at).toLocaleDateString()}</span>
                                 <span style="font-size:0.6rem;opacity:0.35;color:#a78bfa;">👁 ${u.impressions || 0}</span>
                                 <span style="font-size:0.6rem;opacity:0.35;color:#60a5fa;">🖱 ${u.clicks || 0}</span>
                                 <span style="font-size:0.6rem;opacity:0.35;color:#22c55e;">${u.ctr || 0}% CTR</span>
+                                ${(u.target_versions && u.target_versions.length) ? u.target_versions.map(v => `<span style="font-size:0.55rem;padding:0.1rem 0.35rem;border-radius:4px;background:rgba(168,85,247,0.12);color:#c084fc;font-weight:600;">v${escapeHtml(v)}</span>`).join('') : '<span style="font-size:0.55rem;opacity:0.25;">all versions</span>'}
                             </div>
                         </div>
                         <div style="display:flex;gap:0.25rem;flex-shrink:0;">
@@ -6643,6 +6922,7 @@ export class UIRenderer {
                         document.getElementById('admin-update-message').value = u.message || '';
                         document.getElementById('admin-update-link').value = u.link || '';
                         document.getElementById('admin-update-category').value = u.category || 'feature';
+                        _setVersionChips(u.target_versions || []);
                         document.getElementById('admin-update-form-title').textContent = 'Edit Update';
                         document.getElementById('admin-update-cancel-edit').style.display = '';
                         document.getElementById('admin-update-submit').textContent = 'Save Changes';
@@ -6660,6 +6940,7 @@ export class UIRenderer {
             document.getElementById('admin-update-message').value = '';
             document.getElementById('admin-update-link').value = '';
             document.getElementById('admin-update-category').value = 'feature';
+            _clearVersionChips();
             document.getElementById('admin-update-form-title').textContent = 'New Update';
             document.getElementById('admin-update-cancel-edit').style.display = 'none';
             document.getElementById('admin-update-submit').textContent = 'Publish';
@@ -6682,10 +6963,13 @@ export class UIRenderer {
             const message = document.getElementById('admin-update-message').value.trim();
             const link = document.getElementById('admin-update-link').value.trim();
             const category = document.getElementById('admin-update-category').value;
+            const target_versions = _getVersionChips();
             if (!title) { showNotification('Title is required'); return; }
             try {
                 const endpoint = editId ? '/api/admin/updates/edit' : '/api/admin/updates';
-                const payload = editId ? { id: editId, title, message, link, category } : { title, message, link, category };
+                const payload = editId
+                    ? { id: editId, title, message, link, category, target_versions }
+                    : { title, message, link, category, target_versions };
                 const res = await adminFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
                 if (res.error) throw new Error(res.error);
                 showNotification(editId ? 'Update saved!' : 'Update posted!');

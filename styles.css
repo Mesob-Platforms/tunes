@@ -2253,6 +2253,15 @@ input[type='search']::-webkit-search-cancel-button {
         max-width: none;
     }
 }
+/* Trending rows with few items -- wider cards so they don't look lonely */
+.home-scroll-row.few-items > .card {
+    width: 65vw;
+    max-width: 280px;
+}
+.home-scroll-row.few-items > .card.artist {
+    width: 55vw;
+    max-width: 240px;
+}
 /* ===== END HOME PAGE LAYOUT ===== */
 
 .card {
@@ -9281,6 +9290,72 @@ body.native-app .mobile-tab-bar { background: rgba(10, 10, 12, 0.92); border-top
 body.native-app .search-bar { background: rgba(24, 24, 27, 0.9); }
 body.native-app .home-section-header { background: transparent; }
 body.native-app .notification-area { background: rgba(10, 10, 12, 0.95); }
+body.native-app::before,
+body.native-app::after { display: none !important; }
+body.native-app { transition: none !important; }
+body.native-app .page.active { animation: none !important; }
+
+/* ── Lyrics Fullscreen Overlay ── */
+#lyrics-fullscreen-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: #000;
+    flex-direction: column;
+    overflow: hidden;
+    will-change: transform, opacity;
+    contain: layout style paint;
+}
+.lyrics-fs-bg {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    filter: blur(50px) brightness(0.15);
+    transform: scale(1.2);
+    z-index: 0;
+    pointer-events: none;
+}
+body.native-app .lyrics-fs-bg {
+    filter: blur(25px) brightness(0.15);
+    transform: scale(1.15) translateZ(0);
+}
+.lyrics-fs-track-info {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem 1.5rem 0.5rem;
+    text-align: center;
+    pointer-events: none;
+}
+#lyrics-fs-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80vw;
+}
+#lyrics-fs-artist {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.6);
+    margin-top: 0.15rem;
+}
+#lyrics-fs-album {
+    font-size: 0.68rem;
+    color: rgba(255,255,255,0.4);
+    margin-top: 0.1rem;
+}
+#lyrics-fs-content {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    overflow: hidden;
+}
+#lyrics-fs-content am-lyrics { contain: layout; }
 
 /* ══════════════════════════════════════════════════════════════════
    UX IMPROVEMENTS

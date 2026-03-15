@@ -29,9 +29,9 @@ public class SleepTimerReceiver extends BroadcastReceiver {
         }
 
         // Also notify JS so the UI updates (the JS timer may have already fired)
-        Intent bridgeIntent = new Intent(MediaBridge.ACTION_MEDIA_BRIDGE);
+        Intent bridgeIntent = new Intent(TunesActivity.ACTION_MEDIA_BRIDGE);
         bridgeIntent.setPackage(context.getPackageName());
-        bridgeIntent.putExtra(MediaBridge.EXTRA_ACTION, "sleepTimerFired");
+        bridgeIntent.putExtra(TunesActivity.EXTRA_ACTION, "sleepTimerFired");
         context.sendBroadcast(bridgeIntent);
     }
 }

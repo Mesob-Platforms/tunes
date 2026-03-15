@@ -510,19 +510,21 @@ const syncManager = {
                     if (!userFolders) userFolders = {};
                     if (!history) history = [];
 
-                    const mergeItem = (collection, item, type) => {
-                        const id = type === 'playlist' ? item.uuid || item.id : item.id;
-                        if (!collection[id]) {
-                            collection[id] = this._minifyItem(type, item);
-                            needsUpdate = true;
+                    const mergeIntoCloud = (cloudCollection, localItems, type) => {
+                        for (const item of localItems) {
+                            const id = type === 'playlist' ? item.uuid || item.id : item.id;
+                            if (!cloudCollection[id]) {
+                                cloudCollection[id] = this._minifyItem(type, item);
+                                needsUpdate = true;
+                            }
                         }
                     };
 
-                    localData.tracks.forEach((item) => mergeItem(library.tracks, item, 'track'));
-                    localData.albums.forEach((item) => mergeItem(library.albums, item, 'album'));
-                    localData.artists.forEach((item) => mergeItem(library.artists, item, 'artist'));
-                    localData.playlists.forEach((item) => mergeItem(library.playlists, item, 'playlist'));
-                    localData.mixes.forEach((item) => mergeItem(library.mixes, item, 'mix'));
+                    mergeIntoCloud(library.tracks, localData.tracks, 'track');
+                    mergeIntoCloud(library.albums, localData.albums, 'album');
+                    mergeIntoCloud(library.artists, localData.artists, 'artist');
+                    mergeIntoCloud(library.playlists, localData.playlists, 'playlist');
+                    mergeIntoCloud(library.mixes, localData.mixes, 'mix');
 
                     localData.userPlaylists.forEach((playlist) => {
                         if (!userPlaylists[playlist.id]) {
@@ -619,25 +621,18 @@ const syncManager = {
         const user = authManager.user;
         if (!user) return;
 
-        // Import offline sync manager dynamically to avoid circular deps
         const { offlineSync } = await import('../offlineSync.js');
-        
-        // Check if online
-        const isOnline = await offlineSync.checkOnline();
-        
-        if (!isOnline) {
-            // Queue for offline sync
+
+        if (!supabase) {
             await offlineSync.queueListeningEvent(track);
             return;
         }
 
-        // Try direct insert if online
-        if (!supabase) return;
-        try {
-            const artistName = Array.isArray(track.artists)
-                ? track.artists[0]?.name || 'Unknown'
-                : track.artist?.name || 'Unknown';
+        const artistName = Array.isArray(track.artists)
+            ? track.artists[0]?.name || 'Unknown'
+            : track.artist?.name || 'Unknown';
 
+        try {
             const { error } = await supabase.from('listening_events').insert({
                 user_id: user.uid,
                 track_id: String(track.id),
@@ -650,12 +645,10 @@ const syncManager = {
             });
 
             if (error) {
-                // If insert fails, queue for retry
                 console.warn('[Supabase] Failed to log listening event, queuing:', error.message);
                 await offlineSync.queueListeningEvent(track);
             }
         } catch (e) {
-            // Network error or other issue — queue for offline sync
             console.warn('[Supabase] Listening event error, queuing:', e);
             await offlineSync.queueListeningEvent(track);
         }
@@ -664,40 +657,26 @@ const syncManager = {
     _trendingCacheTime: 0,
     _TRENDING_TTL: 5 * 60 * 1000,
 
-    /** Fetch global trending data from listening_events (all users), cached for 5 min */
+    /** Fetch global trending data from worker (includes Telegram archived events) */
     async getGlobalTrending(limit = 20) {
-        if (!supabase) return { tracks: [], artists: [], albums: [] };
-
         if (this._trendingCache && (Date.now() - this._trendingCacheTime) < this._TRENDING_TTL) {
             return this._trendingCache;
         }
 
         try {
-            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-            const { data, error } = await supabase
-                .from('listening_events')
-                .select('track_id, track_title, artist_name, album_title, album_id')
-                .gte('listened_at', sevenDaysAgo)
-                .limit(2000);
-
-            if (error || !data || data.length === 0) {
-                const { data: allData, error: allErr } = await supabase
-                    .from('listening_events')
-                    .select('track_id, track_title, artist_name, album_title, album_id')
-                    .limit(2000);
-                if (allErr || !allData || allData.length === 0) return { tracks: [], artists: [], albums: [] };
-                const result = this._aggregateTrending(allData, limit);
-                this._trendingCache = result;
-                this._trendingCacheTime = Date.now();
-                return result;
-            }
-
-            const result = this._aggregateTrending(data, limit);
+            const res = await fetch('https://tunes-music-app.naolmideksa.workers.dev/api/trending');
+            if (!res.ok) throw new Error(`Trending fetch failed: ${res.status}`);
+            const data = await res.json();
+            const result = {
+                tracks: (data.tracks || []).slice(0, limit),
+                artists: (data.artists || []).slice(0, 12),
+                albums: (data.albums || []).slice(0, 12),
+            };
             this._trendingCache = result;
             this._trendingCacheTime = Date.now();
             return result;
         } catch (e) {
-            console.warn('[Supabase] Failed to get global trending:', e);
+            console.warn('[Trending] Failed to fetch from worker:', e);
             return this._trendingCache || { tracks: [], artists: [], albums: [] };
         }
     },

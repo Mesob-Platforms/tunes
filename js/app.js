@@ -3,7 +3,7 @@ import { LosslessAPI } from './api.js';
 import { apiSettings, themeManager, downloadQualitySettings, sidebarSettings } from './storage.js';
 import { UIRenderer } from './ui.js';
 import { Player } from './player.js';
-import { LyricsManager, openLyricsPanel, clearLyricsPanelSync } from './lyrics.js';
+import { LyricsManager, openLyricsFullscreen, closeLyricsFullscreen, isLyricsOpen, updateLyricsTrack, initLyricsOverlayGestures } from './lyrics.js';
 import { createRouter, updateTabTitle, navigate } from './router.js';
 import { initializePlayerEvents, initializeTrackInteractions, handleTrackAction } from './events.js';
 import { initializeUIInteractions } from './ui-interactions.js';
@@ -14,13 +14,10 @@ import { db } from './db.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { authManager } from './accounts/auth.js';
 import { supabase } from './accounts/config.js';
-import { getAvatarUrl } from './accounts/profile.js';
-import { registerSW } from './pwa-stub.js';
+import { registerSW } from 'virtual:pwa-register';
 import { apiUrl } from './platform.js';
-import { initMediaBridge } from './mediaBridge.js';
 import { isNative } from './platform.js';
-import { initNetworkMonitor, onNetworkChange, checkAndClearStaleCache } from './networkMonitor.js';
-import './smooth-scrolling.js';
+import { initNetworkMonitor, onNetworkChange, checkAndClearStaleCache, isOnline } from './networkMonitor.js';
 
 // Lazy-loaded modules
 let settingsModule = null;
@@ -170,8 +167,8 @@ function initializeKeyboardShortcuts(player, audioPlayer) {
                 break;
             case 'escape':
                 document.getElementById('search-input')?.blur();
+                if (isLyricsOpen()) closeLyricsFullscreen();
                 sidePanelManager.close();
-                clearLyricsPanelSync(audioPlayer, sidePanelManager.panel);
                 break;
             case 'l':
                 document.querySelector('.now-playing-bar .cover')?.click();
@@ -192,19 +189,30 @@ window.addEventListener('unhandledrejection', (e) => {
     }
 });
 
-window.addEventListener('online', () => {
-    document.body.classList.remove('app-offline');
-    showNotification('Back online');
-});
-window.addEventListener('offline', () => {
-    document.body.classList.add('app-offline');
-    showNotification('You\'re offline — playing downloaded music only');
-});
+if (!isNative) {
+    window.addEventListener('online', () => {
+        document.body.classList.remove('app-offline');
+        showNotification('Back online');
+    });
+    window.addEventListener('offline', () => {
+        document.body.classList.add('app-offline');
+        showNotification('You\'re offline — playing downloaded music only');
+    });
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
-    if (!navigator.onLine) document.body.classList.add('app-offline');
+    if (!isNative && !isOnline()) document.body.classList.add('app-offline');
 
-    await checkAndClearStaleCache();
+    const _killShell = () => {
+        const s = document.getElementById('app-loading-shell');
+        if (s) { s.style.opacity = '0'; s.style.transition = 'opacity 0.25s'; setTimeout(() => s.remove(), 300); }
+    };
+    const _shellTimeout = setTimeout(_killShell, 3000);
+
+    await Promise.race([
+        checkAndClearStaleCache(),
+        new Promise(r => setTimeout(r, 2000))
+    ]);
 
     // ── Unified network monitoring (Capacitor Network on native, browser events on web) ──
     initNetworkMonitor();
@@ -230,114 +238,155 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Expose refs for cross-module access (e.g. admin panel auth)
     window.__tunesRefs = { authManager, ui, api, player };
 
-    // Initialize native media bridge (Android foreground service + notification)
-    initMediaBridge(player, audioPlayer, api);
+    window.__tunesRefs.pullRefresh = async () => {
+        try {
+            const path = window.location.pathname;
+            if (path === '/' || path === '/home' || path.endsWith('index.html')) {
+                ui._invalidateHomeDataCache?.();
+                await ui._refreshHomeAndPersistCache?.();
+                _refreshUpdatesAndAnnouncements();
+            } else if (path.startsWith('/search/') || path === '/search' || path === '/explore') {
+                const q = path.startsWith('/search/') ? decodeURIComponent(path.replace('/search/', '')) : '';
+                await ui.renderSearchPage(q);
+            } else if (path === '/library') {
+                await ui.renderLibraryPage();
+            } else if (path === '/account') {
+                await ui.renderAccountPage();
+            } else if (path.startsWith('/album/')) {
+                const id = path.replace('/album/', '');
+                ui._pageDataCache?.delete(`album-${id}`);
+                await ui.renderAlbumPage(id);
+            } else if (path.startsWith('/artist/')) {
+                const id = path.replace('/artist/', '');
+                ui._pageDataCache?.delete(`artist-${id}`);
+                await ui.renderArtistPage(id);
+            } else if (path.startsWith('/playlist/')) {
+                const id = path.replace('/playlist/', '');
+                ui._pageDataCache?.delete(`playlist-${id}`);
+                await ui.renderPlaylistPage(id);
+            } else if (path.startsWith('/mix/')) {
+                const id = path.replace('/mix/', '');
+                ui._pageDataCache?.delete(`mix-${id}`);
+                await ui.renderMixPage(id);
+            }
+        } catch (e) {
+            console.warn('[PullRefresh] native refresh failed:', e);
+        }
+        if (isNative && window.NativeBridge) {
+            try { window.NativeBridge.call('refreshDone'); } catch {}
+        }
+    };
 
-    // Native: global deep link handler for OAuth cold-start
+    // Initialize native media bridge (Android foreground service + notification)
     if (isNative) {
-        import('@capacitor/app').then(({ App }) => {
-            App.addListener('appUrlOpen', async ({ url }) => {
-                if (!url.includes('auth-callback')) return;
-                try { const { Browser } = await import('@capacitor/browser'); await Browser.close(); } catch (_) {}
-                const hashParams = new URLSearchParams(url.split('#')[1] || '');
-                const queryParams = new URLSearchParams(url.split('?')[1]?.split('#')[0] || '');
-                const accessToken = hashParams.get('access_token');
-                const refreshToken = hashParams.get('refresh_token');
-                const code = queryParams.get('code');
-                if (accessToken && refreshToken) {
-                    await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-                } else if (code) {
-                    await supabase.auth.exchangeCodeForSession(code);
-                }
-            });
+        import('./mediaBridge.js').then(m => m.initMediaBridge(player, audioPlayer, api)).catch(() => {});
+    }
+
+    // Native: deep link handler for OAuth cold-start
+    if (isNative && window.NativeBridge) {
+        window.NativeBridge.on('appUrlOpen', async (data) => {
+            const url = data?.url;
+            if (!url) return;
+            if (!url.includes('access_token') && !url.includes('code=') && !url.includes('auth-callback')) return;
+            const hashParams = new URLSearchParams(url.split('#')[1] || '');
+            const queryParams = new URLSearchParams(url.split('?')[1]?.split('#')[0] || '');
+            const accessToken = hashParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token');
+            const code = queryParams.get('code');
+            if (accessToken && refreshToken) {
+                await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+            } else if (code) {
+                await supabase.auth.exchangeCodeForSession(code);
+            }
         });
     }
 
     // Native Android hardware back button handler
-    if (isNative) {
-        import('@capacitor/app').then(({ App }) => {
-            let lastBackPress = 0;
-            App.addListener('backButton', ({ canGoBack }) => {
-                // Priority 1: close playlist modal
-                const playlistModal = document.getElementById('playlist-modal');
-                if (playlistModal?.classList.contains('active')) {
-                    playlistModal.classList.remove('active');
-                    return;
-                }
-                // Priority 2: close folder modal
-                const folderModal = document.getElementById('folder-modal');
-                if (folderModal?.classList.contains('active')) {
-                    folderModal.classList.remove('active');
-                    return;
-                }
-                // Priority 3: close any other active modal
-                const activeModal = document.querySelector('.modal.active');
-                if (activeModal) {
-                    activeModal.classList.remove('active');
-                    return;
-                }
-                // Priority 4: close side panel
-                const sidePanel = document.getElementById('side-panel');
-                if (sidePanel?.classList.contains('active')) {
-                    sidePanelManager.close();
-                    return;
-                }
-                // Priority 5: close fullscreen cover overlay
-                const overlay = document.getElementById('fullscreen-cover-overlay');
-                if (overlay && overlay.style.display !== 'none' && overlay.style.display !== '') {
-                    if (window.location.hash === '#fullscreen') {
-                        window.history.back();
-                    } else {
-                        ui.closeFullscreenCover();
-                    }
-                    return;
-                }
-                // Priority 6: close mobile sidebar
-                const sidebar = document.querySelector('.sidebar.is-open');
-                if (sidebar) {
-                    sidebar.classList.remove('is-open');
-                    document.getElementById('sidebar-overlay')?.classList.remove('is-visible');
-                    return;
-                }
-                // Priority 7: go back in history
-                if (canGoBack) {
+    if (isNative && window.NativeBridge) {
+        let lastBackPress = 0;
+        window.NativeBridge.on('backButton', () => {
+            const playlistModal = document.getElementById('playlist-modal');
+            if (playlistModal?.classList.contains('active')) {
+                playlistModal.classList.remove('active');
+                return;
+            }
+            const folderModal = document.getElementById('folder-modal');
+            if (folderModal?.classList.contains('active')) {
+                folderModal.classList.remove('active');
+                return;
+            }
+            const activeModal = document.querySelector('.modal.active');
+            if (activeModal) {
+                activeModal.classList.remove('active');
+                return;
+            }
+            if (isLyricsOpen()) {
+                closeLyricsFullscreen();
+                return;
+            }
+            const sidePanel = document.getElementById('side-panel');
+            if (sidePanel?.classList.contains('active')) {
+                sidePanelManager.close();
+                return;
+            }
+            const overlay = document.getElementById('fullscreen-cover-overlay');
+            if (overlay && overlay.style.display !== 'none' && overlay.style.display !== '') {
+                if (window.location.hash === '#fullscreen') {
                     window.history.back();
                 } else {
-                    // Double-tap to exit
-                    const now = Date.now();
-                    if (now - lastBackPress < 2000) {
-                        App.exitApp();
-                    } else {
-                        lastBackPress = now;
-                        // Show brief toast
-                        const { showNotification } = window.__tunesDownloads || {};
-                        if (typeof showNotification === 'function') {
-                            showNotification('Press back again to exit');
-                        }
+                    ui.closeFullscreenCover();
+                }
+                return;
+            }
+            const sidebar = document.querySelector('.sidebar.is-open');
+            if (sidebar) {
+                sidebar.classList.remove('is-open');
+                document.getElementById('sidebar-overlay')?.classList.remove('is-visible');
+                return;
+            }
+            if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                const now = Date.now();
+                if (now - lastBackPress < 2000) {
+                    window.NativeBridge.call('exitApp');
+                } else {
+                    lastBackPress = now;
+                    const { showNotification } = window.__tunesDownloads || {};
+                    if (typeof showNotification === 'function') {
+                        showNotification('Press back again to exit');
                     }
                 }
-            });
-        }).catch(e => console.warn('[BackButton] @capacitor/app not available:', e));
+            }
+        });
+    }
 
-        // ── Status Bar: solid dark background with white icons, no overlay ──
-        import('@capacitor/status-bar').then(({ StatusBar, Style }) => {
-            StatusBar.setOverlaysWebView({ overlay: false });
-            StatusBar.setStyle({ style: Style.Dark }); // Dark = white icons
-            StatusBar.setBackgroundColor({ color: '#000000' });
-        }).catch(e => console.warn('[StatusBar] @capacitor/status-bar not available:', e));
+    if (isNative && window.NativeBridge) {
+        window.NativeBridge.on('appResumed', () => {
+            ui._forceHomeRefresh = true;
+            const path = window.location.pathname;
+            if (path === '/' || path === '/home' || path.endsWith('index.html')) {
+                ui._invalidateHomeDataCache?.();
+                ui._refreshHomeAndPersistCache?.();
+                _refreshUpdatesAndAnnouncements();
+            }
+        });
+
     }
 
     // Initialize auth — check for existing session & wire up auth gate forms
     authManager.init();
     authManager.initAuthGate();
 
-    // Set the about page creator avatar (abstract art, no initials)
-    const aboutOrgImg = document.getElementById('about-org-avatar-img');
-    if (aboutOrgImg) aboutOrgImg.src = getAvatarUrl('mesob-platforms');
-    const aboutAvatarImg = document.getElementById('about-creator-avatar-img');
-    if (aboutAvatarImg) aboutAvatarImg.src = getAvatarUrl('naol-mideksa');
-    const aboutZfly1Img = document.getElementById('about-zfly1-avatar-img');
-    if (aboutZfly1Img) aboutZfly1Img.src = getAvatarUrl('z-fly1');
+    // Defer about page avatars — only loads profile module when needed
+    import('./accounts/profile.js').then(({ getAvatarUrl }) => {
+        const aboutOrgImg = document.getElementById('about-org-avatar-img');
+        if (aboutOrgImg) aboutOrgImg.src = getAvatarUrl('mesob-platforms');
+        const aboutAvatarImg = document.getElementById('about-creator-avatar-img');
+        if (aboutAvatarImg) aboutAvatarImg.src = getAvatarUrl('naol-mideksa');
+        const aboutZfly1Img = document.getElementById('about-zfly1-avatar-img');
+        if (aboutZfly1Img) aboutZfly1Img.src = getAvatarUrl('z-fly1');
+    }).catch(() => {});
 
     const originalRenderPlaylistPage = ui.renderPlaylistPage.bind(ui);
     ui.renderPlaylistPage = async function (id, type) {
@@ -451,6 +500,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
     initializeUIInteractions(player, api, ui);
     initializeKeyboardShortcuts(player, audioPlayer);
+    initLyricsOverlayGestures();
+
+    clearTimeout(_shellTimeout);
+    _killShell();
 
     // Casting is not supported in native Android WebView — skip entirely
     if (!isNative) {
@@ -510,7 +563,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 } else {
                     const nextTrack = player.getNextTrack();
-                    ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+                    ui.showFullscreenCover(player.currentTrack, nextTrack, api, audioPlayer);
                 }
             });
         }
@@ -552,7 +605,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const overlay = document.getElementById('fullscreen-cover-overlay');
                     if (overlay && overlay.style.display !== 'flex') {
                         const nextTrack = player.getNextTrack();
-                        ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+                        ui.showFullscreenCover(player.currentTrack, nextTrack, api, audioPlayer);
                     }
                     return;
                 }
@@ -606,8 +659,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.history.forward();
     });
 
-    // ── Pull-to-refresh (replaces reload button) ──
-    {
+    // ── Pull-to-refresh (web only — native uses SwipeRefreshLayout) ──
+    if (!isNative) {
         const mainContent = document.querySelector('.main-content');
         const ptrIndicator = document.getElementById('pull-to-refresh-indicator');
         const THRESHOLD = 110;
@@ -623,9 +676,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (mainContent.scrollTop > 5) return;
                 const target = e.target;
                 if (target.closest('#lyrics-side-panel') || target.closest('#fullscreen-cover-overlay')) return;
-                if (target.closest('#page-library') || target.closest('.dl-detail-overlay') || target.closest('.library-subview')) return;
-                const path = window.location.pathname;
-                if (path === '/library') return;
+                if (target.closest('.dl-detail-overlay') || target.closest('.library-subview')) return;
                 startY = e.touches[0].clientY;
                 startTime = Date.now();
                 pulling = false;
@@ -662,7 +713,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             mainContent.addEventListener('touchend', async () => {
                 if (!pulling) { startY = 0; return; }
                 const elapsed = Date.now() - startTime;
-                if (elapsed > 800) { _ptrReset(); return; }
+                if (elapsed > 2000) { _ptrReset(); return; }
                 const indicator = ptrIndicator;
                 if (indicator.classList.contains('threshold')) {
                     cooldown = true;
@@ -723,7 +774,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 pulling = false;
             }, { passive: true });
         }
-    }
+    } // end if (!isNative) — web PTR
 
     document.getElementById('toggle-lyrics-btn')?.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -732,13 +783,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        const isActive = sidePanelManager.isActive('lyrics');
-
-        if (isActive) {
-            sidePanelManager.close();
-            clearLyricsPanelSync(audioPlayer, sidePanelManager.panel);
+        if (isLyricsOpen()) {
+            closeLyricsFullscreen();
         } else {
-            openLyricsPanel(player.currentTrack, audioPlayer, lyricsManager);
+            openLyricsFullscreen(player.currentTrack, audioPlayer, api);
         }
     });
 
@@ -974,17 +1022,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (currentTrackId === previousTrackId) return;
         previousTrackId = currentTrackId;
 
-        // Update lyrics panel if it's open
-        if (sidePanelManager.isActive('lyrics')) {
-            // Re-open forces update/refresh of content and sync
-            openLyricsPanel(player.currentTrack, audioPlayer, lyricsManager, true);
+        // Update fullscreen lyrics if open
+        if (isLyricsOpen()) {
+            updateLyricsTrack(player.currentTrack, api);
         }
 
         // Update Fullscreen if it's open
         const fullscreenOverlay = document.getElementById('fullscreen-cover-overlay');
         if (fullscreenOverlay && getComputedStyle(fullscreenOverlay).display !== 'none') {
             const nextTrack = player.getNextTrack();
-            ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+            ui.showFullscreenCover(player.currentTrack, nextTrack, api, audioPlayer);
         }
 
         // DEV: Auto-open fullscreen mode if ?fullscreen=1 in URL
@@ -995,7 +1042,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             getComputedStyle(fullscreenOverlay).display === 'none'
         ) {
             const nextTrack = player.getNextTrack();
-            ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, audioPlayer);
+            ui.showFullscreenCover(player.currentTrack, nextTrack, api, audioPlayer);
         }
     });
 
@@ -1882,14 +1929,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    // Flush pending offline events as soon as auth is confirmed
+    let _authInitDone = false;
+    authManager.onAuthStateChanged(async (user) => {
+        if (user) {
+            const { offlineSync } = await import('./offlineSync.js');
+            offlineSync.syncPendingEvents();
+            if (_authInitDone && isNative && window.NativeBridge) {
+                const path = window.location.pathname;
+                if (path === '/' || path === '/home' || path.endsWith('index.html')) {
+                    try { await window.NativeBridge.call('startRefreshing'); } catch {}
+                    try { await window.__tunesRefs.pullRefresh(); } catch {}
+                }
+            }
+        }
+        _authInitDone = true;
+    });
+
     // Initialize offline sync and start periodic sync
     (async () => {
         const { offlineSync } = await import('./offlineSync.js');
         offlineSync.startPeriodicSync();
-        // Sync any pending events on startup
-        if (navigator.onLine) {
-            setTimeout(() => offlineSync.syncPendingEvents(), 2000); // Wait 2s for auth to settle
-        }
     })();
 
     document.querySelector('.now-playing-bar .play-pause-btn').innerHTML = SVG_PLAY;
@@ -1900,6 +1960,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const overlay = document.getElementById('fullscreen-cover-overlay');
         const hash = window.location.hash;
         const isFullscreenOpen = overlay && overlay.style.display !== 'none';
+
+        if (isLyricsOpen() && hash !== '#lyrics') {
+            closeLyricsFullscreen();
+        }
 
         if (isFullscreenOpen && hash !== '#fullscreen' && hash !== '#lyrics') {
             ui.closeFullscreenCover();
@@ -1931,29 +1995,47 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await handleRouteChange();
 
+    if (isNative && window.NativeBridge) {
+        try { await window.NativeBridge.call('startRefreshing'); } catch {}
+        try { await window.__tunesRefs.pullRefresh(); } catch {}
+    }
+
+    // Deferred version check — runs 8s after boot so it never blocks startup
+    setTimeout(() => {
+        const localTs = typeof __BUILD_TIMESTAMP__ !== 'undefined' ? __BUILD_TIMESTAMP__ : null;
+        if (!localTs) return;
+        fetch('https://tunes-app.pages.dev/version.json', { cache: 'no-store' })
+            .then(r => r.ok ? r.json() : null)
+            .then(remote => {
+                if (remote && remote.buildTimestamp && remote.buildTimestamp !== localTs && Number(remote.buildTimestamp) > Number(localTs)) {
+                    showNotification('A new version of Tunes is available. Update for the best experience!');
+                }
+            })
+            .catch(() => {});
+    }, 8000);
+
     window.addEventListener('popstate', handleRouteChange);
 
     document.body.addEventListener('click', (e) => {
-        // If another handler already handled this click, don't interfere
         if (e.defaultPrevented) return;
 
         const link = e.target.closest('a');
 
-        // Don't navigate if it's a search result track (they play music instead)
         if (link && (link.classList.contains('search-top-result') || link.classList.contains('search-mixed-item'))) {
             if (link.hasAttribute('data-track-id')) {
-                return; // Let the search handler deal with it
+                return;
             }
         }
 
-        if (
-            link &&
-            link.origin === window.location.origin &&
-            link.target !== '_blank' &&
-            !link.hasAttribute('download')
-        ) {
-            e.preventDefault();
-            navigate(link.pathname);
+        if (link && link.target !== '_blank' && !link.hasAttribute('download')) {
+            const isSameOrigin = isNative ||
+                link.origin === window.location.origin ||
+                (link.href && link.href.startsWith(window.location.origin)) ||
+                (link.pathname && !link.href.startsWith('http'));
+            if (isSameOrigin) {
+                e.preventDefault();
+                navigate(link.pathname);
+            }
         }
     });
 
@@ -1961,15 +2043,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateTabTitle(player);
     });
 
-    // PWA Update Logic
+    // PWA Update Logic — auto-reload so deployed changes reach users immediately
     const updateSW = registerSW({
         onNeedRefresh() {
-            showUpdateNotification(() => updateSW(true));
+            console.log('[PWA] New version detected — reloading');
+            updateSW(true);
         },
         onOfflineReady() {
-            console.log('App ready to work offline');
+            console.log('[PWA] App ready to work offline');
         },
     });
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('[PWA] New service worker activated — reloading');
+            window.location.reload();
+        });
+    }
 
     document.getElementById('show-shortcuts-btn')?.addEventListener('click', () => {
         showKeyboardShortcuts();
@@ -2148,7 +2238,8 @@ async function _initUpdateNotificationBar() {
     const bar = document.getElementById('update-notification-bar');
     if (!bar) return;
     try {
-        const { data: updates } = await supabase.rpc('get_active_updates');
+        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null;
+        const { data: updates } = await supabase.rpc('get_active_updates', appVersion ? { app_version: appVersion } : {});
         if (!Array.isArray(updates) || updates.length === 0) {
             bar.style.display = 'none';
             document.body.classList.remove('has-update-bar');
@@ -2160,6 +2251,7 @@ async function _initUpdateNotificationBar() {
         const latest = updates[0];
         const count = updates.length;
 
+        bar.style.opacity = '0';
         bar.style.display = '';
         bar.className = 'tunes-update-bar';
         bar.setAttribute('data-update-id', latest.id);
@@ -2185,8 +2277,8 @@ async function _initUpdateNotificationBar() {
             if (link) openExternalUrl(link);
         });
 
-        // Fade-in + push tab bar up + track impression
-        requestAnimationFrame(() => {
+        requestAnimationFrame(() => { requestAnimationFrame(() => {
+            bar.style.opacity = '';
             bar.classList.add('tunes-update-visible');
             document.body.classList.add('has-update-bar');
             _syncUpdateBarOffset(bar);
@@ -2196,7 +2288,7 @@ async function _initUpdateNotificationBar() {
                 window.visualViewport.addEventListener('resize', recalc, { passive: true });
             }
             _trackEvent('update', latest.id, 'impression');
-        });
+        }); });
 
     } catch (e) {
         console.warn('[Updates] Could not check for updates:', e);
@@ -3058,14 +3150,9 @@ async function _trackEvent(itemType, itemId, eventType) {
     if (_trackedEvents.has(key)) return;
     _trackedEvents.add(key);
 
-    // Import offline sync manager
     const { offlineSync } = await import('./offlineSync.js');
-    
-    // Check if online
-    const isOnline = await offlineSync.checkOnline();
-    
-    if (!isOnline) {
-        // Queue for offline sync
+
+    if (!supabase) {
         await offlineSync.queueTrackEvent(itemType, itemId, eventType);
         return;
     }

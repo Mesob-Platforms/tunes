@@ -11,6 +11,8 @@ import {
     getTrackArtists,
     copyToClipboard,
     openExternalUrl,
+    hapticLight,
+    hapticMedium,
 } from './utils.js';
 import { crossfadeSettings } from './storage.js';
 import { showNotification, downloadTrackWithMetadata, downloadAlbumAsZip, downloadPlaylistAsZip } from './downloads.js';
@@ -32,6 +34,7 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
 
     audioPlayer.addEventListener('loadstart', () => {
         historyLoggedTrackId = null;
+        _listeningEventLoggedId = null;
     });
 
     window.addEventListener('playback-gave-up', (e) => {
@@ -101,14 +104,26 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     });
 
     let _lastHistoryCheck = 0;
-    audioPlayer.addEventListener('timeupdate', () => {
+    let _listeningEventLoggedId = null;
+    const _progressFill = document.getElementById('progress-fill');
+    const _currentTimeEl = document.getElementById('current-time');
+    let _lastTimeText = '';
+    const _syncProgressBar = () => {
         const { currentTime, duration } = audioPlayer;
         if (!duration) return;
+        _progressFill.style.width = `${(currentTime / duration) * 100}%`;
+        const timeText = formatTime(currentTime);
+        if (timeText !== _lastTimeText) {
+            _currentTimeEl.textContent = timeText;
+            _lastTimeText = timeText;
+        }
+    };
+    audioPlayer.addEventListener('seeked', _syncProgressBar);
+    audioPlayer.addEventListener('playing', _syncProgressBar);
+    audioPlayer.addEventListener('timeupdate', () => {
+        _syncProgressBar();
 
-        const progressFill = document.getElementById('progress-fill');
-        const currentTimeEl = document.getElementById('current-time');
-        progressFill.style.width = `${(currentTime / duration) * 100}%`;
-        currentTimeEl.textContent = formatTime(currentTime);
+        const { currentTime, duration } = audioPlayer;
 
         if (crossfadeSettings.getEnabled() && !player._isCrossfading && player.repeatMode !== REPEAT_MODE.ONE) {
             const cfDuration = crossfadeSettings.getDuration();
@@ -127,12 +142,15 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
             db.addToHistory(trackToLog).then(historyEntry => {
                 historyLoggedTrackId = trackToLog.id;
                 syncManager.syncHistoryItem(historyEntry);
-                syncManager.logListeningEvent(historyEntry);
                 window.dispatchEvent(new CustomEvent('history-changed'));
                 if (window.location.hash === '#recent') ui.renderRecentPage();
             }).catch(err => {
                 console.error('[History] FAILED to save track:', trackToLog.title, err);
             });
+        }
+        if (currentTime >= 60 && player.currentTrack && player.currentTrack.id !== _listeningEventLoggedId) {
+            _listeningEventLoggedId = player.currentTrack.id;
+            syncManager.logListeningEvent(player.currentTrack);
         }
     });
 
@@ -145,86 +163,66 @@ export function initializePlayerEvents(player, audioPlayer, scrobbler, ui) {
     audioPlayer.addEventListener('error', async (e) => {
         console.error('Audio playback error:', e);
         playPauseBtn.innerHTML = SVG_PLAY;
-        player.cancelCrossfade(); // Cancel crossfade on error
+        player.cancelCrossfade();
 
+        if (!player.currentTrack) return;
+
+        const track = player.currentTrack;
         const currentQuality = player.quality;
 
-        // Check if we can fallback to a lower quality
+        // Invalidate cached URLs for this track so retries get fresh ones
+        if (track.id) {
+            player.api.clearStreamCache(track.id);
+            player.preloadCache.delete(track.id);
+        }
+
+        // Try quality fallback once: HI_RES_LOSSLESS → LOSSLESS
         if (
-            player.currentTrack &&
             currentQuality === 'HI_RES_LOSSLESS' &&
-            !player.currentTrack.isLocal &&
-            !player.currentTrack.isTracker &&
+            !track.isLocal && !track.isTracker &&
             !player.isFallbackRetry
         ) {
-            console.warn('Playback failed, attempting fallback to LOSSLESS quality...');
-            player.isFallbackRetry = true; // Set flag to prevent infinite loops
-
+            player.isFallbackRetry = true;
             try {
-                // Force getTrack to fetch new URL for LOSSLESS
-                const trackId = player.currentTrack.id;
-
-                // Fetch new stream URL
-                const newStreamUrl = await player.api.getStreamUrl(trackId, 'LOSSLESS');
-
+                const newStreamUrl = await player.api.getStreamUrl(track.id, 'LOSSLESS');
                 if (newStreamUrl) {
-                    // Reset player state for standard playback (non-DASH if possible)
                     if (player.dashInitialized) {
                         player.dashPlayer.reset();
                         player.dashInitialized = false;
                     }
-
                     audioPlayer.src = newStreamUrl;
                     audioPlayer.load();
                     await audioPlayer.play();
-
-                    // Reset flag after successful start
-                    setTimeout(() => {
-                        player.isFallbackRetry = false;
-                    }, 5000);
-                    return; // Successfully handled
+                    setTimeout(() => { player.isFallbackRetry = false; }, 5000);
+                    return;
                 }
             } catch (fallbackError) {
-                console.error('Fallback failed:', fallbackError);
+                console.error('Quality fallback failed:', fallbackError);
             }
         }
 
         player.isFallbackRetry = false;
 
-        // Retry the same track a few times before skipping (handles slow networks)
-        if (player.currentTrack) {
-            if (!player._errorRetryCount) player._errorRetryCount = 0;
-            if (player._errorRetryCount < 2) {
-                player._errorRetryCount++;
-                const delay = player._errorRetryCount * 3000; // 3s, 6s backoff
-                console.warn(`Playback error – retrying same track (attempt ${player._errorRetryCount}/2) in ${delay / 1000}s...`);
-                setTimeout(() => {
-                    player.playTrackFromQueue(0, 0);
-                }, delay);
-            } else {
-                // Retries exhausted, skip to next
-                const trackTitle = player.currentTrack?.title || 'Track';
-                showNotification(`Couldn't play "${trackTitle}", skipping…`);
-                console.warn('Skipping to next track after retries failed');
-                player._errorRetryCount = 0;
-                setTimeout(() => player.playNext(), 1000);
-            }
-        }
+        // Let the player's own retry mechanism handle it via playTrackFromQueue
+        const trackTitle = track.title || 'Track';
+        showNotification(`Couldn't play "${trackTitle}", skipping…`);
+        player._playRetryCount = 0;
+        setTimeout(() => player.playNext(), 500);
     });
 
-    playPauseBtn.addEventListener('click', () => player.handlePlayPause());
-    nextBtn.addEventListener('click', () => {
-        player.playNext();
-    });
-    prevBtn.addEventListener('click', () => player.playPrev());
+    playPauseBtn.addEventListener('click', () => { hapticMedium(); player.handlePlayPause(); });
+    nextBtn.addEventListener('click', () => { hapticLight(); player.playNext(); });
+    prevBtn.addEventListener('click', () => { hapticLight(); player.playPrev(); });
 
     shuffleBtn.addEventListener('click', () => {
+        hapticLight();
         player.toggleShuffle();
         shuffleBtn.classList.toggle('active', player.shuffleActive);
         if (window.renderQueueFunction) window.renderQueueFunction();
     });
 
     repeatBtn.addEventListener('click', () => {
+        hapticLight();
         const mode = player.toggleRepeat();
         repeatBtn.classList.toggle('active', mode !== REPEAT_MODE.OFF);
         repeatBtn.classList.toggle('repeat-one', mode === REPEAT_MODE.ONE);
@@ -768,6 +766,7 @@ export async function handleTrackAction(
     } else if (action === 'download') {
         await downloadTrackWithMetadata(item, downloadQualitySettings.getQuality(), api, lyricsManager);
     } else if (action === 'toggle-like') {
+        hapticMedium();
         const added = await db.toggleFavorite(type, item);
         syncManager.syncLibraryItem(type, item, added);
 

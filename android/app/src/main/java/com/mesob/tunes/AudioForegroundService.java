@@ -112,9 +112,9 @@ public class AudioForegroundService extends Service {
 
             @Override
             public void onSeekTo(long pos) {
-                Intent i = new Intent(MediaBridge.ACTION_MEDIA_BRIDGE);
+                Intent i = new Intent(TunesActivity.ACTION_MEDIA_BRIDGE);
                 i.setPackage(getPackageName());
-                i.putExtra(MediaBridge.EXTRA_ACTION, "seekTo");
+                i.putExtra(TunesActivity.EXTRA_ACTION, "seekTo");
                 i.putExtra("position", pos / 1000.0);
                 sendBroadcast(i);
             }
@@ -150,6 +150,18 @@ public class AudioForegroundService extends Service {
         }
         if (ACTION_PLAY.equals(action)) {
             sendActionToJS("play");
+            currentIsPlaying = true;
+            updateMediaSessionPlaybackState();
+            notificationManager.notify(NOTIFICATION_ID, buildNotification());
+            cancelPauseStopTimer();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_NEXT.equals(action)) {
+            sendActionToJS("next");
+            return START_NOT_STICKY;
+        }
+        if (ACTION_PREV.equals(action)) {
+            sendActionToJS("prev");
             return START_NOT_STICKY;
         }
         if (ACTION_STOP.equals(action)) {
@@ -305,7 +317,7 @@ public class AudioForegroundService extends Service {
     }
 
     private Notification buildNotification() {
-        Intent launchIntent = new Intent(this, MainActivity.class);
+        Intent launchIntent = new Intent(this, TunesActivity.class);
         launchIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(
             this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
@@ -346,9 +358,9 @@ public class AudioForegroundService extends Service {
     }
 
     private NotificationCompat.Action makeAction(String actionStr, int icon, String title) {
-        Intent intent = new Intent(this, NotificationActionReceiver.class);
+        Intent intent = new Intent(this, AudioForegroundService.class);
         intent.setAction(actionStr);
-        PendingIntent pi = PendingIntent.getBroadcast(
+        PendingIntent pi = PendingIntent.getService(
             this, actionStr.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
@@ -458,9 +470,9 @@ public class AudioForegroundService extends Service {
     // ──────────────────────────────────────────────────
 
     private void sendActionToJS(String action) {
-        Intent i = new Intent(MediaBridge.ACTION_MEDIA_BRIDGE);
+        Intent i = new Intent(TunesActivity.ACTION_MEDIA_BRIDGE);
         i.setPackage(getPackageName());
-        i.putExtra(MediaBridge.EXTRA_ACTION, action);
+        i.putExtra(TunesActivity.EXTRA_ACTION, action);
         sendBroadcast(i);
     }
 }

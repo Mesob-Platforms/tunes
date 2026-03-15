@@ -130,30 +130,26 @@ export class AuthManager {
         const googleBtn = document.getElementById('gate-google-btn') || document.getElementById('google-sign-in-btn');
         if (googleBtn) { googleBtn.disabled = true; googleBtn.style.opacity = '0.5'; googleBtn.textContent = 'Connecting to Google...'; }
         try {
-            if (isNative) {
-                const [{ Browser }, { App }, { data, error: oauthErr }] = await Promise.all([
-                    import('@capacitor/browser'),
-                    import('@capacitor/app'),
-                    supabase.auth.signInWithOAuth({
-                        provider: 'google',
-                        options: {
-                            redirectTo: 'com.mesob.tunes://auth-callback',
-                            skipBrowserRedirect: true,
-                        },
-                    }),
-                ]);
+            if (isNative && window.NativeBridge) {
+                const { data, error: oauthErr } = await supabase.auth.signInWithOAuth({
+                    provider: 'google',
+                    options: {
+                        redirectTo: 'com.mesob.tunes://auth-callback',
+                        skipBrowserRedirect: true,
+                    },
+                });
                 if (oauthErr) throw oauthErr;
                 if (!data?.url) {
                     showGateMessage('gate-email-message', 'Could not start Google sign-in.');
                     return;
                 }
 
-                const urlOpenHandler = App.addListener('appUrlOpen', async ({ url }) => {
-                    if (!url.includes('auth-callback')) return;
-                    try { await Browser.close(); } catch (_) {}
-                    urlOpenHandler.remove();
+                const urlOpenHandler = (urlData) => {
+                    const url = urlData?.url;
+                    if (!url) return;
+                    if (!url.includes('access_token') && !url.includes('code=') && !url.includes('auth-callback')) return;
+                    if (window.NativeBridge.off) window.NativeBridge.off('appUrlOpen', urlOpenHandler);
 
-                    // Extract tokens from the URL fragment or query
                     const hashParams = new URLSearchParams(url.split('#')[1] || '');
                     const queryParams = new URLSearchParams(url.split('?')[1]?.split('#')[0] || '');
                     const accessToken = hashParams.get('access_token');
@@ -161,27 +157,35 @@ export class AuthManager {
                     const code = queryParams.get('code');
 
                     if (accessToken && refreshToken) {
-                        const { error: sessErr } = await supabase.auth.setSession({
+                        supabase.auth.setSession({
                             access_token: accessToken,
                             refresh_token: refreshToken,
+                        }).then(({ error: sessErr }) => {
+                            if (sessErr) {
+                                console.error('[auth] setSession failed:', sessErr);
+                                showGateMessage('gate-email-message', `Sign-in failed: ${sessErr.message}`);
+                            }
                         });
-                        if (sessErr) {
-                            console.error('[auth] setSession failed:', sessErr);
-                            showGateMessage('gate-email-message', `Sign-in failed: ${sessErr.message}`);
-                        }
                     } else if (code) {
-                        const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
-                        if (exchErr) {
-                            console.error('[auth] exchangeCode failed:', exchErr);
-                            showGateMessage('gate-email-message', `Sign-in failed: ${exchErr.message}`);
-                        }
+                        supabase.auth.exchangeCodeForSession(code).then(({ error: exchErr }) => {
+                            if (exchErr) {
+                                console.error('[auth] exchangeCode failed:', exchErr);
+                                showGateMessage('gate-email-message', `Sign-in failed: ${exchErr.message}`);
+                            }
+                        });
                     } else {
                         console.error('[auth] No tokens or code in callback URL:', url);
                         showGateMessage('gate-email-message', 'Sign-in did not complete. Please try again.');
                     }
-                });
+                };
+                window.NativeBridge.on('appUrlOpen', urlOpenHandler);
 
-                await Browser.open({ url: data.url, presentationStyle: 'popover' });
+                try {
+                    await window.NativeBridge.call('openBrowser', { url: data.url });
+                } catch (browserErr) {
+                    console.error('[auth] openBrowser failed, trying fallback:', browserErr);
+                    window.open(data.url, '_system');
+                }
                 return;
             }
 

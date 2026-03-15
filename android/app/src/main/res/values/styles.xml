@@ -22,10 +22,5 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
-        <item name="android:statusBarColor">#021f45</item>
-        <item name="android:navigationBarColor">#021f45</item>
-    </style>
 
 </resources>

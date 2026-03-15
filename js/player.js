@@ -13,6 +13,7 @@ import { queueManager, trackDateSettings, crossfadeSettings } from './storage.js
 import { showNotification } from './downloads.js';
 import { audioContextManager } from './audio-context.js';
 import { db } from './db.js';
+import { isOnline } from './networkMonitor.js';
 import { apiUrl } from './platform.js';
 import { onTrackChanged, pushNowPlaying } from './mediaBridge.js';
 import { isNative } from './platform.js';
@@ -34,7 +35,7 @@ export class Player {
         this.userVolume = parseFloat(localStorage.getItem('volume') || '0.7');
         this.isFallbackRetry = false;
         this._playRetryCount = 0;
-        this._maxPlayRetries = 30;
+        this._maxPlayRetries = 15;
 
         // Crossfade properties
         this._isCrossfading = false;
@@ -43,14 +44,26 @@ export class Player {
         this._crossfadeRaf = null;
         this._lastBlobUrl = null;
 
-        // Initialize dash.js player
         this.dashPlayer = MediaPlayer().create();
         this.dashPlayer.updateSettings({
             streaming: {
-                buffer: {
-                    fastSwitchEnabled: true,
-                },
+                buffer: { fastSwitchEnabled: true },
             },
+        });
+        this._dashErrorCount = 0;
+        this.dashPlayer.on('error', (e) => {
+            console.error('[DASH] Error event:', e);
+            this._dashErrorCount++;
+            if (this._dashErrorCount > 2) {
+                this._dashErrorCount = 0;
+                if (this.audio && !this.audio.paused) this.audio.pause();
+                this.audio.dispatchEvent(new Event('error'));
+            }
+        });
+        this.dashPlayer.on('playbackError', (e) => {
+            console.error('[DASH] Playback error:', e);
+            if (this.audio && !this.audio.paused) this.audio.pause();
+            this.audio.dispatchEvent(new Event('error'));
         });
         this.dashInitialized = false;
 
@@ -78,7 +91,7 @@ export class Player {
         if (!coverEl) return;
         const coverId = track?.album?.cover || track?.cover;
         if (!coverId) {
-            coverEl.src = '/assets/everywhere.png';
+            coverEl.src = 'assets/everywhere.png';
             return;
         }
 
@@ -93,8 +106,8 @@ export class Player {
             }
         } catch (e) { /* ignore */ }
 
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            coverEl.src = '/assets/everywhere.png';
+        if (!isOnline()) {
+            coverEl.src = 'assets/everywhere.png';
             return;
         }
 
@@ -327,15 +340,14 @@ export class Player {
             this.cancelCrossfade();
         }
         this._playRetryCount = 0;
+        this._dashErrorCount = 0;
         if (!wasCrossfading) {
             this.audio.volume = this.userVolume;
         }
 
         const track = currentQueue[this.currentQueueIndex];
         if (track.isUnavailable) {
-            showNotification(`"${track.title}" is unavailable, skipping…`);
-            this.playNext();
-            return;
+            track.isUnavailable = false;
         }
 
         this.saveQueueState();
@@ -386,7 +398,7 @@ export class Player {
         this.updateMediaSession(track);
         this.updateMediaSessionPlaybackState();
 
-        const isOffline = !navigator.onLine;
+        const isOffline = !isOnline();
         try {
             const cachedBlob = await db.getCachedTrackBlob(track.id);
             if (gen !== this._playGeneration) return;
@@ -400,26 +412,9 @@ export class Player {
                 if (gen !== this._playGeneration) return;
                 this.preloadNextTracks();
                 return;
-            } else if (isOffline) {
-                console.warn(`Track "${trackTitle}" is not downloaded. Skipping (offline mode).`);
-                if (typeof showNotification === 'function') {
-                    showNotification(`"${trackTitle}" is not downloaded. Skipping (offline mode).`);
-                }
-                track.isUnavailable = true;
-                this.playNext();
-                return;
             }
         } catch (cacheErr) {
             console.warn('Cache lookup failed:', cacheErr);
-            if (isOffline) {
-                console.warn(`Cannot play "${trackTitle}" offline. Skipping.`);
-                if (typeof showNotification === 'function') {
-                    showNotification(`Cannot play "${trackTitle}" offline. Skipping.`);
-                }
-                track.isUnavailable = true;
-                this.playNext();
-                return;
-            }
         }
 
         try {
@@ -442,10 +437,7 @@ export class Player {
                 }
 
                 if (!streamUrl) {
-                    console.warn(`Track ${trackTitle} audio URL is missing. Skipping.`);
-                    track.isUnavailable = true;
-                    this.playNext();
-                    return;
+                    throw new Error(`Track ${trackTitle} audio URL is missing`);
                 }
 
                 if (isTracker && !streamUrl.startsWith('blob:') && streamUrl.startsWith('http')) {
@@ -472,16 +464,6 @@ export class Player {
                 streamUrl = URL.createObjectURL(track.file);
                 await this._setSourceAndPlay(streamUrl, startTime);
             } else {
-                if (isOffline) {
-                    console.warn(`Track "${trackTitle}" is not downloaded. Skipping (offline mode).`);
-                    if (typeof showNotification === 'function') {
-                        showNotification(`"${trackTitle}" is not downloaded. Skipping (offline mode).`);
-                    }
-                    track.isUnavailable = true;
-                    this.playNext();
-                    return;
-                }
-
                 if (this.dashInitialized) {
                     this.dashPlayer.reset();
                     this.dashInitialized = false;
@@ -496,6 +478,10 @@ export class Player {
                     streamUrl = trackData.originalTrackUrl;
                 } else {
                     streamUrl = this.api.extractStreamUrlFromManifest(trackData.info.manifest);
+                }
+
+                if (!streamUrl) {
+                    throw new Error('No stream URL available for this track');
                 }
 
                 // ═══════════════════════════════════════════════════════
@@ -530,7 +516,7 @@ export class Player {
                                 this.dashInitialized = true;
                             }
 
-                            await this._waitForCanPlay(120000);
+                            await this._waitForCanPlay(8000);
                             if (gen !== this._playGeneration) return;
 
                             if (startTime > 0) this.dashPlayer.seek(startTime);
@@ -571,18 +557,24 @@ export class Player {
 
             if (gen !== this._playGeneration) return;
 
+            // Invalidate cached stream URLs so retry fetches fresh ones
+            if (track?.id) {
+                this.preloadCache.delete(track.id);
+                this.api.clearStreamCache(track.id);
+                this.api.cache.delete('track', `${track.id}_${this.quality}`);
+            }
+
             this._playRetryCount++;
             if (this._playRetryCount > this._maxPlayRetries) {
-                console.error(`Giving up on "${trackTitle}" after ${this._maxPlayRetries} retries`);
                 this._playRetryCount = 0;
-                if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('playback-gave-up', { detail: { trackTitle } }));
-                }
-                this.playNext();
+                showNotification(`Couldn't play "${trackTitle}" after multiple attempts.`);
                 return;
             }
-            const retryDelay = Math.min(this._playRetryCount * 2000, 15000);
-            console.warn(`Retrying track "${trackTitle}" (attempt ${this._playRetryCount}) in ${retryDelay / 1000}s...`);
+            const retryDelay = Math.min(this._playRetryCount * 2000, 8000);
+            if (this._playRetryCount === 1) {
+                showNotification(`Loading "${trackTitle}"…`);
+            }
+            console.warn(`Retrying "${trackTitle}" (attempt ${this._playRetryCount}/${this._maxPlayRetries}) in ${retryDelay / 1000}s...`);
             setTimeout(() => {
                 if (gen !== this._playGeneration) return;
                 this.playTrackFromQueue(startTime, recursiveCount);
@@ -604,12 +596,12 @@ export class Player {
         this.applyReplayGain();
         this.audio.src = url;
         this.audio.load();
-        await this._waitForCanPlay(120000);
+        await this._waitForCanPlay(8000);
         if (startTime > 0) this.audio.currentTime = startTime;
         await this.audio.play();
     }
 
-    _waitForCanPlay(timeoutMs = 120000) {
+    _waitForCanPlay(timeoutMs = 8000) {
         return new Promise((resolve, reject) => {
             if (this.audio.readyState >= 3) { resolve(); return; }
             const cleanup = () => {
@@ -623,7 +615,7 @@ export class Player {
             this.audio.addEventListener('canplay', onReady);
             this.audio.addEventListener('loadeddata', onReady);
             this.audio.addEventListener('error', onErr);
-            const tid = setTimeout(() => { cleanup(); resolve(); }, timeoutMs);
+            const tid = setTimeout(() => { cleanup(); reject(new Error('Timed out waiting for audio to load')); }, timeoutMs);
         });
     }
 

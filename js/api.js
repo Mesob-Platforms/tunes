@@ -106,10 +106,20 @@ export class LosslessAPI {
     }
 
     pruneStreamCache() {
+        const now = Date.now();
+        for (const [key, entry] of this.streamCache) {
+            if (now - entry.time > 10 * 60 * 1000) this.streamCache.delete(key);
+        }
         if (this.streamCache.size > 50) {
             const entries = Array.from(this.streamCache.entries());
             const toDelete = entries.slice(0, entries.length - 50);
             toDelete.forEach(([key]) => this.streamCache.delete(key));
+        }
+    }
+
+    clearStreamCache(trackId) {
+        for (const key of this.streamCache.keys()) {
+            if (key.includes(`stream_${trackId}`)) this.streamCache.delete(key);
         }
     }
 
@@ -1081,7 +1091,9 @@ export class LosslessAPI {
         const cacheKey = `stream_${id}_${quality}`;
 
         if (this.streamCache.has(cacheKey)) {
-            return this.streamCache.get(cacheKey);
+            const entry = this.streamCache.get(cacheKey);
+            if (Date.now() - entry.time < 10 * 60 * 1000) return entry.url;
+            this.streamCache.delete(cacheKey);
         }
 
         const lookup = await this.getTrack(id, quality);
@@ -1096,7 +1108,7 @@ export class LosslessAPI {
             }
         }
 
-        this.streamCache.set(cacheKey, streamUrl);
+        this.streamCache.set(cacheKey, { url: streamUrl, time: Date.now() });
         return streamUrl;
     }
 

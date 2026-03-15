@@ -41,21 +41,18 @@ class OfflineSyncManager {
      * Uses apiUrl() so the fetch works on native Capacitor (where '/' is localhost).
      */
     async checkOnline() {
-        // Use unified networkMonitor (reliable on native Capacitor)
         if (!getNetworkOnline()) return false;
-        // Try a lightweight fetch to confirm connectivity
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
             const res = await fetch(apiUrl('/api/ping'), {
-                method: 'HEAD',
+                method: 'GET',
                 cache: 'no-store',
                 signal: controller.signal,
             });
             clearTimeout(timeoutId);
-            return res.status < 500; // Any non-server-error means we're online
+            return res.ok;
         } catch {
-            // Network error — assume offline
             return false;
         }
     }

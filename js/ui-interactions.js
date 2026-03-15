@@ -9,9 +9,14 @@ import {
     getTrackArtists,
     escapeHtml,
     createQualityBadgeHTML,
+    trackDataStore,
+    hapticLight,
+    hapticMedium,
 } from './utils.js';
 import { sidePanelManager } from './side-panel.js';
+import { isLyricsOpen, closeLyricsFullscreen } from './lyrics.js';
 import { downloadQualitySettings } from './storage.js';
+import { showNotification } from './downloads.js';
 
 export function initializeUIInteractions(player, api, ui) {
     const sidebar = document.querySelector('.sidebar');
@@ -83,6 +88,12 @@ export function initializeUIInteractions(player, api, ui) {
                 return;
             }
             
+            // Close lyrics overlay if open
+            if (isLyricsOpen()) {
+                closeLyricsFullscreen();
+                return;
+            }
+
             // Close fullscreen if open
             const fullscreenOverlay = document.getElementById('fullscreen-cover-overlay');
             if (fullscreenOverlay && fullscreenOverlay.style.display !== 'none') {
@@ -642,8 +653,8 @@ export function initializeUIInteractions(player, api, ui) {
             if (Math.abs(dx) < THRESHOLD) return;
             const lyricsBtn = document.getElementById('toggle-fullscreen-lyrics-btn');
             if (!lyricsBtn) return;
-            const lyricsContainer = document.getElementById('fullscreen-lyrics-container');
-            const isLyricsVisible = lyricsContainer && lyricsContainer.style.display !== 'none';
+            const lyricsOverlay = document.getElementById('lyrics-fullscreen-overlay');
+            const isLyricsVisible = lyricsOverlay && lyricsOverlay.style.display !== 'none';
             if (dx < 0 && !isLyricsVisible) lyricsBtn.click();
             else if (dx > 0 && isLyricsVisible) lyricsBtn.click();
         }, { passive: true });
@@ -687,6 +698,79 @@ export function initializeUIInteractions(player, api, ui) {
 
         document.addEventListener('touchcancel', () => {
             if (timer) { clearTimeout(timer); timer = null; }
+        }, { passive: true });
+    })();
+
+    // Swipe-right on track items to quickly add to queue
+    (function initSwipeToQueue() {
+        let row = null, startX = 0, startY = 0, swiping = false;
+        const SWIPE_THRESHOLD = 70, VERTICAL_MAX = 35;
+
+        document.addEventListener('touchstart', (e) => {
+            const el = e.target.closest('.track-item, .dl-track-item, .search-result-item');
+            if (!el || el.closest('.queue-track-item')) return;
+            row = el;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            swiping = false;
+        }, { passive: true });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!row) return;
+            const dx = e.touches[0].clientX - startX;
+            const dy = Math.abs(e.touches[0].clientY - startY);
+            if (dy > VERTICAL_MAX) { row.style.transform = ''; row = null; return; }
+            if (dx > 20) {
+                swiping = true;
+                const clamped = Math.min(dx, 100);
+                row.style.transform = `translateX(${clamped}px)`;
+                row.style.transition = 'none';
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchend', () => {
+            if (!row) return;
+            const el = row;
+            const wasSwiping = swiping;
+            row = null;
+            swiping = false;
+
+            if (!wasSwiping) return;
+
+            const currentTransform = el.style.transform;
+            const match = currentTransform.match(/translateX\((\d+)/);
+            const dx = match ? parseInt(match[1]) : 0;
+
+            if (dx >= SWIPE_THRESHOLD) {
+                const track = trackDataStore.get(el);
+                if (track && !track.isUnavailable && !track.isLocal) {
+                    hapticMedium();
+                    player.addToQueue(track);
+                    if (window.renderQueueFunction) window.renderQueueFunction();
+                    showNotification(`Added to queue: ${track.title || 'Track'}`);
+                    el.style.transition = 'transform 0.15s ease, background 0.15s ease';
+                    el.style.background = 'rgba(74, 222, 128, 0.1)';
+                    el.style.transform = 'translateX(0)';
+                    setTimeout(() => { el.style.background = ''; el.style.transition = ''; }, 400);
+                } else {
+                    el.style.transition = 'transform 0.2s ease';
+                    el.style.transform = 'translateX(0)';
+                    setTimeout(() => { el.style.transition = ''; }, 250);
+                }
+            } else {
+                el.style.transition = 'transform 0.2s ease';
+                el.style.transform = 'translateX(0)';
+                setTimeout(() => { el.style.transition = ''; }, 250);
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchcancel', () => {
+            if (row) {
+                row.style.transform = '';
+                row.style.transition = '';
+                row = null;
+                swiping = false;
+            }
         }, { passive: true });
     })();
 

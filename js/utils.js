@@ -1,12 +1,9 @@
 //js/utils.js
 import { qualityBadgeSettings, coverArtSizeSettings, trackDateSettings } from './storage.js';
-import { Capacitor } from '@capacitor/core';
-
 export async function openExternalUrl(url) {
-    if (Capacitor.isNativePlatform()) {
+    if (window.__TUNES_NATIVE__ && window.NativeBridge) {
         try {
-            const { Browser } = await import('@capacitor/browser');
-            await Browser.open({ url });
+            await window.NativeBridge.call('openBrowser', { url });
             return;
         } catch {}
     }
@@ -500,3 +497,9 @@ export function showConfirmDialog(title, message = '') {
         overlay.addEventListener('click', onCancel);
     });
 }
+
+const _canVibrate = typeof navigator !== 'undefined' && 'vibrate' in navigator;
+
+export function hapticLight() { if (_canVibrate) navigator.vibrate(8); }
+export function hapticMedium() { if (_canVibrate) navigator.vibrate(15); }
+export function hapticHeavy() { if (_canVibrate) navigator.vibrate(25); }

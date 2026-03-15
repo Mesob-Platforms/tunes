@@ -39,9 +39,9 @@ public class NotificationActionReceiver extends BroadcastReceiver {
 
         if (bridgeAction != null) {
             // Forward to MediaBridge plugin via broadcast
-            Intent bridgeIntent = new Intent(MediaBridge.ACTION_MEDIA_BRIDGE);
+            Intent bridgeIntent = new Intent(TunesActivity.ACTION_MEDIA_BRIDGE);
             bridgeIntent.setPackage(context.getPackageName());
-            bridgeIntent.putExtra(MediaBridge.EXTRA_ACTION, bridgeAction);
+            bridgeIntent.putExtra(TunesActivity.EXTRA_ACTION, bridgeAction);
             context.sendBroadcast(bridgeIntent);
         }
     }

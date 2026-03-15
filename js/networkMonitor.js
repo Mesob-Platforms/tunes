@@ -6,7 +6,7 @@
 
 import { isNative, apiUrl } from './platform.js';
 
-let _isOnline = navigator.onLine;
+let _isOnline = isNative ? true : navigator.onLine;
 let _offlineBanner = null;
 let _listeners = [];
 
@@ -29,30 +29,25 @@ export function isOnline() {
  * On web, uses browser online/offline events.
  */
 export async function initNetworkMonitor() {
-    if (isNative) {
+    if (isNative && window.NativeBridge) {
         try {
-            const { Network } = await import('@capacitor/network');
+            const status = await window.NativeBridge.callAsync('getNetworkStatus');
+            _setOnline(status.connected !== false);
 
-            // Get initial status from native (more reliable than navigator.onLine)
-            const status = await Network.getStatus();
-            _setOnline(status.connected);
-
-            // Listen for changes via native
-            Network.addListener('networkStatusChange', (status) => {
-                _setOnline(status.connected);
+            window.NativeBridge.on('networkChange', (data) => {
+                _setOnline(data.connected);
             });
 
             console.log('[NetworkMonitor] Native listener active, connected:', status.connected);
         } catch (e) {
-            console.warn('[NetworkMonitor] Capacitor Network plugin unavailable, using browser events', e);
+            console.warn('[NetworkMonitor] NativeBridge unavailable, using browser events', e);
             _initBrowserListeners();
         }
     } else {
         _initBrowserListeners();
     }
 
-    // Show offline banner immediately if starting offline
-    if (!_isOnline) {
+    if (!isNative && !_isOnline) {
         _showOfflineBanner();
     }
 }
@@ -71,13 +66,11 @@ function _setOnline(connected) {
     _isOnline = connected;
 
     if (connected && wasOffline) {
-        // Went from offline → online
-        _hideOfflineBanner();
-        _showBackOnlineToast();
+        if (!isNative) _hideOfflineBanner();
+        if (!isNative) _showBackOnlineToast();
         console.log('[NetworkMonitor] Back online');
     } else if (!connected && !wasOffline) {
-        // Went from online → offline
-        _showOfflineBanner();
+        if (!isNative) _showOfflineBanner();
         console.log('[NetworkMonitor] Gone offline');
     }
 
@@ -171,6 +164,10 @@ export async function checkAndClearStaleCache() {
             // 1. Clear API response cache (IndexedDB)
             await _clearIndexedDBCache('api_cache');
 
+            // 1b. Clear stale homepage HTML cache
+            await _clearObjectStore('MonochromeDB', 'home_cache');
+            await _clearObjectStore('MonochromeDB', 'page_cache');
+
             // 2. Clear Service Worker runtime caches (if any)
             if ('caches' in window) {
                 const keys = await caches.keys();
@@ -227,6 +224,32 @@ async function _clearIndexedDBCache(dbName) {
                 db.close();
                 resolve();
             }
+        };
+        req.onerror = () => resolve();
+    });
+}
+
+/** Clear a single object store inside an existing IndexedDB database */
+async function _clearObjectStore(dbName, storeName) {
+    return new Promise((resolve) => {
+        const req = indexedDB.open(dbName);
+        req.onsuccess = () => {
+            const database = req.result;
+            if (!database.objectStoreNames.contains(storeName)) {
+                database.close();
+                resolve();
+                return;
+            }
+            try {
+                const tx = database.transaction(storeName, 'readwrite');
+                tx.objectStore(storeName).clear();
+                tx.oncomplete = () => {
+                    console.log(`[CacheClear] Cleared "${storeName}" in "${dbName}"`);
+                    database.close();
+                    resolve();
+                };
+                tx.onerror = () => { database.close(); resolve(); };
+            } catch (_) { database.close(); resolve(); }
         };
         req.onerror = () => resolve();
     });

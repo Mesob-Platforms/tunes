@@ -1,25 +1,48 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { writeFileSync } from 'fs';
+import { resolve } from 'path';
+
+const buildTimestamp = Date.now().toString();
+
+function versionJsonPlugin() {
+    return {
+        name: 'generate-version-json',
+        closeBundle() {
+            writeFileSync(
+                resolve(__dirname, 'dist', 'version.json'),
+                JSON.stringify({ buildTimestamp, updatedAt: new Date().toISOString() })
+            );
+        },
+    };
+}
 
 export default defineConfig({
     base: './',
     define: {
-        // Inject build timestamp so the app can detect APK updates and clear stale caches
-        '__BUILD_TIMESTAMP__': JSON.stringify(Date.now().toString()),
+        '__BUILD_TIMESTAMP__': JSON.stringify(buildTimestamp),
+        '__APP_VERSION__': JSON.stringify('1.1.0'),
     },
     build: {
         outDir: 'dist',
         emptyOutDir: true,
         assetsInlineLimit: 102400,
-        sourcemap: 'hidden',
-        minify: false,
+        sourcemap: false,
+        minify: 'esbuild',
         rollupOptions: {
             output: {
-                manualChunks: undefined,
+                manualChunks(id) {
+                    if (id.includes('dashjs')) return 'vendor-dashjs';
+                    if (id.includes('@supabase')) return 'vendor-supabase';
+                    if (id.includes('html2canvas')) return 'vendor-html2canvas';
+                    if (id.includes('gsap')) return 'vendor-gsap';
+                    if (id.includes('lenis')) return 'vendor-lenis';
+                },
             },
         },
     },
     plugins: [
+        versionJsonPlugin(),
         VitePWA({
             registerType: 'autoUpdate',
             workbox: {

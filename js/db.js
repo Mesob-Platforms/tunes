@@ -834,9 +834,8 @@ export class MusicDatabase {
         const entry = await this.performTransaction('home_cache', 'readonly', (store) => store.get('home_content'));
         if (!entry) return null;
         const age = Date.now() - entry.timestamp;
-        const ttl = 120 * 60 * 1000; // 2 hours
+        const ttl = 7 * 24 * 60 * 60 * 1000; // 7 days — stale is fine, background refresh replaces it
         if (age > ttl) {
-            // Expired - delete it
             await this.performTransaction('home_cache', 'readwrite', (store) => store.delete('home_content'));
             return null;
         }
@@ -855,7 +854,7 @@ export class MusicDatabase {
         if (!entry) return null;
         const age = Date.now() - entry.timestamp;
         const ttl = 30 * 60 * 1000; // 30 minutes
-        if (age > ttl && navigator.onLine) {
+        if (age > ttl && (typeof window !== 'undefined' && window.__TUNES_NATIVE__ ? true : navigator.onLine)) {
             await this.performTransaction('page_cache', 'readwrite', (store) => store.delete(key));
             return null;
         }
@@ -1062,8 +1061,15 @@ export class MusicDatabase {
      * @returns {Promise<number>} Count of pending events
      */
     async getUnsyncedEventCount() {
-        const events = await this.getUnsyncedEvents();
-        return events.length;
+        const db = await this._getValidDb();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction('offline_events', 'readonly');
+            const store = transaction.objectStore('offline_events');
+            const index = store.index('synced');
+            const request = index.count(IDBKeyRange.only(false));
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
     }
 
     /**
