@@ -6,7 +6,7 @@
 
 import { isNative, apiUrl } from './platform.js';
 
-let _isOnline = isNative ? true : navigator.onLine;
+let _isOnline = navigator.onLine;
 let _offlineBanner = null;
 let _listeners = [];
 
@@ -29,6 +29,8 @@ export function isOnline() {
  * On web, uses browser online/offline events.
  */
 export async function initNetworkMonitor() {
+    _initBrowserListeners();
+
     if (isNative && window.NativeBridge) {
         try {
             const status = await window.NativeBridge.callAsync('getNetworkStatus');
@@ -41,13 +43,10 @@ export async function initNetworkMonitor() {
             console.log('[NetworkMonitor] Native listener active, connected:', status.connected);
         } catch (e) {
             console.warn('[NetworkMonitor] NativeBridge unavailable, using browser events', e);
-            _initBrowserListeners();
         }
-    } else {
-        _initBrowserListeners();
     }
 
-    if (!isNative && !_isOnline) {
+    if (!_isOnline) {
         _showOfflineBanner();
     }
 }
@@ -66,11 +65,11 @@ function _setOnline(connected) {
     _isOnline = connected;
 
     if (connected && wasOffline) {
-        if (!isNative) _hideOfflineBanner();
-        if (!isNative) _showBackOnlineToast();
+        _hideOfflineBanner();
+        _showBackOnlineToast();
         console.log('[NetworkMonitor] Back online');
     } else if (!connected && !wasOffline) {
-        if (!isNative) _showOfflineBanner();
+        _showOfflineBanner();
         console.log('[NetworkMonitor] Gone offline');
     }
 
@@ -259,6 +258,7 @@ async function _clearObjectStore(dbName, storeName) {
 function _clearStaleLocalStorage() {
     const KEEP_PREFIXES = [
         'tunes_build_version',
+        'tunes-downloaded',
         'auth_',
         'supabase.',
         'sb-',
@@ -274,6 +274,9 @@ function _clearStaleLocalStorage() {
         'librefm_',
         'maloja_',
         'pocketbase_',
+        'volume',
+        'queue',
+        'player',
     ];
 
     const keysToRemove = [];

@@ -1935,7 +1935,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (user) {
             const { offlineSync } = await import('./offlineSync.js');
             offlineSync.syncPendingEvents();
-            if (_authInitDone && isNative && window.NativeBridge) {
+            if (_authInitDone && isNative && window.NativeBridge && isOnline()) {
                 const path = window.location.pathname;
                 if (path === '/' || path === '/home' || path.endsWith('index.html')) {
                     try { await window.NativeBridge.call('startRefreshing'); } catch {}
@@ -1995,9 +1995,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await handleRouteChange();
 
-    if (isNative && window.NativeBridge) {
-        try { await window.NativeBridge.call('startRefreshing'); } catch {}
-        try { await window.__tunesRefs.pullRefresh(); } catch {}
+    if (isNative && window.NativeBridge && isOnline()) {
+        window.NativeBridge.call('startRefreshing').catch(() => {});
+        window.__tunesRefs.pullRefresh().catch(() => {});
     }
 
     // Deferred version check — runs 8s after boot so it never blocks startup

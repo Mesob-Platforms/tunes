@@ -3198,16 +3198,7 @@ export class UIRenderer {
 
             this._renderHomeShortcuts();
             this._renderHomeRecentlyPlayed();
-            try {
-                await Promise.all([
-                    this.renderHomeSongs(),
-                    this.renderHomeAlbums(),
-                    this.renderHomeArtists(),
-                    this.renderHomeTrending()
-                ]);
-            } catch (e) {
-                console.warn('[Home] Initial load failed, retrying in 3s:', e);
-                await new Promise(r => setTimeout(r, 3000));
+            if (isOnline()) {
                 try {
                     await Promise.all([
                         this.renderHomeSongs(),
@@ -3215,8 +3206,19 @@ export class UIRenderer {
                         this.renderHomeArtists(),
                         this.renderHomeTrending()
                     ]);
-                } catch (e2) {
-                    console.warn('[Home] Retry also failed:', e2);
+                } catch (e) {
+                    console.warn('[Home] Initial load failed, retrying in 3s:', e);
+                    await new Promise(r => setTimeout(r, 3000));
+                    try {
+                        await Promise.all([
+                            this.renderHomeSongs(),
+                            this.renderHomeAlbums(),
+                            this.renderHomeArtists(),
+                            this.renderHomeTrending()
+                        ]);
+                    } catch (e2) {
+                        console.warn('[Home] Retry also failed:', e2);
+                    }
                 }
             }
 

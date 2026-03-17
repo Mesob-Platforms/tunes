@@ -417,6 +417,12 @@ export class Player {
             console.warn('Cache lookup failed:', cacheErr);
         }
 
+        if (isOffline) {
+            const { showNotification } = await import('./downloads.js');
+            showNotification('Track not available offline');
+            return;
+        }
+
         try {
             let streamUrl;
 
