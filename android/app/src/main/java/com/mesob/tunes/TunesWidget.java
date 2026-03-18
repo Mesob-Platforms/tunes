@@ -28,7 +28,7 @@ public class TunesWidget extends AppWidgetProvider {
     public static final String ACTION_WIDGET_UPDATE = "com.mesob.tunes.WIDGET_UPDATE";
 
     private static final int BG_W = 1000;
-    private static final int BG_H = 400;
+    private static final int BG_H = 340;
     private static final int ART_SIZE = 300;
     private static final float ART_RADIUS_DP = 12f;
     private static final float BG_RADIUS_DP = 24f;

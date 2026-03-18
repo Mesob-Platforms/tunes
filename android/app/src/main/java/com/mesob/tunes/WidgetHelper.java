@@ -30,17 +30,15 @@ public final class WidgetHelper {
                 .copy(Bitmap.Config.ARGB_8888, true);
         mid.recycle();
 
-        int accent = extractDarkColor(albumArt);
-
         Canvas canvas = new Canvas(blurred);
-        Paint glassPaint = new Paint();
-        glassPaint.setColor(Color.argb(0xCC,
-                Color.red(accent), Color.green(accent), Color.blue(accent)));
-        canvas.drawRect(0, 0, width, height, glassPaint);
 
-        Paint veilPaint = new Paint();
-        veilPaint.setColor(Color.argb(0x33, 0, 0, 0));
-        canvas.drawRect(0, 0, width, height, veilPaint);
+        Paint darkenPaint = new Paint();
+        darkenPaint.setColor(Color.argb(0x4D, 0, 0, 0));
+        canvas.drawRect(0, 0, width, height, darkenPaint);
+
+        Paint glassPaint = new Paint();
+        glassPaint.setColor(Color.argb(0x59, 0, 0, 0));
+        canvas.drawRect(0, 0, width, height, glassPaint);
 
         return blurred;
     }
