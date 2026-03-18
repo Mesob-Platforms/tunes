@@ -2609,7 +2609,7 @@ export class UIRenderer {
 
         detailEl.innerHTML = `
             <header class="detail-header" style="padding:1rem var(--content-padding,1rem);">
-                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" onerror="this.onerror=null;this.src='assets/everywhere.png'" />
+                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" data-cover-id="${albumInfo?.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'" />
                 <div class="detail-header-info">
                     <h1 class="title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</h1>
                     <div class="meta">${sortedTracks.length} track${sortedTracks.length !== 1 ? 's' : ''} · ${formatDuration(totalDuration)}</div>

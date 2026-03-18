@@ -21,7 +21,7 @@ export default defineConfig({
     base: './',
     define: {
         '__BUILD_TIMESTAMP__': JSON.stringify(buildTimestamp),
-        '__APP_VERSION__': JSON.stringify('1.1.0'),
+        '__APP_VERSION__': JSON.stringify('1.1.3'),
     },
     build: {
         outDir: 'dist',
@@ -43,6 +43,16 @@ export default defineConfig({
     },
     plugins: [
         versionJsonPlugin(),
+        {
+            name: 'strip-local-crossorigin',
+            enforce: 'post',
+            transformIndexHtml(html) {
+                return html
+                    .replace(/<script([^>]*) crossorigin([^>]*) src="\.\/assets\//g, '<script$1$2 src="./assets/')
+                    .replace(/<link([^>]*) crossorigin([^>]*) href="\.\/assets\//g, '<link$1$2 href="./assets/')
+                    .replace(/<script([^>]*) src="\.\/assets\/([^"]*)"([^>]*) crossorigin/g, '<script$1 src="./assets/$2"$3');
+            },
+        },
         VitePWA({
             registerType: 'autoUpdate',
             workbox: {
