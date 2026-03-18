@@ -3220,6 +3220,8 @@ export class UIRenderer {
                         console.warn('[Home] Retry also failed:', e2);
                     }
                 }
+            } else {
+                this._renderOfflineDownloads();
             }
 
             if (shell) {
@@ -3228,7 +3230,57 @@ export class UIRenderer {
                 setTimeout(() => shell.remove(), 300);
             }
 
-            this._persistHomeCache();
+            if (isOnline()) this._persistHomeCache();
+        }
+    }
+
+    _renderOfflineDownloads() {
+        const contentEl = document.getElementById('home-content');
+        if (!contentEl) return;
+        const catalog = getDownloadedCatalog();
+        if (!catalog || !catalog.length) {
+            contentEl.insertAdjacentHTML('beforeend',
+                '<div style="text-align:center;padding:2rem 1rem;color:rgba(255,255,255,0.5);">' +
+                '<span class="material-symbols-rounded" style="font-size:2.5rem;display:block;margin-bottom:0.5rem;">cloud_off</span>' +
+                'You\'re offline. Download tracks to listen without internet.</div>');
+            return;
+        }
+        const tracks = catalog.slice(0, 20).map(t => ({
+            id: t.id, title: t.title,
+            artist: { name: t.artist },
+            artists: [{ name: t.artist }],
+            album: { id: t.albumId, title: t.album, cover: t.cover },
+            duration: t.duration,
+        }));
+        const albums = {};
+        for (const t of catalog) {
+            if (t.albumId && !albums[t.albumId]) {
+                albums[t.albumId] = { id: t.albumId, title: t.album, cover: t.cover, artist: t.artist };
+            }
+        }
+        const albumList = Object.values(albums).slice(0, 10);
+
+        const section = document.createElement('div');
+        section.className = 'content-section';
+        section.innerHTML = '<div class="section-header"><h2>Downloaded Tracks</h2></div><div id="home-offline-tracks" class="track-list"></div>';
+        contentEl.appendChild(section);
+        const trackList = section.querySelector('#home-offline-tracks');
+        if (trackList) this.renderListWithTracks(trackList, tracks, true);
+
+        if (albumList.length) {
+            const albumSec = document.createElement('div');
+            albumSec.className = 'content-section';
+            albumSec.innerHTML = '<div class="section-header"><h2>Downloaded Albums</h2></div><div class="album-grid"></div>';
+            const grid = albumSec.querySelector('.album-grid');
+            for (const a of albumList) {
+                const coverUrl = this.api.getCoverUrl(a.cover);
+                grid.insertAdjacentHTML('beforeend',
+                    `<a href="/album/${a.id}" class="album-card" data-album-id="${a.id}">` +
+                    `<img src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">` +
+                    `<div class="album-info"><div class="album-title">${a.title || ''}</div>` +
+                    `<div class="album-artist">${a.artist || ''}</div></div></a>`);
+            }
+            contentEl.appendChild(albumSec);
         }
     }
 
@@ -3406,6 +3458,7 @@ export class UIRenderer {
     }
 
     async _refreshHomeAndPersistCache() {
+        if (!isOnline()) return;
         this._invalidateHomeDataCache();
         this._renderHomeShortcuts();
         this._renderHomeRecentlyPlayed();

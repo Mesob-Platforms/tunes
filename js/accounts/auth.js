@@ -1,6 +1,7 @@
 // js/accounts/auth.js
 import { supabase, isAdminEmail, GOOGLE_WEB_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID } from './config.js';
 import { isNative } from '../platform.js';
+import { isOnline } from '../networkMonitor.js';
 
 // Helper: show an inline message in the gate
 function showGateMessage(elementId, text, type = 'error') {
@@ -92,6 +93,15 @@ export class AuthManager {
             this._cacheAuthState(!!this.user);
             this.updateUI(this.user);
             this.authListeners.forEach(listener => listener(this.user));
+        }).catch(() => {
+            this._initialSessionChecked = true;
+            this._sessionRestored = true;
+            if (this._wasSignedIn()) {
+                const authGate = document.getElementById('auth-gate');
+                if (authGate) authGate.style.display = 'none';
+            } else {
+                this.updateUI(null);
+            }
         });
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -329,8 +339,12 @@ export class AuthManager {
             if (user) {
                 authGate.style.display = 'none';
             } else if (this._sessionRestored) {
-                authGate.style.display = 'flex';
-                showGateScreen('gate-screen-email');
+                if (!isOnline() && this._wasSignedIn()) {
+                    authGate.style.display = 'none';
+                } else {
+                    authGate.style.display = 'flex';
+                    showGateScreen('gate-screen-email');
+                }
             }
             // If session not yet restored, gate stays hidden (display:none from HTML)
         }

@@ -207,11 +207,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const s = document.getElementById('app-loading-shell');
         if (s) { s.style.opacity = '0'; s.style.transition = 'opacity 0.25s'; setTimeout(() => s.remove(), 300); }
     };
-    const _shellTimeout = setTimeout(_killShell, 3000);
+    const _shellTimeout = setTimeout(_killShell, 2000);
 
     await Promise.race([
         checkAndClearStaleCache(),
-        new Promise(r => setTimeout(r, 2000))
+        new Promise(r => setTimeout(r, 500))
     ]);
 
     // ── Unified network monitoring (Capacitor Network on native, browser events on web) ──
@@ -239,6 +239,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.__tunesRefs = { authManager, ui, api, player };
 
     window.__tunesRefs.pullRefresh = async () => {
+        if (!isOnline()) {
+            if (isNative && window.NativeBridge) {
+                try { window.NativeBridge.call('refreshDone'); } catch {}
+            }
+            return;
+        }
         try {
             const path = window.location.pathname;
             if (path === '/' || path === '/home' || path.endsWith('index.html')) {
@@ -363,6 +369,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (isNative && window.NativeBridge) {
         window.NativeBridge.on('appResumed', () => {
+            if (!isOnline()) return;
             ui._forceHomeRefresh = true;
             const path = window.location.pathname;
             if (path === '/' || path === '/home' || path.endsWith('index.html')) {
@@ -504,6 +511,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     clearTimeout(_shellTimeout);
     _killShell();
+
+    document.addEventListener('error', (e) => {
+        if (e.target.tagName === 'IMG' && !e.target.dataset.fallback) {
+            e.target.dataset.fallback = '1';
+            e.target.src = 'assets/everywhere.png';
+        }
+    }, true);
 
     // Casting is not supported in native Android WebView — skip entirely
     if (!isNative) {

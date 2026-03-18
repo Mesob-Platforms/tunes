@@ -1,1 +1,0 @@
-import{s as t,a}from"./index-DUYmqt6O.js";import"./vendor-supabase-BZ0N5lZN.js";import"./vendor-dashjs-BUG1wcKy.js";function p(e,i,s,r){i.setQuality(t.getQuality()),a.applySidebarVisibility()}export{p as initializeSettings};
