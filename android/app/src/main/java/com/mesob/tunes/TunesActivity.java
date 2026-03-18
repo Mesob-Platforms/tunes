@@ -278,6 +278,7 @@ public class TunesActivity extends AppCompatActivity {
                 .putBoolean("isPlaying", args.optBoolean("isPlaying", false))
                 .apply();
             TunesWidget.triggerUpdate(this);
+            TunesWidgetLarge.triggerUpdate(this);
         } catch (Exception e) {
             Log.e(TAG, "Failed to start foreground service", e);
         }

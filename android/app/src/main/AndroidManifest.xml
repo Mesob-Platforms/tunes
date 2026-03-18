@@ -63,11 +63,11 @@
             </intent-filter>
         </receiver>
 
-        <!-- Home screen widget (4×1 now-playing controls) -->
+        <!-- Compact widget (4×1 now-playing strip) -->
         <receiver
             android:name=".TunesWidget"
             android:exported="true"
-            android:label="Tunes Now Playing">
+            android:label="Tunes - Compact">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="com.mesob.tunes.WIDGET_UPDATE" />
@@ -75,6 +75,20 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info" />
+        </receiver>
+
+        <!-- Large widget (4×2 now-playing card) -->
+        <receiver
+            android:name=".TunesWidgetLarge"
+            android:exported="true"
+            android:label="Tunes - Now Playing">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.mesob.tunes.WIDGET_LARGE_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_large" />
         </receiver>
 
         <provider
