@@ -27,128 +27,120 @@ public class TunesWidget extends AppWidgetProvider {
     public static final String PREFS_NAME = "tunes_widget";
     public static final String ACTION_WIDGET_UPDATE = "com.mesob.tunes.WIDGET_UPDATE";
 
-    private static final int BG_WIDTH = 600;
-    private static final int BG_HEIGHT = 200;
-    private static final float CORNER_RADIUS_DP = 20f;
+    private static final int BG_W = 800;
+    private static final int BG_H = 400;
+    private static final int ART_SIZE = 256;
+    private static final float ART_RADIUS_DP = 14f;
+    private static final float BG_RADIUS_DP = 24f;
 
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     @Override
-    public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
-        for (int appWidgetId : appWidgetIds) {
-            updateWidget(context, appWidgetManager, appWidgetId);
-        }
+    public void onUpdate(Context ctx, AppWidgetManager mgr, int[] ids) {
+        for (int id : ids) updateWidget(ctx, mgr, id);
     }
 
     @Override
-    public void onReceive(Context context, Intent intent) {
-        super.onReceive(context, intent);
+    public void onReceive(Context ctx, Intent intent) {
+        super.onReceive(ctx, intent);
         if (ACTION_WIDGET_UPDATE.equals(intent.getAction())) {
-            AppWidgetManager manager = AppWidgetManager.getInstance(context);
-            int[] ids = manager.getAppWidgetIds(new ComponentName(context, TunesWidget.class));
-            for (int id : ids) {
-                updateWidget(context, manager, id);
-            }
+            AppWidgetManager mgr = AppWidgetManager.getInstance(ctx);
+            int[] ids = mgr.getAppWidgetIds(new ComponentName(ctx, TunesWidget.class));
+            for (int id : ids) updateWidget(ctx, mgr, id);
         }
     }
 
-    private void updateWidget(Context context, AppWidgetManager manager, int widgetId) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-
+    private void updateWidget(Context ctx, AppWidgetManager mgr, int widgetId) {
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         String title = prefs.getString("title", "Not Playing");
         String artist = prefs.getString("artist", "Tunes");
-        boolean isPlaying = prefs.getBoolean("isPlaying", false);
-        String albumArtUrl = prefs.getString("albumArt", "");
+        boolean playing = prefs.getBoolean("isPlaying", false);
+        String artUrl = prefs.getString("albumArt", "");
 
-        RemoteViews views = buildRemoteViews(context, title, artist, isPlaying);
-        manager.updateAppWidget(widgetId, views);
+        RemoteViews v = buildViews(ctx, title, artist, playing);
+        mgr.updateAppWidget(widgetId, v);
 
-        if (albumArtUrl != null && !albumArtUrl.isEmpty()) {
-            loadArtAndUpdate(context, manager, widgetId, albumArtUrl, title, artist, isPlaying);
+        if (artUrl != null && !artUrl.isEmpty()) {
+            loadArt(ctx, mgr, widgetId, artUrl, title, artist, playing);
         }
     }
 
-    private RemoteViews buildRemoteViews(Context context, String title, String artist, boolean isPlaying) {
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_layout);
-        views.setTextViewText(R.id.widget_title, title);
-        views.setTextViewText(R.id.widget_artist, artist);
+    private RemoteViews buildViews(Context ctx, String title, String artist, boolean playing) {
+        RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_layout);
+        v.setTextViewText(R.id.widget_title, title);
+        v.setTextViewText(R.id.widget_artist, artist);
+        v.setImageViewResource(R.id.widget_play_pause,
+                playing ? R.drawable.ic_widget_pause : R.drawable.ic_widget_play);
 
-        views.setImageViewResource(R.id.widget_play_pause,
-                isPlaying ? R.drawable.ic_widget_pause : R.drawable.ic_widget_play);
+        v.setOnClickPendingIntent(R.id.widget_prev, svcIntent(ctx, ACTION_PREV, 1));
+        v.setOnClickPendingIntent(R.id.widget_play_pause,
+                svcIntent(ctx, playing ? ACTION_PAUSE : ACTION_PLAY, 2));
+        v.setOnClickPendingIntent(R.id.widget_next, svcIntent(ctx, ACTION_NEXT, 3));
 
-        views.setOnClickPendingIntent(R.id.widget_prev,
-                makeServiceIntent(context, "com.mesob.tunes.ACTION_PREV", 1));
-        views.setOnClickPendingIntent(R.id.widget_play_pause,
-                makeServiceIntent(context, isPlaying ? "com.mesob.tunes.ACTION_PAUSE" : "com.mesob.tunes.ACTION_PLAY", 2));
-        views.setOnClickPendingIntent(R.id.widget_next,
-                makeServiceIntent(context, "com.mesob.tunes.ACTION_NEXT", 3));
-
-        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-        if (launchIntent != null) {
-            PendingIntent lp = PendingIntent.getActivity(
-                    context, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            views.setOnClickPendingIntent(R.id.widget_album_art, lp);
-            views.setOnClickPendingIntent(R.id.widget_title, lp);
-            views.setOnClickPendingIntent(R.id.widget_artist, lp);
+        Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(ctx.getPackageName());
+        if (launch != null) {
+            PendingIntent lp = PendingIntent.getActivity(ctx, 0, launch,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            v.setOnClickPendingIntent(R.id.widget_album_art, lp);
+            v.setOnClickPendingIntent(R.id.widget_title, lp);
+            v.setOnClickPendingIntent(R.id.widget_artist, lp);
         }
-
-        return views;
+        return v;
     }
 
-    private void loadArtAndUpdate(Context context, AppWidgetManager manager, int widgetId,
-                                   String albumArtUrl, String title, String artist, boolean isPlaying) {
+    private void loadArt(Context ctx, AppWidgetManager mgr, int wid,
+                         String url, String title, String artist, boolean playing) {
         executor.execute(() -> {
             try {
-                URL url = new URL(albumArtUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setDoInput(true);
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-                conn.connect();
-                InputStream input = conn.getInputStream();
-                Bitmap bitmap = BitmapFactory.decodeStream(input);
-                input.close();
-                conn.disconnect();
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setConnectTimeout(5000);
+                c.setReadTimeout(5000);
+                c.connect();
+                Bitmap raw = BitmapFactory.decodeStream(c.getInputStream());
+                c.disconnect();
+                if (raw == null) return;
 
-                if (bitmap == null) return;
+                float density = ctx.getResources().getDisplayMetrics().density;
 
-                Bitmap albumThumb = Bitmap.createScaledBitmap(bitmap, 128, 128, true);
-                Bitmap blurredBg = WidgetHelper.createBlurredBackground(bitmap, BG_WIDTH, BG_HEIGHT);
-
+                Bitmap frostedBg = WidgetHelper.createFrostedBackground(raw, BG_W, BG_H);
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                    float density = context.getResources().getDisplayMetrics().density;
-                    Bitmap rounded = WidgetHelper.roundCorners(blurredBg, CORNER_RADIUS_DP, density);
-                    blurredBg.recycle();
-                    blurredBg = rounded;
+                    Bitmap rounded = WidgetHelper.roundCorners(frostedBg, BG_RADIUS_DP, density);
+                    frostedBg.recycle();
+                    frostedBg = rounded;
                 }
 
-                if (albumThumb != bitmap) bitmap.recycle();
+                Bitmap art = WidgetHelper.roundAlbumArt(raw, ART_SIZE, ART_RADIUS_DP, density);
+                raw.recycle();
 
-                final Bitmap finalBg = blurredBg;
-                final Bitmap finalArt = albumThumb;
-
+                final Bitmap bg = frostedBg;
+                final Bitmap albumArt = art;
                 new Handler(Looper.getMainLooper()).post(() -> {
-                    RemoteViews views = buildRemoteViews(context, title, artist, isPlaying);
-                    views.setImageViewBitmap(R.id.widget_bg, finalBg);
-                    views.setImageViewBitmap(R.id.widget_album_art, finalArt);
-                    manager.updateAppWidget(widgetId, views);
+                    RemoteViews v = buildViews(ctx, title, artist, playing);
+                    v.setImageViewBitmap(R.id.widget_bg, bg);
+                    v.setImageViewBitmap(R.id.widget_album_art, albumArt);
+                    mgr.updateAppWidget(wid, v);
                 });
             } catch (Exception e) {
-                Log.w(TAG, "Failed to load album art for widget", e);
+                Log.w(TAG, "Art load failed", e);
             }
         });
     }
 
-    private PendingIntent makeServiceIntent(Context context, String action, int requestCode) {
-        Intent intent = new Intent(context, AudioForegroundService.class);
-        intent.setAction(action);
-        return PendingIntent.getService(context, requestCode, intent,
+    private static final String ACTION_PREV = "com.mesob.tunes.ACTION_PREV";
+    private static final String ACTION_PLAY = "com.mesob.tunes.ACTION_PLAY";
+    private static final String ACTION_PAUSE = "com.mesob.tunes.ACTION_PAUSE";
+    private static final String ACTION_NEXT = "com.mesob.tunes.ACTION_NEXT";
+
+    private PendingIntent svcIntent(Context ctx, String action, int rc) {
+        Intent i = new Intent(ctx, AudioForegroundService.class);
+        i.setAction(action);
+        return PendingIntent.getService(ctx, rc, i,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    public static void triggerUpdate(Context context) {
-        Intent intent = new Intent(ACTION_WIDGET_UPDATE);
-        intent.setComponent(new ComponentName(context, TunesWidget.class));
-        context.sendBroadcast(intent);
+    public static void triggerUpdate(Context ctx) {
+        Intent i = new Intent(ACTION_WIDGET_UPDATE);
+        i.setComponent(new ComponentName(ctx, TunesWidget.class));
+        ctx.sendBroadcast(i);
     }
 }

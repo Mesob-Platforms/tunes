@@ -3,89 +3,80 @@ package com.mesob.tunes;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RectF;
-import android.graphics.Shader;
 import android.util.Log;
 
 import androidx.palette.graphics.Palette;
 
-/**
- * Shared utilities for both compact and large Tunes widgets.
- * Handles blurred background compositing, color extraction, and bitmap manipulation.
- */
 public final class WidgetHelper {
 
     private static final String TAG = "WidgetHelper";
-    static final int DEFAULT_BG_COLOR = 0xCC111113;
 
     private WidgetHelper() {}
 
     /**
-     * Creates a blurred, gradient-overlaid background bitmap from album art.
-     * Uses downscale-upscale technique (no external libraries).
+     * Creates a heavily blurred, frosted-glass background from album art.
+     * Downscales to 6x6 for extreme blur, upscales, then overlays a
+     * semi-transparent matte color extracted from the art via Palette.
      */
-    static Bitmap createBlurredBackground(Bitmap albumArt, int width, int height) {
-        Bitmap tiny = Bitmap.createScaledBitmap(albumArt, 24, 24, true);
-        Bitmap blurred = Bitmap.createScaledBitmap(tiny, width, height, true).copy(Bitmap.Config.ARGB_8888, true);
+    static Bitmap createFrostedBackground(Bitmap albumArt, int width, int height) {
+        Bitmap tiny = Bitmap.createScaledBitmap(albumArt, 6, 6, true);
+        Bitmap mid = Bitmap.createScaledBitmap(tiny, 50, 50, true);
         tiny.recycle();
+        Bitmap blurred = Bitmap.createScaledBitmap(mid, width, height, true)
+                .copy(Bitmap.Config.ARGB_8888, true);
+        mid.recycle();
 
-        int accentColor = extractAccentColor(albumArt);
-        int gradientStart = Color.argb(0x66,
-                Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor));
-        int gradientEnd = Color.argb(0xCC, 0, 0, 0);
+        int accent = extractDarkColor(albumArt);
 
         Canvas canvas = new Canvas(blurred);
-        Paint gradientPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        LinearGradient gradient = new LinearGradient(
-                0, 0, 0, height,
-                new int[]{gradientStart, gradientEnd},
-                null, Shader.TileMode.CLAMP);
-        gradientPaint.setShader(gradient);
-        canvas.drawRect(0, 0, width, height, gradientPaint);
+        Paint glassPaint = new Paint();
+        glassPaint.setColor(Color.argb(0xCC,
+                Color.red(accent), Color.green(accent), Color.blue(accent)));
+        canvas.drawRect(0, 0, width, height, glassPaint);
+
+        Paint veilPaint = new Paint();
+        veilPaint.setColor(Color.argb(0x33, 0, 0, 0));
+        canvas.drawRect(0, 0, width, height, veilPaint);
 
         return blurred;
     }
 
-    /**
-     * Rounds the corners of a bitmap for pre-Android 12 devices.
-     */
     static Bitmap roundCorners(Bitmap bitmap, float radiusDp, float density) {
         float radiusPx = radiusDp * density;
         int w = bitmap.getWidth();
         int h = bitmap.getHeight();
-
         Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(output);
-
         Paint clipPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         RectF rect = new RectF(0, 0, w, h);
         canvas.drawRoundRect(rect, radiusPx, radiusPx, clipPaint);
-
         clipPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
         canvas.drawBitmap(bitmap, 0, 0, clipPaint);
-
         return output;
     }
 
     /**
-     * Extracts the most vibrant/colorful swatch from album art.
-     * Prioritizes: Vibrant -> DarkVibrant -> Muted -> DarkMuted -> Dominant
+     * Rounds album art corners into a bitmap suitable for RemoteViews.
      */
-    static int extractAccentColor(Bitmap bitmap) {
+    static Bitmap roundAlbumArt(Bitmap albumArt, int size, float radiusDp, float density) {
+        Bitmap scaled = Bitmap.createScaledBitmap(albumArt, size, size, true);
+        return roundCorners(scaled, radiusDp, density);
+    }
+
+    static int extractDarkColor(Bitmap bitmap) {
         try {
             Palette palette = Palette.from(bitmap).maximumColorCount(16).generate();
-            Palette.Swatch swatch = palette.getVibrantSwatch();
-            if (swatch == null) swatch = palette.getDarkVibrantSwatch();
-            if (swatch == null) swatch = palette.getMutedSwatch();
-            if (swatch == null) swatch = palette.getDarkMutedSwatch();
-            if (swatch == null) swatch = palette.getDominantSwatch();
-            if (swatch != null) return swatch.getRgb();
+            Palette.Swatch s = palette.getDarkMutedSwatch();
+            if (s == null) s = palette.getDarkVibrantSwatch();
+            if (s == null) s = palette.getMutedSwatch();
+            if (s == null) s = palette.getDominantSwatch();
+            if (s != null) return s.getRgb();
         } catch (Exception e) {
-            Log.w(TAG, "Palette extraction failed", e);
+            Log.w(TAG, "Palette failed", e);
         }
         return 0xFF1A1A2E;
     }
