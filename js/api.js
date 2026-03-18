@@ -1242,7 +1242,7 @@ export class LosslessAPI {
 
     getCoverUrl(id, size = '160') {
         if (!id) {
-            return `https://picsum.photos/seed/${Math.random()}/${size}`;
+            return 'assets/everywhere.png';
         }
 
         if (typeof id === 'string' && (id.startsWith('http') || id.startsWith('blob:') || id.startsWith('assets/'))) {
@@ -1255,7 +1255,7 @@ export class LosslessAPI {
 
     getArtistPictureUrl(id, size = '160') {
         if (!id) {
-            return `https://picsum.photos/seed/${Math.random()}/${size}`;
+            return 'assets/everywhere.png';
         }
 
         if (typeof id === 'string' && (id.startsWith('blob:') || id.startsWith('assets/'))) {
