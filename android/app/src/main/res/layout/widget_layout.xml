@@ -22,8 +22,8 @@
         <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="28"
-            android:padding="10dp">
+            android:layout_weight="25"
+            android:padding="12dp">
 
             <ImageView
                 android:id="@+id/widget_album_art"
@@ -31,17 +31,17 @@
                 android:layout_height="match_parent"
                 android:layout_gravity="center"
                 android:scaleType="fitCenter"
-                android:src="@mipmap/ic_launcher"
+                android:adjustViewBounds="true"
                 android:contentDescription="Album art" />
         </FrameLayout>
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="40"
+            android:layout_weight="35"
             android:orientation="vertical"
             android:gravity="center_vertical|start"
-            android:paddingStart="4dp"
+            android:paddingStart="2dp"
             android:paddingEnd="4dp">
 
             <TextView
@@ -82,31 +82,31 @@
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="32"
+            android:layout_weight="40"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingEnd="8dp">
+            android:paddingEnd="12dp">
 
             <ImageButton
                 android:id="@+id/widget_play_pause"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:src="@drawable/ic_widget_pause"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:src="@drawable/ic_widget_play"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Play or Pause"
                 android:scaleType="fitCenter"
-                android:padding="4dp"
-                android:layout_marginEnd="4dp" />
+                android:padding="2dp"
+                android:layout_marginEnd="2dp" />
 
             <ImageButton
                 android:id="@+id/widget_next"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
                 android:src="@drawable/ic_widget_next"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Next"
                 android:scaleType="fitCenter"
-                android:padding="4dp" />
+                android:padding="2dp" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

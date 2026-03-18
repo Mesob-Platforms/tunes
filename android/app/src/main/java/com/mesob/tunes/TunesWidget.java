@@ -76,6 +76,7 @@ public class TunesWidget extends AppWidgetProvider {
         v.setTextViewText(R.id.widget_artist, artist);
         v.setImageViewResource(R.id.widget_play_pause,
                 playing ? R.drawable.ic_widget_pause : R.drawable.ic_widget_play);
+        v.setImageViewResource(R.id.widget_album_art, R.mipmap.ic_launcher);
 
         if (buttonTint != 0) {
             v.setInt(R.id.widget_play_pause, "setColorFilter", buttonTint);
