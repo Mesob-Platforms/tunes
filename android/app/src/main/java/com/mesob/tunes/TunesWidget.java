@@ -27,11 +27,15 @@ public class TunesWidget extends AppWidgetProvider {
     public static final String PREFS_NAME = "tunes_widget";
     public static final String ACTION_WIDGET_UPDATE = "com.mesob.tunes.WIDGET_UPDATE";
 
-    private static final int BG_W = 800;
+    private static final int BG_W = 1000;
     private static final int BG_H = 400;
-    private static final int ART_SIZE = 256;
-    private static final float ART_RADIUS_DP = 14f;
+    private static final int ART_SIZE = 300;
+    private static final float ART_RADIUS_DP = 12f;
     private static final float BG_RADIUS_DP = 24f;
+
+    private static final String ACTION_PLAY  = "com.mesob.tunes.ACTION_PLAY";
+    private static final String ACTION_PAUSE = "com.mesob.tunes.ACTION_PAUSE";
+    private static final String ACTION_NEXT  = "com.mesob.tunes.ACTION_NEXT";
 
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -57,7 +61,7 @@ public class TunesWidget extends AppWidgetProvider {
         boolean playing = prefs.getBoolean("isPlaying", false);
         String artUrl = prefs.getString("albumArt", "");
 
-        RemoteViews v = buildViews(ctx, title, artist, playing);
+        RemoteViews v = buildViews(ctx, title, artist, playing, 0);
         mgr.updateAppWidget(widgetId, v);
 
         if (artUrl != null && !artUrl.isEmpty()) {
@@ -65,17 +69,23 @@ public class TunesWidget extends AppWidgetProvider {
         }
     }
 
-    private RemoteViews buildViews(Context ctx, String title, String artist, boolean playing) {
+    private RemoteViews buildViews(Context ctx, String title, String artist,
+                                    boolean playing, int buttonTint) {
         RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_layout);
         v.setTextViewText(R.id.widget_title, title);
         v.setTextViewText(R.id.widget_artist, artist);
         v.setImageViewResource(R.id.widget_play_pause,
                 playing ? R.drawable.ic_widget_pause : R.drawable.ic_widget_play);
 
-        v.setOnClickPendingIntent(R.id.widget_prev, svcIntent(ctx, ACTION_PREV, 1));
+        if (buttonTint != 0) {
+            v.setInt(R.id.widget_play_pause, "setColorFilter", buttonTint);
+            v.setInt(R.id.widget_next, "setColorFilter", buttonTint);
+        }
+
         v.setOnClickPendingIntent(R.id.widget_play_pause,
                 svcIntent(ctx, playing ? ACTION_PAUSE : ACTION_PLAY, 2));
-        v.setOnClickPendingIntent(R.id.widget_next, svcIntent(ctx, ACTION_NEXT, 3));
+        v.setOnClickPendingIntent(R.id.widget_next,
+                svcIntent(ctx, ACTION_NEXT, 3));
 
         Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(ctx.getPackageName());
         if (launch != null) {
@@ -110,12 +120,15 @@ public class TunesWidget extends AppWidgetProvider {
                 }
 
                 Bitmap art = WidgetHelper.roundAlbumArt(raw, ART_SIZE, ART_RADIUS_DP, density);
+                int buttonColor = WidgetHelper.extractLightColor(raw);
                 raw.recycle();
 
                 final Bitmap bg = frostedBg;
                 final Bitmap albumArt = art;
+                final int tint = buttonColor;
+
                 new Handler(Looper.getMainLooper()).post(() -> {
-                    RemoteViews v = buildViews(ctx, title, artist, playing);
+                    RemoteViews v = buildViews(ctx, title, artist, playing, tint);
                     v.setImageViewBitmap(R.id.widget_bg, bg);
                     v.setImageViewBitmap(R.id.widget_album_art, albumArt);
                     mgr.updateAppWidget(wid, v);
@@ -125,11 +138,6 @@ public class TunesWidget extends AppWidgetProvider {
             }
         });
     }
-
-    private static final String ACTION_PREV = "com.mesob.tunes.ACTION_PREV";
-    private static final String ACTION_PLAY = "com.mesob.tunes.ACTION_PLAY";
-    private static final String ACTION_PAUSE = "com.mesob.tunes.ACTION_PAUSE";
-    private static final String ACTION_NEXT = "com.mesob.tunes.ACTION_NEXT";
 
     private PendingIntent svcIntent(Context ctx, String action, int rc) {
         Intent i = new Intent(ctx, AudioForegroundService.class);

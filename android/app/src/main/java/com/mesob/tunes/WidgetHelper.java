@@ -80,4 +80,31 @@ public final class WidgetHelper {
         }
         return 0xFF1A1A2E;
     }
+
+    /**
+     * Extracts a lighter/vibrant color for button tinting.
+     * Prioritizes LightMuted -> LightVibrant -> Vibrant -> Muted -> Dominant.
+     * Ensures the returned color has enough brightness to be visible on dark bg.
+     */
+    static int extractLightColor(Bitmap bitmap) {
+        try {
+            Palette palette = Palette.from(bitmap).maximumColorCount(24).generate();
+            Palette.Swatch s = palette.getLightMutedSwatch();
+            if (s == null) s = palette.getLightVibrantSwatch();
+            if (s == null) s = palette.getVibrantSwatch();
+            if (s == null) s = palette.getMutedSwatch();
+            if (s == null) s = palette.getDominantSwatch();
+            if (s != null) {
+                int rgb = s.getRgb();
+                float[] hsv = new float[3];
+                Color.colorToHSV(rgb, hsv);
+                if (hsv[2] < 0.5f) hsv[2] = 0.5f + hsv[2] * 0.5f;
+                if (hsv[1] > 0.8f) hsv[1] = 0.8f;
+                return Color.HSVToColor(hsv);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Palette light failed", e);
+        }
+        return 0xFFCCCCCC;
+    }
 }

@@ -22,30 +22,27 @@
         <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:padding="12dp">
+            android:layout_weight="28"
+            android:padding="10dp">
 
             <ImageView
                 android:id="@+id/widget_album_art"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:layout_gravity="center"
-                android:scaleType="centerCrop"
+                android:scaleType="fitCenter"
                 android:src="@mipmap/ic_launcher"
-                android:contentDescription="Album art"
-                android:adjustViewBounds="true" />
+                android:contentDescription="Album art" />
         </FrameLayout>
 
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_weight="40"
             android:orientation="vertical"
-            android:gravity="center_vertical"
-            android:paddingTop="16dp"
-            android:paddingBottom="16dp"
-            android:paddingEnd="14dp"
-            android:paddingStart="2dp">
+            android:gravity="center_vertical|start"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
 
             <TextView
                 android:id="@+id/widget_title"
@@ -53,12 +50,12 @@
                 android:layout_height="wrap_content"
                 android:text="Not Playing"
                 android:textColor="#FFFFFF"
-                android:textSize="15sp"
+                android:textSize="18sp"
                 android:fontFamily="sans-serif-medium"
-                android:letterSpacing="-0.01"
+                android:letterSpacing="-0.03"
                 android:maxLines="2"
                 android:ellipsize="end"
-                android:shadowColor="#66000000"
+                android:shadowColor="#55000000"
                 android:shadowDx="0"
                 android:shadowDy="1"
                 android:shadowRadius="2" />
@@ -68,68 +65,48 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Tunes"
-                android:textColor="#BBFFFFFF"
-                android:textSize="13sp"
+                android:textColor="#CCFFFFFF"
+                android:textSize="14sp"
                 android:fontFamily="sans-serif"
+                android:letterSpacing="-0.02"
                 android:maxLines="1"
                 android:ellipsize="end"
                 android:singleLine="true"
                 android:layout_marginTop="2dp"
-                android:shadowColor="#66000000"
+                android:shadowColor="#55000000"
                 android:shadowDx="0"
                 android:shadowDy="1"
                 android:shadowRadius="2" />
+        </LinearLayout>
 
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="14dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="32"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingEnd="8dp">
 
-                <ImageButton
-                    android:id="@+id/widget_prev"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
-                    android:src="@drawable/ic_widget_prev"
-                    android:background="?android:attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Previous"
-                    android:scaleType="centerInside"
-                    android:padding="7dp"
-                    android:layout_marginEnd="6dp" />
+            <ImageButton
+                android:id="@+id/widget_play_pause"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:src="@drawable/ic_widget_pause"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Play or Pause"
+                android:scaleType="fitCenter"
+                android:padding="4dp"
+                android:layout_marginEnd="4dp" />
 
-                <FrameLayout
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_marginEnd="6dp">
-
-                    <ImageView
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:src="@drawable/widget_play_bg"
-                        android:importantForAccessibility="no" />
-
-                    <ImageButton
-                        android:id="@+id/widget_play_pause"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:src="@drawable/ic_widget_play"
-                        android:background="?android:attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="Play or Pause"
-                        android:scaleType="centerInside"
-                        android:padding="8dp" />
-                </FrameLayout>
-
-                <ImageButton
-                    android:id="@+id/widget_next"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
-                    android:src="@drawable/ic_widget_next"
-                    android:background="?android:attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Next"
-                    android:scaleType="centerInside"
-                    android:padding="7dp" />
-            </LinearLayout>
+            <ImageButton
+                android:id="@+id/widget_next"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:src="@drawable/ic_widget_next"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Next"
+                android:scaleType="fitCenter"
+                android:padding="4dp" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>
