@@ -254,7 +254,7 @@ export class UIRenderer {
     createTrackItemHTML(track, index, showCover = false, hasMultipleDiscs = false, useTrackNumber = false) {
         const isUnavailable = track.isUnavailable;
         const trackImageHTML = showCover
-            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">`
+            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy" data-cover-id="${track.album?.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'">`
             : '';
 
         let displayIndex;
@@ -2451,7 +2451,7 @@ export class UIRenderer {
             const dur = t.duration ? formatTime(t.duration) : '';
             return `
                 <div class="dl-track-item" data-track-id="${t.id}">
-                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" data-cover-id="${t.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                     <div class="dl-track-item-info">
                         <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
                         <div class="dl-track-item-meta">
@@ -2467,6 +2467,8 @@ export class UIRenderer {
                     </div>
                 </div>`;
         }).join('');
+
+        this._applyCachedCovers(container);
 
         container.querySelectorAll('.dl-remove-btn').forEach((btn) => {
             btn._confirmPending = false;
@@ -2553,13 +2555,15 @@ export class UIRenderer {
             const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-album-id="${a.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" data-cover-id="${a.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
                         <div class="dl-album-card-subtitle">${escapeHtml(a.artist || 'Unknown')} · ${a.count} track${a.count !== 1 ? 's' : ''}</div>
                     </div>
                 </div>`;
         }).join('')}</div>`;
+
+        this._applyCachedCovers(container);
 
         // Click → show only downloaded tracks from this album (offline view)
         container.querySelectorAll('.dl-album-card').forEach((card) => {
@@ -3175,7 +3179,13 @@ export class UIRenderer {
         let cached = null;
         try { cached = await db.getHomeCache(); } catch {}
 
-        if (cached) {
+        if (!isOnline()) {
+            this._renderHomeShortcuts();
+            this._renderHomeRecentlyPlayed();
+            this._renderOfflineDownloads();
+            const shell = document.getElementById('app-loading-shell');
+            if (shell) shell.remove();
+        } else if (cached) {
             this._renderHomeSectionsFromCache(cached);
             this._forceHomeRefresh = false;
             if (!window.__TUNES_NATIVE__) {
@@ -3198,7 +3208,16 @@ export class UIRenderer {
 
             this._renderHomeShortcuts();
             this._renderHomeRecentlyPlayed();
-            if (isOnline()) {
+            try {
+                await Promise.all([
+                    this.renderHomeSongs(),
+                    this.renderHomeAlbums(),
+                    this.renderHomeArtists(),
+                    this.renderHomeTrending()
+                ]);
+            } catch (e) {
+                console.warn('[Home] Initial load failed, retrying in 3s:', e);
+                await new Promise(r => setTimeout(r, 3000));
                 try {
                     await Promise.all([
                         this.renderHomeSongs(),
@@ -3206,22 +3225,9 @@ export class UIRenderer {
                         this.renderHomeArtists(),
                         this.renderHomeTrending()
                     ]);
-                } catch (e) {
-                    console.warn('[Home] Initial load failed, retrying in 3s:', e);
-                    await new Promise(r => setTimeout(r, 3000));
-                    try {
-                        await Promise.all([
-                            this.renderHomeSongs(),
-                            this.renderHomeAlbums(),
-                            this.renderHomeArtists(),
-                            this.renderHomeTrending()
-                        ]);
-                    } catch (e2) {
-                        console.warn('[Home] Retry also failed:', e2);
-                    }
+                } catch (e2) {
+                    console.warn('[Home] Retry also failed:', e2);
                 }
-            } else {
-                this._renderOfflineDownloads();
             }
 
             if (shell) {
@@ -3230,7 +3236,20 @@ export class UIRenderer {
                 setTimeout(() => shell.remove(), 300);
             }
 
-            if (isOnline()) this._persistHomeCache();
+            this._persistHomeCache();
+        }
+    }
+
+    _applyCachedCovers(container) {
+        if (!container) return;
+        const imgs = container.querySelectorAll('img[data-cover-id]');
+        for (const img of imgs) {
+            const coverId = img.dataset.coverId;
+            if (!coverId) continue;
+            const key = `cover-${String(coverId).replace(/\//g, '-')}`;
+            db.getCachedImage(key).then(blob => {
+                if (blob) img.src = URL.createObjectURL(blob);
+            }).catch(() => {});
         }
     }
 
@@ -3265,7 +3284,10 @@ export class UIRenderer {
         section.innerHTML = '<div class="section-header"><h2>Downloaded Tracks</h2></div><div id="home-offline-tracks" class="track-list"></div>';
         contentEl.appendChild(section);
         const trackList = section.querySelector('#home-offline-tracks');
-        if (trackList) this.renderListWithTracks(trackList, tracks, true);
+        if (trackList) {
+            this.renderListWithTracks(trackList, tracks, true);
+            this._applyCachedCovers(trackList);
+        }
 
         if (albumList.length) {
             const albumSec = document.createElement('div');
@@ -3276,12 +3298,15 @@ export class UIRenderer {
                 const coverUrl = this.api.getCoverUrl(a.cover);
                 grid.insertAdjacentHTML('beforeend',
                     `<a href="/album/${a.id}" class="album-card" data-album-id="${a.id}">` +
-                    `<img src="${coverUrl}" alt="" loading="lazy" onerror="this.src='assets/everywhere.png'">` +
+                    `<img src="${coverUrl}" alt="" loading="lazy" data-cover-id="${a.cover || ''}" onerror="this.src='assets/everywhere.png'">` +
                     `<div class="album-info"><div class="album-title">${a.title || ''}</div>` +
                     `<div class="album-artist">${a.artist || ''}</div></div></a>`);
             }
             contentEl.appendChild(albumSec);
+            this._applyCachedCovers(albumSec);
         }
+
+        this._applyCachedCovers(section);
     }
 
     _bindHomeRefreshButtons() {

@@ -12,6 +12,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
@@ -341,6 +342,7 @@ public class AudioForegroundService extends Service {
             .setContentText(currentArtist)
             .setSubText(currentAlbum)
             .setSmallIcon(R.drawable.ic_notif_music)
+            .setColor(Color.parseColor("#035480"))
             .setContentIntent(contentIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(currentIsPlaying)

@@ -7753,8 +7753,8 @@ img[src=''] {
         aspect-ratio: 1;
     }
 
-    .detail-header-actions .btn-primary span,
-    .detail-header-actions .btn-secondary span {
+    .detail-header-actions .btn-primary > span:last-child,
+    .detail-header-actions .btn-secondary > span:last-child {
         display: none;
     }
 
