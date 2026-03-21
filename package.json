@@ -1,7 +1,7 @@
 {
     "name": "monochrome",
     "type": "module",
-    "version": "1.1.3",
+    "version": "1.1.4",
     "description": "[<img src=\"https://github.com/SamidyFR/monochrome/blob/main/assets/512.png?raw=true\" alt=\"Monochrome Logo\">](https://monochrome.samidy.com)",
     "main": "sw.js",
     "scripts": {

@@ -13,23 +13,24 @@ import { DashDownloader } from './dash-downloader.js';
 
 export const DASH_MANIFEST_UNAVAILABLE_CODE = 'DASH_MANIFEST_UNAVAILABLE';
 
-// Concurrency limiter - prevents hammering the API proxy
-// Max N concurrent requests; extras queue up
 class ConcurrencyLimiter {
-    constructor(maxConcurrent = 4) {
+    constructor(maxConcurrent = 10) {
         this.max = maxConcurrent;
         this.running = 0;
         this.queue = [];
     }
 
-    async acquire() {
+    async acquire(priority = false) {
         if (this.running < this.max) {
             this.running++;
             return;
         }
-        // Wait in queue
         return new Promise((resolve) => {
-            this.queue.push(resolve);
+            if (priority) {
+                this.queue.unshift(resolve);
+            } else {
+                this.queue.push(resolve);
+            }
         });
     }
 
@@ -42,8 +43,8 @@ class ConcurrencyLimiter {
         }
     }
 
-    async run(fn) {
-        await this.acquire();
+    async run(fn, priority = false) {
+        await this.acquire(priority);
         try {
             return await fn();
         } finally {
@@ -52,8 +53,7 @@ class ConcurrencyLimiter {
     }
 }
 
-// Shared limiter across all API instances - max 4 concurrent requests
-const apiLimiter = new ConcurrencyLimiter(4);
+const apiLimiter = new ConcurrencyLimiter(10);
 
 // Network-aware helpers using navigator.connection API
 export const networkInfo = {
@@ -124,11 +124,9 @@ export class LosslessAPI {
     }
 
     async fetchWithRetry(relativePath, options = {}) {
-        // Streaming requests bypass the limiter (they're long-lived audio downloads)
-        if (options.type === 'streaming') {
+        if (options.type === 'streaming' || options.priority) {
             return this._doFetchWithRetry(relativePath, options);
         }
-        // All API requests go through the concurrency limiter
         return apiLimiter.run(() => this._doFetchWithRetry(relativePath, options));
     }
 
@@ -400,7 +398,7 @@ export class LosslessAPI {
         if (cached) return cached;
 
         try {
-            const response = await this.fetchWithRetry(`/search/?s=${encodeURIComponent(query)}`, options);
+            const response = await this.fetchWithRetry(`/search/?s=${encodeURIComponent(query)}`, { ...options, priority: true });
             const data = await response.json();
             const normalized = this.normalizeSearchResponse(data, 'tracks');
             const preparedTracks = normalized.items.map((t) => this.prepareTrack(t));
@@ -424,7 +422,7 @@ export class LosslessAPI {
         if (cached) return cached;
 
         try {
-            const response = await this.fetchWithRetry(`/search/?a=${encodeURIComponent(query)}`, options);
+            const response = await this.fetchWithRetry(`/search/?a=${encodeURIComponent(query)}`, { ...options, priority: true });
             const data = await response.json();
             const normalized = this.normalizeSearchResponse(data, 'artists');
             const result = {
@@ -446,7 +444,7 @@ export class LosslessAPI {
         if (cached) return cached;
 
         try {
-            const response = await this.fetchWithRetry(`/search/?al=${encodeURIComponent(query)}`, options);
+            const response = await this.fetchWithRetry(`/search/?al=${encodeURIComponent(query)}`, { ...options, priority: true });
             const data = await response.json();
             const normalized = this.normalizeSearchResponse(data, 'albums');
             const preparedItems = normalized.items.map((a) => this.prepareAlbum(a));
@@ -469,7 +467,7 @@ export class LosslessAPI {
         if (cached) return cached;
 
         try {
-            const response = await this.fetchWithRetry(`/search/?p=${encodeURIComponent(query)}`, options);
+            const response = await this.fetchWithRetry(`/search/?p=${encodeURIComponent(query)}`, { ...options, priority: true });
             const data = await response.json();
             const normalized = this.normalizeSearchResponse(data, 'playlists');
             const result = {

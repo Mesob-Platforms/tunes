@@ -20,19 +20,9 @@ class OfflineSyncManager {
     }
 
     _setupNetworkListeners() {
-        // Use the unified networkMonitor (works on native + web)
         onNetworkChange((online) => {
             this.isOnline = online;
             if (online) this.syncPendingEvents();
-        });
-
-        // Also listen to browser events as a fallback
-        window.addEventListener('online', () => {
-            this.isOnline = true;
-            this.syncPendingEvents();
-        });
-        window.addEventListener('offline', () => {
-            this.isOnline = false;
         });
     }
 

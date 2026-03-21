@@ -10,6 +10,10 @@ export class APICache {
         this.initDB();
     }
 
+    _effectiveTTL() {
+        return navigator.onLine ? this.ttl : Infinity;
+    }
+
     async initDB() {
         if (typeof indexedDB === 'undefined') return;
 
@@ -40,10 +44,11 @@ export class APICache {
 
     async get(type, params) {
         const key = this.generateKey(type, params);
+        const ttl = this._effectiveTTL();
 
         if (this.memoryCache.has(key)) {
             const cached = this.memoryCache.get(key);
-            if (Date.now() - cached.timestamp < this.ttl) {
+            if (Date.now() - cached.timestamp < ttl) {
                 return cached.data;
             }
             this.memoryCache.delete(key);
@@ -52,7 +57,7 @@ export class APICache {
         if (this.db) {
             try {
                 const cached = await this.getFromIndexedDB(key);
-                if (cached && Date.now() - cached.timestamp < this.ttl) {
+                if (cached && Date.now() - cached.timestamp < ttl) {
                     this.memoryCache.set(key, cached);
                     return cached.data;
                 }

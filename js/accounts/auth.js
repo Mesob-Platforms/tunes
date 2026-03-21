@@ -90,6 +90,13 @@ export class AuthManager {
             this._initialSessionChecked = true;
             this._sessionRestored = true;
 
+            if (!this.user && !isOnline() && this._wasSignedIn()) {
+                const authGate = document.getElementById('auth-gate');
+                if (authGate) authGate.style.display = 'none';
+                this.authListeners.forEach(listener => listener(null));
+                return;
+            }
+
             this._cacheAuthState(!!this.user);
             this.updateUI(this.user);
             this.authListeners.forEach(listener => listener(this.user));
@@ -104,11 +111,16 @@ export class AuthManager {
             }
         });
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             if (!this._initialSessionChecked) return;
 
             this.session = session;
             this.user = this._extractUser(session?.user);
+
+            if (!this.user && !isOnline() && this._wasSignedIn()) {
+                return;
+            }
+
             this._cacheAuthState(!!this.user);
 
             if (this._skipGateHide && this.user) {

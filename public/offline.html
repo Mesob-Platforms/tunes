@@ -20,18 +20,28 @@
             padding: 1.5rem;
             text-align: center;
         }
-        .icon {
-            font-size: 4rem;
-            opacity: 0.4;
-            margin-bottom: 1rem;
-        }
+        .icon { font-size: 4rem; opacity: 0.4; margin-bottom: 1rem; }
         h1 { font-size: 1.35rem; margin: 0 0 0.5rem; font-weight: 700; }
-        p { margin: 0; opacity: 0.6; font-size: 0.95rem; max-width: 280px; }
+        p { margin: 0; opacity: 0.6; font-size: 0.95rem; max-width: 300px; }
+        .btn {
+            margin-top: 1.5rem;
+            padding: 0.75rem 2rem;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 12px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: rgba(255,255,255,0.15); }
     </style>
 </head>
 <body>
     <div class="icon" aria-hidden="true">📶</div>
     <h1>You're offline</h1>
-    <p>Open Tunes again when you're back online to keep listening.</p>
+    <p>You can still listen to your downloaded music. Tap below to open Tunes.</p>
+    <a href="/" class="btn">Open Tunes</a>
 </body>
 </html>

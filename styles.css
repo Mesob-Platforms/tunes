@@ -846,7 +846,7 @@ body:not(.fullscreen-open):not(:has(#side-panel.active)) .mobile-back-btn.inline
     display: flex;
 }
 #pull-to-refresh-indicator.refreshing .ptr-spinner {
-    animation: spin-reload 0.7s linear infinite;
+    animation: spin-reload 1.5s linear infinite;
 }
 #pull-to-refresh-indicator .ptr-spinner {
     opacity: 0.6;
@@ -9294,6 +9294,13 @@ body.native-app::before,
 body.native-app::after { display: none !important; }
 body.native-app { transition: none !important; }
 body.native-app .page.active { animation: none !important; }
+body.native-app .tunes-update-bar,
+body.native-app .update-notification,
+body.native-app #update-notification-bar {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
 
 /* ── Lyrics Fullscreen Overlay ── */
 #lyrics-fullscreen-overlay {
@@ -9512,7 +9519,7 @@ input[type="password"] {
 }
 
 body.app-offline .main-content::before {
-    content: 'Offline mode';
+    content: 'Offline mode — playing downloaded music';
     display: block;
     background: rgba(255, 150, 50, 0.15);
     color: rgba(255, 180, 80, 0.9);
@@ -9521,5 +9528,10 @@ body.app-offline .main-content::before {
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.03em;
+}
+
+body.app-offline #search-input {
+    opacity: 0.4;
+    pointer-events: none;
 }
 

@@ -84,6 +84,7 @@ export class UIRenderer {
         this._homeDataCache = { songs: null, albums: null, artists: null, songsTime: 0, albumsTime: 0, artistsTime: 0 };
         this._homeSessionRefreshed = false;
         this._forceHomeRefresh = false;
+        this._homeRefreshAbort = null;
         this._scrollPositions = {};
         this._currentPageId = null;
         this._activeRootTab = 'home';
@@ -253,8 +254,13 @@ export class UIRenderer {
 
     createTrackItemHTML(track, index, showCover = false, hasMultipleDiscs = false, useTrackNumber = false) {
         const isUnavailable = track.isUnavailable;
+        const coverSrc = track.album?.cover
+            ? this.api.getCoverUrl(track.album.cover)
+            : (track.artist?.picture
+                ? this.api.getArtistPictureUrl(track.artist.picture)
+                : 'assets/everywhere.png');
         const trackImageHTML = showCover
-            ? `<img src="${this.api.getCoverUrl(track.album?.cover)}" alt="Track Cover" class="track-item-cover" loading="lazy" data-cover-id="${track.album?.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'">`
+            ? `<img src="${coverSrc}" alt="Track Cover" class="track-item-cover" loading="lazy" data-cover-id="${track.album?.cover || ''}" onerror="window.__imgErr(this)">`
             : '';
 
         let displayIndex;
@@ -376,8 +382,8 @@ export class UIRenderer {
             id: playlist.uuid,
             href: `/playlist/${playlist.uuid}`,
             title: playlist.title,
-            subtitle: `${playlist.numberOfTracks || 0} tracks`,
-            imageHTML: `<img src="${coverUrl}" alt="${playlist.title}" class="card-image" loading="${loadingAttr}" ${fetchPriority} onerror="this.onerror=null;this.src='assets/everywhere.png'">`,
+            subtitle: `${playlist.numberOfTracks || 0} track${(playlist.numberOfTracks || 0) !== 1 ? 's' : ''}`,
+            imageHTML: `<img src="${coverUrl}" alt="${playlist.title}" class="card-image" loading="${loadingAttr}" ${fetchPriority} onerror="window.__imgErr(this)">`,
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="playlist" title="Add to Liked">
                     ${this.createHeartIcon(false)}
@@ -397,7 +403,7 @@ export class UIRenderer {
             href: `/folder/${folder.id}`,
             title: escapeHtml(folder.name),
             subtitle: `${folder.playlists ? folder.playlists.length : 0} playlists`,
-            imageHTML: `<img src="${imageSrc}" alt="${escapeHtml(folder.name)}" class="card-image" loading="lazy" onerror="this.src='/assets/folder.png'">`,
+            imageHTML: `<img src="${imageSrc}" alt="${escapeHtml(folder.name)}" class="card-image" loading="lazy" onerror="window.__imgErr(this,'assets/folder.png')">`,
             actionButtonsHTML: '',
             isCompact,
         });
@@ -456,7 +462,7 @@ export class UIRenderer {
             } else if (uniqueCovers.length > 0) {
                 imageHTML = `<img src="${this.api.getCoverUrl(uniqueCovers[0])}" alt="${playlist.name}" class="card-image" loading="lazy">`;
             } else {
-                imageHTML = `<img src="/assets/everywhere.png" alt="${playlist.name}" class="card-image" loading="lazy">`;
+                imageHTML = `<img src="assets/everywhere.png" alt="${playlist.name}" class="card-image" loading="lazy">`;
             }
         }
 
@@ -468,7 +474,7 @@ export class UIRenderer {
             id: playlist.id,
             href: `/userplaylist/${playlist.id}`,
             title: escapeHtml(playlist.name),
-            subtitle: `${playlist.tracks ? playlist.tracks.length : playlist.numberOfTracks || 0} tracks`,
+            subtitle: (() => { const c = playlist.tracks ? playlist.tracks.length : playlist.numberOfTracks || 0; return `${c} track${c !== 1 ? 's' : ''}`; })(),
             imageHTML: imageHTML,
             actionButtonsHTML: `
                 <button class="edit-playlist-btn" data-action="edit-playlist" title="Edit Playlist">
@@ -505,7 +511,7 @@ export class UIRenderer {
             href: `/album/${album.id}`,
             title: `${escapeHtml(album.title)} ${explicitBadge} ${qualityBadge}`,
             subtitle: `${escapeHtml(album.artist?.name ?? '')} • ${yearDisplay}${typeLabel}`,
-            imageHTML: `<img src="${this.api.getCoverUrl(album.cover)}" alt="${escapeHtml(album.title)}" class="card-image" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">`,
+            imageHTML: `<img src="${this.api.getCoverUrl(album.cover)}" alt="${escapeHtml(album.title)}" class="card-image" loading="lazy" data-cover-id="${album.cover || ''}" onerror="window.__imgErr(this)">`,
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="album" title="Add to Liked">
                     ${this.createHeartIcon(false)}
@@ -524,7 +530,7 @@ export class UIRenderer {
             href: `/artist/${artist.id}`,
             title: escapeHtml(artist.name),
             subtitle: '',
-            imageHTML: `<img src="${this.api.getArtistPictureUrl(artist.picture)}" alt="${escapeHtml(artist.name)}" class="card-image" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">`,
+            imageHTML: `<img src="${this.api.getArtistPictureUrl(artist.picture)}" alt="${escapeHtml(artist.name)}" class="card-image" loading="lazy" data-cover-id="${artist.picture || ''}" onerror="window.__imgErr(this)">`,
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="artist" title="Add to Liked">
                     ${this.createHeartIcon(false)}
@@ -1625,7 +1631,7 @@ export class UIRenderer {
             case 'playlist':
                 cover = item.picture ? this.api.getCoverUrl(item.picture) : '';
                 title = item.title || 'Playlist';
-                subtitle = `Playlist · ${item.nb_tracks || ''} tracks`;
+                subtitle = `Playlist · ${item.nb_tracks || 0} track${(item.nb_tracks || 0) !== 1 ? 's' : ''}`;
                 dataAttr = `data-playlist-id="${item.uuid}"`;
                 iconFallback = 'queue_music';
                 break;
@@ -1638,7 +1644,7 @@ export class UIRenderer {
                 break;
             case 'userPlaylist':
                 title = item.name || 'My Playlist';
-                subtitle = `Playlist · ${item.tracks?.length || 0} tracks`;
+                subtitle = (() => { const c = item.tracks?.length || 0; return `Playlist · ${c} track${c !== 1 ? 's' : ''}`; })();
                 dataAttr = `data-user-playlist-id="${item.id}"`;
                 iconFallback = 'playlist_add';
                 break;
@@ -1652,7 +1658,7 @@ export class UIRenderer {
 
         const thumbClass = isArtist ? 'library-row-thumb artist-thumb' : 'library-row-thumb';
         const coverHTML = cover
-            ? `<img class="${thumbClass}" src="${cover}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">`
+            ? `<img class="${thumbClass}" src="${cover}" alt="" loading="lazy" onerror="window.__imgErr(this)">`
             : `<div class="library-row-icon library-row-icon--muted"><span class="material-symbols-rounded">${iconFallback}</span></div>`;
 
         return `
@@ -1702,7 +1708,7 @@ export class UIRenderer {
                     const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-album-id="${a.id}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="window.__imgErr(this)">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
                                 <div class="dl-album-card-subtitle">${escapeHtml(a.artist?.name || a.artist || 'Unknown')}${a.releaseDate ? ` • ${a.releaseDate}` : ''}</div>
@@ -1768,7 +1774,7 @@ export class UIRenderer {
                     const coverUrl = (imageId && imageId !== p.uuid) ? this.api.getCoverUrl(imageId, '480') : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-playlist-id="${p.uuid}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="eager" fetchpriority="high" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="eager" fetchpriority="high" onerror="window.__imgErr(this)">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(p.title || 'Unknown Playlist')}</div>
                                 <div class="dl-album-card-subtitle">${p.numberOfTracks || 0} track${(p.numberOfTracks || 0) !== 1 ? 's' : ''}</div>
@@ -1819,7 +1825,7 @@ export class UIRenderer {
                     const trackCount = p.numberOfTracks || (p.tracks ? p.tracks.length : 0);
                     return `
                         <div class="dl-album-card" data-user-playlist-id="${p.id}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="window.__imgErr(this)">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(p.name || 'Unknown Playlist')}</div>
                                 <div class="dl-album-card-subtitle">${trackCount} track${trackCount !== 1 ? 's' : ''}</div>
@@ -2090,7 +2096,7 @@ export class UIRenderer {
                             const coverUrl = cover ? this.api.getCoverUrl(cover) : 'assets/everywhere.png';
                             html += `
                                 <div class="library-row library-row--search-result" data-track-id="${track.id}" data-source="${match.source}">
-                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="window.__imgErr(this)">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(title)}</div>
                                         <div class="library-row-subtitle">${escapeHtml(artist)} · ${match.source}</div>
@@ -2107,7 +2113,7 @@ export class UIRenderer {
                             const albumId = album.id || album.albumId;
                             html += `
                                 <div class="library-row library-row--search-result" data-album-id="${albumId}" data-source="${match.source}">
-                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="window.__imgErr(this)">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(title)}</div>
                                         <div class="library-row-subtitle">${escapeHtml(artist)} · ${match.source}</div>
@@ -2122,10 +2128,10 @@ export class UIRenderer {
                             const coverUrl = this.api.getCoverUrl(cover);
                             html += `
                                 <div class="library-row library-row--search-result" data-playlist-id="${playlist.uuid}" data-source="${match.source}">
-                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                                    <img src="${coverUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover;" onerror="window.__imgErr(this)">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(title)}</div>
-                                        <div class="library-row-subtitle">${playlist.numberOfTracks || 0} tracks · ${match.source}</div>
+                                        <div class="library-row-subtitle">${playlist.numberOfTracks || 0} track${(playlist.numberOfTracks || 0) !== 1 ? 's' : ''} · ${match.source}</div>
                                     </div>
                                     <span class="material-symbols-rounded library-row-chevron">chevron_right</span>
                                 </div>
@@ -2137,10 +2143,10 @@ export class UIRenderer {
                             const pictureUrl = picture ? this.api.getArtistPictureUrl(picture) : 'assets/everywhere.png';
                             html += `
                                 <div class="library-row library-row--search-result" data-artist-id="${artist.id}" data-source="${match.source}">
-                                    <img src="${pictureUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                                    <img src="${pictureUrl}" alt="" class="library-row-icon" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="window.__imgErr(this)">
                                     <div class="library-row-content">
                                         <div class="library-row-title">${escapeHtml(name)}</div>
-                                        <div class="library-row-subtitle">${artist.tracks?.length || 0} tracks · ${match.source}</div>
+                                        <div class="library-row-subtitle">${artist.tracks?.length || 0} track${(artist.tracks?.length || 0) !== 1 ? 's' : ''} · ${match.source}</div>
                                     </div>
                                     <span class="material-symbols-rounded library-row-chevron">chevron_right</span>
                                 </div>
@@ -2451,7 +2457,7 @@ export class UIRenderer {
             const dur = t.duration ? formatTime(t.duration) : '';
             return `
                 <div class="dl-track-item" data-track-id="${t.id}">
-                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" data-cover-id="${t.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                    <img class="dl-track-item-cover" src="${coverUrl}" alt="" loading="lazy" data-cover-id="${t.cover || ''}" onerror="window.__imgErr(this)">
                     <div class="dl-track-item-info">
                         <div class="dl-track-item-title">${escapeHtml(t.title || 'Unknown')}</div>
                         <div class="dl-track-item-meta">
@@ -2555,7 +2561,7 @@ export class UIRenderer {
             const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-album-id="${a.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" data-cover-id="${a.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" data-cover-id="${a.cover || ''}" onerror="window.__imgErr(this)">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(a.title || 'Unknown Album')}</div>
                         <div class="dl-album-card-subtitle">${escapeHtml(a.artist || 'Unknown')} · ${a.count} track${a.count !== 1 ? 's' : ''}</div>
@@ -2609,7 +2615,7 @@ export class UIRenderer {
 
         detailEl.innerHTML = `
             <header class="detail-header" style="padding:1rem var(--content-padding,1rem);">
-                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" data-cover-id="${albumInfo?.cover || ''}" onerror="this.onerror=null;this.src='assets/everywhere.png'" />
+                <img class="detail-header-image" id="dl-album-cover-img" src="${coverUrl}" alt="" data-cover-id="${albumInfo?.cover || ''}" onerror="window.__imgErr(this)" />
                 <div class="detail-header-info">
                     <h1 class="title">${escapeHtml(albumInfo?.title || 'Unknown Album')}</h1>
                     <div class="meta">${sortedTracks.length} track${sortedTracks.length !== 1 ? 's' : ''} · ${formatDuration(totalDuration)}</div>
@@ -2758,7 +2764,7 @@ export class UIRenderer {
 
         container.innerHTML = `<div class="dl-artists-grid">${artists.map((a) => `
                 <div class="dl-artist-card" data-artist-id="${a.id}" data-artist-picture="${a.picture || ''}">
-                    <img class="dl-artist-card-avatar" src="assets/everywhere.png" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                    <img class="dl-artist-card-avatar" src="assets/everywhere.png" alt="" loading="lazy" onerror="window.__imgErr(this)">
                     <div class="dl-artist-card-name">${escapeHtml(a.name || 'Unknown')}</div>
                     <div class="dl-artist-card-count">${a.count} track${a.count !== 1 ? 's' : ''}</div>
                 </div>`
@@ -2830,7 +2836,7 @@ export class UIRenderer {
 
         detailEl.innerHTML = `
             <div class="dl-detail-hero dl-detail-hero--artist">
-                <img class="dl-detail-cover-lg dl-detail-cover--round" id="dl-artist-hero-img" src="assets/everywhere.png" alt="" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                <img class="dl-detail-cover-lg dl-detail-cover--round" id="dl-artist-hero-img" src="assets/everywhere.png" alt="" onerror="window.__imgErr(this)">
                 <div class="dl-detail-hero-title">${escapeHtml(artistInfo?.name || 'Unknown Artist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -2853,7 +2859,7 @@ export class UIRenderer {
                         const dur = t.duration ? formatTime(t.duration) : '';
                         return `
                         <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
-                            <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                            <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="window.__imgErr(this)">
                             <div class="dl-detail-track-info">
                                 <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
                                 <div class="dl-detail-track-meta">
@@ -2891,7 +2897,7 @@ export class UIRenderer {
                     const coverUrl = a.cover ? this.api.getCoverUrl(a.cover) : 'assets/everywhere.png';
                     return `
                         <div class="dl-album-card" data-album-id="${a.id}">
-                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                            <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="window.__imgErr(this)">
                             <div class="dl-album-card-info">
                                 <div class="dl-album-card-title">${escapeHtml(a.title)}</div>
                                 <div class="dl-album-card-subtitle">${a.tracks.length} track${a.tracks.length !== 1 ? 's' : ''}</div>
@@ -2961,7 +2967,7 @@ export class UIRenderer {
             if (!t.playlistId) return;
             const key = String(t.playlistId);
             if (!playlistMap.has(key)) {
-                playlistMap.set(key, { id: t.playlistId, name: t.playlistName || 'Unknown Playlist', cover: t.cover, count: 0 });
+                playlistMap.set(key, { id: t.playlistId, name: t.playlistName || 'Unknown Playlist', cover: t.playlistCover || t.cover, count: 0 });
             }
             playlistMap.get(key).count++;
         });
@@ -2976,7 +2982,7 @@ export class UIRenderer {
             const coverUrl = p.cover ? this.api.getCoverUrl(p.cover) : 'assets/everywhere.png';
             return `
                 <div class="dl-album-card" data-playlist-id="${p.id}">
-                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                    <img class="dl-album-card-cover" src="${coverUrl}" alt="" loading="lazy" onerror="window.__imgErr(this)">
                     <div class="dl-album-card-info">
                         <div class="dl-album-card-title">${escapeHtml(p.name)}</div>
                         <div class="dl-album-card-subtitle">${p.count} track${p.count !== 1 ? 's' : ''}</div>
@@ -3019,7 +3025,7 @@ export class UIRenderer {
                 <span class="dl-detail-nav-title">Downloads</span>
             </div>
             <div class="dl-detail-hero">
-                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                <img class="dl-detail-cover-lg" src="${coverUrl}" alt="" onerror="window.__imgErr(this)">
                 <div class="dl-detail-hero-title">${escapeHtml(playlistInfo?.name || 'Unknown Playlist')}</div>
                 <div class="dl-detail-hero-meta">${tracks.length} track${tracks.length !== 1 ? 's' : ''} saved</div>
                 <div class="dl-detail-actions">
@@ -3037,7 +3043,7 @@ export class UIRenderer {
                     return `
                     <div class="dl-detail-track-item" data-dl-detail-idx="${i}">
                         <span class="dl-track-number">${trackNum}</span>
-                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="this.onerror=null;this.src='assets/everywhere.png'">
+                        <img class="dl-detail-track-cover" src="${cUrl}" alt="" loading="lazy" onerror="window.__imgErr(this)">
                         <div class="dl-detail-track-info">
                             <div class="dl-detail-track-title">${escapeHtml(t.title || 'Unknown')}</div>
                             <div class="dl-detail-track-meta">
@@ -3180,17 +3186,22 @@ export class UIRenderer {
         try { cached = await db.getHomeCache(); } catch {}
 
         if (!isOnline()) {
-            this._renderHomeShortcuts();
-            this._renderHomeRecentlyPlayed();
+            if (cached) {
+                this._renderHomeSectionsFromCache(cached);
+                this._applyCachedCovers(document.getElementById('home-content'));
+            } else {
+                this._renderHomeShortcuts();
+                this._renderHomeRecentlyPlayed();
+            }
             this._renderOfflineDownloads();
             const shell = document.getElementById('app-loading-shell');
             if (shell) shell.remove();
         } else if (cached) {
             this._renderHomeSectionsFromCache(cached);
+            const shell = document.getElementById('app-loading-shell');
+            if (shell) shell.remove();
             this._forceHomeRefresh = false;
-            if (!window.__TUNES_NATIVE__) {
-                this._refreshHomeAndPersistCache();
-            }
+            this._refreshHomeAndPersistCache();
             this._homeSessionRefreshed = true;
         } else {
             const shell = document.getElementById('app-loading-shell');
@@ -3298,7 +3309,7 @@ export class UIRenderer {
                 const coverUrl = this.api.getCoverUrl(a.cover);
                 grid.insertAdjacentHTML('beforeend',
                     `<a href="/album/${a.id}" class="album-card" data-album-id="${a.id}">` +
-                    `<img src="${coverUrl}" alt="" loading="lazy" data-cover-id="${a.cover || ''}" onerror="this.src='assets/everywhere.png'">` +
+                    `<img src="${coverUrl}" alt="" loading="lazy" data-cover-id="${a.cover || ''}" onerror="window.__imgErr(this)">` +
                     `<div class="album-info"><div class="album-title">${a.title || ''}</div>` +
                     `<div class="album-artist">${a.artist || ''}</div></div></a>`);
             }
@@ -3479,11 +3490,50 @@ export class UIRenderer {
                 trendingArtists: this._lastTrendingArtists || null,
             };
             await db.saveHomeCache(data);
+            this._cacheHomeCoverArt(data);
         } catch {}
+    }
+
+    _cacheHomeCoverArt(data) {
+        const urls = new Map();
+        const collectCover = (id) => {
+            if (!id) return;
+            const key = `cover-${String(id).replace(/\//g, '-')}`;
+            if (!urls.has(key)) {
+                urls.set(key, this.api.getCoverUrl(id, '320'));
+            }
+        };
+        const collectArtist = (id) => {
+            if (!id) return;
+            const key = `cover-${String(id).replace(/\//g, '-')}`;
+            if (!urls.has(key)) {
+                urls.set(key, this.api.getArtistPictureUrl(id, '320'));
+            }
+        };
+
+        (data.songs || []).forEach(t => collectCover(t.album?.cover));
+        (data.albums || []).forEach(a => collectCover(a.cover));
+        (data.artists || []).forEach(a => collectArtist(a.picture));
+        (data.trendingAlbums || []).forEach(a => collectCover(a.cover));
+        (data.trendingTracks || []).forEach(t => collectCover(t.album?.cover));
+        (data.trendingArtists || []).forEach(a => collectArtist(a.picture));
+
+        for (const [key, url] of urls) {
+            db.getCachedImage(key).then(existing => {
+                if (existing) return;
+                fetch(url).then(r => r.ok ? r.blob() : null).then(blob => {
+                    if (blob) db.cacheImage(key, blob);
+                }).catch(() => {});
+            }).catch(() => {});
+        }
     }
 
     async _refreshHomeAndPersistCache() {
         if (!isOnline()) return;
+        if (this._homeRefreshAbort) this._homeRefreshAbort.abort();
+        this._homeRefreshAbort = new AbortController();
+        const signal = this._homeRefreshAbort.signal;
+
         this._invalidateHomeDataCache();
         this._renderHomeShortcuts();
         this._renderHomeRecentlyPlayed();
@@ -3494,7 +3544,9 @@ export class UIRenderer {
                 this.renderHomeArtists(true),
                 this.renderHomeTrending()
             ]);
+            if (signal.aborted) return;
         } catch (e) {
+            if (signal.aborted) return;
             console.warn('[Home] Background refresh partially failed:', e);
         }
         this._persistHomeCache();
@@ -3525,6 +3577,18 @@ export class UIRenderer {
         void el.offsetWidth;
         el.classList.add('page-cache-reveal');
         el.addEventListener('animationend', () => el.classList.remove('page-cache-reveal'), { once: true });
+    }
+
+    _showOfflineFallback(pageId) {
+        const page = document.getElementById(`page-${pageId}`);
+        if (!page) return;
+        const container = page.querySelector('.detail-tracklist, .content-section, .page-content') || page;
+        container.innerHTML = `
+            <div style="text-align:center;padding:3rem 1rem;color:rgba(255,255,255,0.5);">
+                <span class="material-symbols-rounded" style="font-size:2.5rem;display:block;margin-bottom:0.5rem;">wifi_off</span>
+                This page isn't available offline.<br>
+                <span style="font-size:0.85rem;margin-top:0.5rem;display:inline-block;">Browse your downloads from the Library tab.</span>
+            </div>`;
     }
 
     async _renderHomeShortcuts(cachedItems) {
@@ -4005,15 +4069,32 @@ export class UIRenderer {
             const trendingArtistNames = (trending.artists || []).filter(a => a.count >= 1).slice(0, 12);
 
             const albumsTask = (async () => {
-                if (trendingAlbumIds.length < 1 || !trendingAlbumsContainer) {
+                if (!trendingAlbumsContainer) {
                     if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
                     return;
                 }
-                trendingAlbumsSection.style.display = '';
-                const albums = (await Promise.all(
-                    trendingAlbumIds.map(t => this.api.getAlbum(t.id).then(d => d?.album || null).catch(() => null))
-                )).filter(Boolean);
+                let albums = [];
+                if (trendingAlbumIds.length > 0) {
+                    albums = (await Promise.all(
+                        trendingAlbumIds.map(t => this.api.getAlbum(t.id).then(d => d?.album || null).catch(() => null))
+                    )).filter(Boolean);
+                }
+                if (albums.length < 3) {
+                    try {
+                        const genres = ['pop', 'hip hop', 'r&b', 'rock', 'afrobeats'];
+                        const results = await Promise.all(genres.map(g => this.api.searchAlbums(g, { limit: 10 }).catch(() => ({ items: [] }))));
+                        const seen = new Set(albums.map(a => a.id));
+                        for (const r of results) {
+                            for (const a of (r.items || [])) {
+                                if (!seen.has(a.id)) { seen.add(a.id); albums.push(a); }
+                                if (albums.length >= 8) break;
+                            }
+                            if (albums.length >= 8) break;
+                        }
+                    } catch {}
+                }
                 if (albums.length > 0) {
+                    trendingAlbumsSection.style.display = '';
                     this._lastTrendingAlbums = albums;
                     trendingAlbumsContainer.classList.toggle('few-items', albums.length <= 3);
                     trendingAlbumsContainer.innerHTML = albums.map(a => this.createAlbumCardHTML(a)).join('');
@@ -4027,16 +4108,33 @@ export class UIRenderer {
             })();
 
             const tracksTask = (async () => {
-                if (trendingTrackIds.length < 1 || !trendingTracksContainer) {
+                if (!trendingTracksContainer) {
                     if (trendingTracksSection) trendingTracksSection.style.display = 'none';
                     return;
                 }
-                trendingTracksSection.style.display = '';
                 const fallback = (t) => t.id && t.title ? { id: t.id, title: t.title, artist: { name: t.artist || 'Unknown Artist' }, album: null, duration: 0 } : null;
-                const tracks = (await Promise.all(
-                    trendingTrackIds.map(t => this.api.getTrackMetadata(t.id).then(m => (m?.title ? m : fallback(t))).catch(() => fallback(t)))
-                )).filter(Boolean);
+                let tracks = [];
+                if (trendingTrackIds.length > 0) {
+                    tracks = (await Promise.all(
+                        trendingTrackIds.map(t => this.api.getTrackMetadata(t.id).then(m => (m?.title ? m : fallback(t))).catch(() => fallback(t)))
+                    )).filter(Boolean);
+                }
+                if (tracks.length < 3) {
+                    try {
+                        const genres = ['pop', 'hip hop', 'r&b', 'rock', 'afrobeats'];
+                        const results = await Promise.all(genres.map(g => this.api.searchTracks(g, { limit: 10 }).catch(() => ({ items: [] }))));
+                        const seen = new Set(tracks.map(t => t.id));
+                        for (const r of results) {
+                            for (const t of (r.items || [])) {
+                                if (!seen.has(t.id)) { seen.add(t.id); tracks.push(t); }
+                                if (tracks.length >= 10) break;
+                            }
+                            if (tracks.length >= 10) break;
+                        }
+                    } catch {}
+                }
                 if (tracks.length > 0) {
+                    trendingTracksSection.style.display = '';
                     this._lastTrendingTracks = tracks;
                     this.renderListWithTracks(trendingTracksContainer, tracks, true);
                 } else {
@@ -4123,12 +4221,29 @@ export class UIRenderer {
     }
 
     async renderSearchPage(query, isLiveTyping = false) {
-        // Only call showPage (which scrolls to top) when first entering the search page
+        if (this._homeRefreshAbort) {
+            this._homeRefreshAbort.abort();
+            this._homeRefreshAbort = null;
+        }
+
         const isAlreadyOnSearch = document.getElementById('page-search')?.classList.contains('active');
         if (!isAlreadyOnSearch) {
             this.showPage('search');
         }
         document.body.classList.add('on-explore-page');
+
+        if (!isOnline() && query) {
+            const allContainer = document.getElementById('search-all-container');
+            if (allContainer) {
+                allContainer.innerHTML = `
+                    <div style="text-align:center;padding:3rem 1rem;color:rgba(255,255,255,0.5);">
+                        <span class="material-symbols-rounded" style="font-size:2.5rem;display:block;margin-bottom:0.5rem;">wifi_off</span>
+                        You're offline. Search requires an internet connection.<br>
+                        <span style="font-size:0.85rem;margin-top:0.5rem;display:inline-block;">Browse your downloads from the Library tab.</span>
+                    </div>`;
+            }
+            return;
+        }
 
         const exploreLanding = document.getElementById('explore-landing');
         const searchResultsTitle = document.getElementById('search-results-title');
@@ -4185,61 +4300,71 @@ export class UIRenderer {
         const signal = this.searchAbortController.signal;
 
         try {
-            // 1) Fire the 4 main searches in parallel
-            const [tracksResult, artistsResult, albumsResult, playlistsResult] = await Promise.all([
-                this.api.searchTracks(query, { signal }),
-                this.api.searchArtists(query, { signal }),
-                this.api.searchAlbums(query, { signal }),
-                this.api.searchPlaylists(query, { signal }),
-            ]);
-
-            if (signal.aborted) return;
-
-            // 2) Collect results into maps for dedup
             const trackMap = new Map();
             const artistMap = new Map();
             const albumMap = new Map();
-
-            for (const t of tracksResult.items) trackMap.set(t.id, t);
-            for (const a of artistsResult.items) artistMap.set(a.id, a);
-            for (const a of albumsResult.items) albumMap.set(a.id, a);
-
-            // Also extract artists/albums from tracks
-            for (const t of tracksResult.items) {
-                if (t.artist && !artistMap.has(t.artist.id)) artistMap.set(t.artist.id, t.artist);
-                if (t.artists) t.artists.forEach(a => { if (a && !artistMap.has(a.id)) artistMap.set(a.id, a); });
-                if (t.album && !albumMap.has(t.album.id)) albumMap.set(t.album.id, t.album);
-            }
-
-            let finalTracks = Array.from(trackMap.values());
-            let finalArtists = Array.from(artistMap.values());
-            let finalAlbums = Array.from(albumMap.values());
-            let finalPlaylists = playlistsResult.items;
-
-            // 3) Sort by raw popularity
-            finalTracks.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-            finalArtists.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-            finalAlbums.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-            finalPlaylists.sort((a, b) => (b.numberOfTracks || 0) - (a.numberOfTracks || 0));
-
-            if (signal.aborted) return;
-
-            // 4) Render results IMMEDIATELY (no waiting for AI during live typing)
-            this._renderSearchResults(tracksContainer, artistsContainer, albumsContainer, playlistsContainer,
-                finalTracks, finalArtists, finalAlbums, finalPlaylists);
+            let finalPlaylists = [];
 
             const _popScore = (item, type) => {
                 return (type === 'playlist') ? (item.numberOfTracks || 0) : (item.popularity || 0);
             };
 
-            // Show "All" tab right away with raw results
+            const tracksPromise = this.api.searchTracks(query, { signal }).then(result => {
+                if (signal.aborted) return;
+                for (const t of result.items) trackMap.set(t.id, t);
+                for (const t of result.items) {
+                    if (t.artist && !artistMap.has(t.artist.id)) artistMap.set(t.artist.id, t.artist);
+                    if (t.artists) t.artists.forEach(a => { if (a && !artistMap.has(a.id)) artistMap.set(a.id, a); });
+                    if (t.album && !albumMap.has(t.album.id)) albumMap.set(t.album.id, t.album);
+                }
+                const sorted = Array.from(trackMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+                this._renderSearchTracks(tracksContainer, sorted);
+                this._populateAllTab(query, _popScore, sorted, Array.from(albumMap.values()), Array.from(artistMap.values()), finalPlaylists, null);
+                return result;
+            });
+
+            const artistsPromise = this.api.searchArtists(query, { signal }).then(result => {
+                if (signal.aborted) return;
+                for (const a of result.items) artistMap.set(a.id, a);
+                const sorted = Array.from(artistMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+                this._renderSearchArtists(artistsContainer, sorted);
+                return result;
+            });
+
+            const albumsPromise = this.api.searchAlbums(query, { signal }).then(result => {
+                if (signal.aborted) return;
+                for (const a of result.items) albumMap.set(a.id, a);
+                const sorted = Array.from(albumMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+                this._renderSearchAlbums(albumsContainer, sorted);
+                return result;
+            });
+
+            const playlistsPromise = this.api.searchPlaylists(query, { signal }).then(result => {
+                if (signal.aborted) return;
+                finalPlaylists = result.items.sort((a, b) => (b.numberOfTracks || 0) - (a.numberOfTracks || 0));
+                this._renderSearchPlaylists(playlistsContainer, finalPlaylists);
+                return result;
+            });
+
+            const [tracksResult, artistsResult, albumsResult, playlistsResult] = await Promise.all([
+                tracksPromise, artistsPromise, albumsPromise, playlistsPromise
+            ]);
+
+            if (signal.aborted) return;
+
+            const finalTracks = Array.from(trackMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            const finalArtists = Array.from(artistMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            const finalAlbums = Array.from(albumMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+
+            this._renderSearchResults(tracksContainer, artistsContainer, albumsContainer, playlistsContainer,
+                finalTracks, finalArtists, finalAlbums, finalPlaylists);
+
             requestAnimationFrame(() => {
                 if (!signal.aborted) {
                     this._populateAllTab(query, _popScore, finalTracks, finalAlbums, finalArtists, finalPlaylists, null);
                 }
             });
 
-            // 5) Always fire AI refinement in the background to improve results
             clearTimeout(this._aiRefinementTimer);
             if (!isLiveTyping) {
                 this._refineSearchWithAI(query, signal, tracksResult, artistsResult, albumsResult, playlistsResult,
@@ -4263,6 +4388,38 @@ export class UIRenderer {
             albumsContainer.innerHTML = errorMsg;
             playlistsContainer.innerHTML = errorMsg;
         }
+    }
+
+    _renderSearchTracks(container, tracks) {
+        if (!tracks.length) return;
+        this.renderListWithTracks(container, tracks, true);
+    }
+
+    _renderSearchArtists(container, artists) {
+        if (!artists.length) return;
+        container.innerHTML = artists.map(a => this.createArtistCardHTML(a)).join('');
+        container.querySelectorAll('[data-artist-id]').forEach(el => {
+            const artist = artists.find(a => String(a.id) === el.dataset.artistId);
+            if (artist) { trackDataStore.set(el, artist); this.updateLikeState(el, 'artist', artist.id); }
+        });
+    }
+
+    _renderSearchAlbums(container, albums) {
+        if (!albums.length) return;
+        container.innerHTML = albums.map(a => this.createAlbumCardHTML(a)).join('');
+        container.querySelectorAll('[data-album-id]').forEach(el => {
+            const album = albums.find(a => String(a.id) === el.dataset.albumId);
+            if (album) { trackDataStore.set(el, album); this.updateLikeState(el, 'album', album.id); }
+        });
+    }
+
+    _renderSearchPlaylists(container, playlists) {
+        if (!playlists.length) return;
+        container.innerHTML = playlists.map(p => this.createPlaylistCardHTML(p, true)).join('');
+        container.querySelectorAll('[data-playlist-id]').forEach(el => {
+            const playlist = playlists.find(p => String(p.uuid) === el.dataset.playlistId);
+            if (playlist) { trackDataStore.set(el, playlist); this.updateLikeState(el, 'playlist', playlist.uuid); }
+        });
     }
 
     // Renders search results into the tab containers
@@ -4614,6 +4771,11 @@ export class UIRenderer {
         const cachedResult = await this._getPageDataFromCache(cacheKey);
         if (cachedResult) this._applyCacheReveal('album');
 
+        if (!isOnline() && !cachedResult) {
+            this._showOfflineFallback('album');
+            return;
+        }
+
         const imageEl = document.getElementById('album-detail-image');
         const titleEl = document.getElementById('album-detail-title');
         const metaEl = document.getElementById('album-detail-meta');
@@ -4690,7 +4852,7 @@ export class UIRenderer {
             const firstCopyright = tracks.find((track) => track.copyright)?.copyright;
 
             metaEl.innerHTML =
-                (dateDisplay ? `${dateDisplay} • ` : '') + `${tracks.length} tracks • ${formatDuration(totalDuration)}`;
+                (dateDisplay ? `${dateDisplay} • ` : '') + `${tracks.length} track${tracks.length !== 1 ? 's' : ''} • ${formatDuration(totalDuration)}`;
 
             prodEl.innerHTML =
                 `By <a href="/artist/${album.artist.id}">${album.artist.name}</a>` +
@@ -4896,7 +5058,7 @@ export class UIRenderer {
                                             const metaEl = document.getElementById('playlist-detail-meta');
                                             if (metaEl) {
                                                 const totalDuration = calculateTotalDuration(updatedPlaylist.tracks);
-                                                metaEl.textContent = `${updatedPlaylist.tracks.length} tracks • ${formatDuration(totalDuration)}`;
+                                                metaEl.textContent = `${updatedPlaylist.tracks.length} track${updatedPlaylist.tracks.length !== 1 ? 's' : ''} • ${formatDuration(totalDuration)}`;
                                             }
                                         }
 
@@ -4935,6 +5097,11 @@ export class UIRenderer {
         const isUUIDCheck = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(playlistId);
         const cachedResult = (source !== 'user' && !isUUIDCheck) ? await this._getPageDataFromCache(cacheKey) : null;
         if (cachedResult) this._applyCacheReveal('playlist');
+
+        if (!isOnline() && !cachedResult) {
+            this._showOfflineFallback('playlist');
+            return;
+        }
 
         // Reset search input for new playlist
         const searchInput = document.getElementById('track-list-search-input');
@@ -5005,7 +5172,7 @@ export class UIRenderer {
                 const tracks = playlistData.tracks || [];
                 const totalDuration = calculateTotalDuration(tracks);
 
-                metaEl.textContent = `${tracks.length} tracks • ${formatDuration(totalDuration)}`;
+                metaEl.textContent = `${tracks.length} track${tracks.length !== 1 ? 's' : ''} • ${formatDuration(totalDuration)}`;
                 descEl.textContent = playlistData.description || '';
 
                 const originalTracks = [...tracks];
@@ -5148,7 +5315,7 @@ export class UIRenderer {
 
                 const totalDuration = calculateTotalDuration(tracks);
 
-                metaEl.textContent = `${playlist.numberOfTracks} tracks • ${formatDuration(totalDuration)}`;
+                metaEl.textContent = `${playlist.numberOfTracks} track${playlist.numberOfTracks !== 1 ? 's' : ''} • ${formatDuration(totalDuration)}`;
                 descEl.textContent = playlist.description || '';
 
                 const originalTracks = [...tracks];
@@ -5232,9 +5399,10 @@ export class UIRenderer {
             const folder = await db.getFolder(folderId);
             if (!folder) throw new Error('Folder not found');
 
-            imageEl.src = folder.cover || '/assets/folder.png';
+            imageEl.src = folder.cover || 'assets/folder.png';
             imageEl.onerror = () => {
-                imageEl.src = '/assets/folder.png';
+                imageEl.onerror = null;
+                imageEl.src = 'assets/folder.png';
             };
             imageEl.style.backgroundColor = '';
 
@@ -5273,6 +5441,11 @@ export class UIRenderer {
         const cacheKey = `mix-${mixId}`;
         const cachedResult = await this._getPageDataFromCache(cacheKey);
         if (cachedResult) this._applyCacheReveal('mix');
+
+        if (!isOnline() && !cachedResult) {
+            this._showOfflineFallback('mix');
+            return;
+        }
 
         const imageEl = document.getElementById('mix-detail-image');
         const titleEl = document.getElementById('mix-detail-title');
@@ -5338,7 +5511,7 @@ export class UIRenderer {
             this.adjustTitleFontSize(titleEl, displayTitle);
 
             const totalDuration = calculateTotalDuration(tracks);
-            metaEl.textContent = `${tracks.length} tracks • ${formatDuration(totalDuration)}`;
+            metaEl.textContent = `${tracks.length} track${tracks.length !== 1 ? 's' : ''} • ${formatDuration(totalDuration)}`;
             descEl.innerHTML = `${mix.subTitle}`;
 
             tracklistContainer.innerHTML = `
@@ -5382,6 +5555,11 @@ export class UIRenderer {
         const cacheKey = `artist-${artistId}`;
         const cachedResult = await this._getPageDataFromCache(cacheKey);
         if (cachedResult) this._applyCacheReveal('artist');
+
+        if (!isOnline() && !cachedResult) {
+            this._showOfflineFallback('artist');
+            return;
+        }
 
         const imageEl = document.getElementById('artist-detail-image');
         const nameEl = document.getElementById('artist-detail-name');

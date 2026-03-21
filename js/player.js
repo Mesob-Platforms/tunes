@@ -280,6 +280,8 @@ export class Player {
     }
 
     async preloadNextTracks() {
+        if (!isOnline()) return;
+
         if (this.preloadAbortController) {
             this.preloadAbortController.abort();
         }
@@ -319,13 +321,22 @@ export class Player {
         }
     }
 
+    _stopCurrentPlayback() {
+        if (!this.audio.paused) this.audio.pause();
+        this.audio.currentTime = 0;
+        if (this.dashInitialized) {
+            this.dashPlayer.reset();
+            this.dashInitialized = false;
+        }
+    }
+
     async playTrackFromQueue(startTime = 0, recursiveCount = 0) {
         const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
         if (this.currentQueueIndex < 0 || this.currentQueueIndex >= currentQueue.length) {
             return;
         }
 
-        if (!this.audio.paused) this.audio.pause();
+        this._stopCurrentPlayback();
 
         this._playGeneration = (this._playGeneration || 0) + 1;
         const gen = this._playGeneration;

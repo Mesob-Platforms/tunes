@@ -63,8 +63,6 @@ dependencies {
     // SwipeRefreshLayout for native pull-to-refresh
     implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"
 
-    // Palette — extract dominant colors from album art for widget/notification
-    implementation "androidx.palette:palette:1.0.0"
 
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

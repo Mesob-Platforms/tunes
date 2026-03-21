@@ -189,19 +189,34 @@ window.addEventListener('unhandledrejection', (e) => {
     }
 });
 
-if (!isNative) {
-    window.addEventListener('online', () => {
+onNetworkChange((online) => {
+    if (online) {
         document.body.classList.remove('app-offline');
-        showNotification('Back online');
-    });
-    window.addEventListener('offline', () => {
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.disabled = false;
+            searchInput.placeholder = 'Search for tracks, artists, albums...';
+        }
+    } else {
         document.body.classList.add('app-offline');
         showNotification('You\'re offline — playing downloaded music only');
-    });
-}
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.disabled = true;
+            searchInput.placeholder = 'Search available when online';
+        }
+    }
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
-    if (!isNative && !isOnline()) document.body.classList.add('app-offline');
+    if (!isOnline()) {
+        document.body.classList.add('app-offline');
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.disabled = true;
+            searchInput.placeholder = 'Search available when online';
+        }
+    }
 
     const _killShell = () => {
         const s = document.getElementById('app-loading-shell');
@@ -1894,7 +1909,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         navigate(`/search/${encodeURIComponent(query)}`);
         const historyEl = document.getElementById('search-history');
         if (historyEl) historyEl.style.display = 'none';
-    }, 750);
+    }, 300);
 
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value.trim();
@@ -2009,24 +2024,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await handleRouteChange();
 
-    if (isNative && window.NativeBridge && isOnline()) {
-        window.NativeBridge.call('startRefreshing').catch(() => {});
-        window.__tunesRefs.pullRefresh().catch(() => {});
+    // Deferred version check — web only (APK can't self-update via CDN)
+    if (!isNative) {
+        setTimeout(() => {
+            const localTs = typeof __BUILD_TIMESTAMP__ !== 'undefined' ? __BUILD_TIMESTAMP__ : null;
+            if (!localTs) return;
+            fetch('https://tunes-app.pages.dev/version.json', { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(remote => {
+                    if (remote && remote.buildTimestamp && remote.buildTimestamp !== localTs && Number(remote.buildTimestamp) > Number(localTs)) {
+                        showNotification('A new version of Tunes is available. Update for the best experience!');
+                    }
+                })
+                .catch(() => {});
+        }, 8000);
     }
-
-    // Deferred version check — runs 8s after boot so it never blocks startup
-    setTimeout(() => {
-        const localTs = typeof __BUILD_TIMESTAMP__ !== 'undefined' ? __BUILD_TIMESTAMP__ : null;
-        if (!localTs) return;
-        fetch('https://tunes-app.pages.dev/version.json', { cache: 'no-store' })
-            .then(r => r.ok ? r.json() : null)
-            .then(remote => {
-                if (remote && remote.buildTimestamp && remote.buildTimestamp !== localTs && Number(remote.buildTimestamp) > Number(localTs)) {
-                    showNotification('A new version of Tunes is available. Update for the best experience!');
-                }
-            })
-            .catch(() => {});
-    }, 8000);
 
     window.addEventListener('popstate', handleRouteChange);
 
@@ -2221,12 +2233,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // ── Check for updates & announcements ──
-    _initUpdateNotificationBar();
-    _initAnnouncementBanners();
+    // ── Check for updates & announcements (web only — APK can't self-update) ──
+    if (!isNative) {
+        _initUpdateNotificationBar();
+        _initAnnouncementBanners();
+    }
 });
 
 function _refreshUpdatesAndAnnouncements() {
+    if (isNative) return;
     try { _initUpdateNotificationBar(); } catch {}
     try { _initAnnouncementBanners(); } catch {}
 }

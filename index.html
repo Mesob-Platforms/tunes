@@ -29,6 +29,19 @@
         <link rel="preload" href="/instances.json" as="fetch" />
         <link rel="stylesheet" href="/styles.css" />
         <script>
+        window.__imgProxy = function(url) {
+            if (!url || url.startsWith('assets/') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+            return 'https://tunes-music-app.naolmideksa.workers.dev/api/image-proxy?url=' + encodeURIComponent(url);
+        };
+        window.__imgErr = function(img, fallback) {
+            if (!img.dataset.retried) {
+                img.dataset.retried = '1';
+                var proxied = window.__imgProxy(img.getAttribute('src'));
+                if (proxied !== img.getAttribute('src')) { img.src = proxied; return; }
+            }
+            img.onerror = null;
+            img.src = fallback || 'assets/everywhere.png';
+        };
         (function() {
             if (!window.TunesBridge) return;
             window.__TUNES_NATIVE__ = true;
@@ -1383,12 +1396,6 @@
                                         </svg>
                                     </button>
                                     <div class="detail-more-dropdown">
-                                        <button id="download-playlist-dropdown-btn">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                                            </svg>
-                                            <span>Download</span>
-                                        </button>
                                     </div>
                                 </div>
                             </div>

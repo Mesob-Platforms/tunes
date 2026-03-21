@@ -37,12 +37,11 @@ function _saveCatalog(catalog) {
  * Record a successfully-downloaded track in the local catalog so the
  * "Downloaded" library section can display it.
  */
-export function catalogDownloadedTrack(track) {
+export function catalogDownloadedTrack(track, collectionInfo = null) {
     if (!track || !track.id) return;
     const catalog = _getCatalog();
-    // avoid duplicates
     if (catalog.some(t => String(t.id) === String(track.id))) return;
-    catalog.push({
+    const entry = {
         id:        track.id,
         title:     track.title || '',
         artist:    track.artist?.name || (track.artists?.[0]?.name) || '',
@@ -54,9 +53,14 @@ export function catalogDownloadedTrack(track) {
         duration:  track.duration || 0,
         trackNumber: track.trackNumber || null,
         discNumber: track.discNumber || null,
-        artistPicture: track.artist?.picture || (track.artists?.[0]?.picture) || null,
         downloadedAt: Date.now(),
-    });
+    };
+    if (collectionInfo) {
+        if (collectionInfo.playlistId) entry.playlistId = collectionInfo.playlistId;
+        if (collectionInfo.playlistName) entry.playlistName = collectionInfo.playlistName;
+        if (collectionInfo.playlistCover) entry.playlistCover = collectionInfo.playlistCover;
+    }
+    catalog.push(entry);
     _saveCatalog(catalog);
 }
 
@@ -77,6 +81,13 @@ export function removeAlbumFromDownloadedCatalog(albumId) {
     const catalog = _getCatalog();
     const removed = catalog.filter(t => String(t.albumId) === String(albumId));
     _saveCatalog(catalog.filter(t => String(t.albumId) !== String(albumId)));
+    return removed;
+}
+
+export function removePlaylistFromDownloadedCatalog(playlistId) {
+    const catalog = _getCatalog();
+    const removed = catalog.filter(t => String(t.playlistId) === String(playlistId));
+    _saveCatalog(catalog.filter(t => String(t.playlistId) !== String(playlistId)));
     return removed;
 }
 
@@ -402,7 +413,7 @@ function triggerDownload(blob, filename) {
     URL.revokeObjectURL(url);
 }
 
-async function bulkDownloadSequentially(tracks, api, quality, lyricsManager, notification) {
+async function bulkDownloadSequentially(tracks, api, quality, lyricsManager, notification, collectionInfo = null) {
     const { abortController } = bulkDownloadTasks.get(notification);
     const signal = abortController.signal;
 
@@ -416,7 +427,7 @@ async function bulkDownloadSequentially(tracks, api, quality, lyricsManager, not
         try {
             const { blob } = await downloadTrackBlob(track, quality, api, null, signal);
             await db.cacheTrackBlob(track.id, blob);
-            catalogDownloadedTrack(track);
+            catalogDownloadedTrack(track, collectionInfo);
 
             // Cache lyrics for offline access
             if (lyricsManager) {
@@ -730,10 +741,18 @@ async function startBulkDownload(
     const firstCover = tracks.find(t => t.album?.cover)?.album?.cover;
     if (firstCover && api.getCoverUrl) _updateGlowColor(api.getCoverUrl(firstCover));
 
+    let collectionInfo = null;
+    if (type === 'playlist' && metadata) {
+        const coverFallback = tracks.find(t => t.album?.cover)?.album?.cover || null;
+        collectionInfo = {
+            playlistId: metadata.uuid || metadata.id || null,
+            playlistName: metadata.title || metadata.name || name || null,
+            playlistCover: metadata.squareImage || metadata.image || metadata.cover || coverFallback,
+        };
+    }
+
     try {
-        // Always cache tracks in IndexedDB for in-app offline playback
-        // (no external file downloads – all stays inside the app)
-        await bulkDownloadSequentially(tracks, api, quality, lyricsManager, notification);
+        await bulkDownloadSequentially(tracks, api, quality, lyricsManager, notification, collectionInfo);
         completeBulkDownload(notification, true);
     } catch (error) {
         console.error('Bulk download failed:', error);
@@ -905,6 +924,7 @@ export async function downloadTrackWithMetadata(track, quality, api, lyricsManag
         showNotification('This track is already being downloaded');
         return;
     }
+    ongoingDownloads.add(downloadKey);
 
     let enrichedTrack = {
         ...track,
@@ -928,7 +948,6 @@ export async function downloadTrackWithMetadata(track, quality, api, lyricsManag
     const filename = buildTrackFilename(enrichedTrack, quality);
 
     const controller = abortController || new AbortController();
-    ongoingDownloads.add(downloadKey);
 
     try {
         addDownloadTask(track.id, enrichedTrack, filename, api, controller);

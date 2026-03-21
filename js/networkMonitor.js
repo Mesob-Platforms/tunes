@@ -163,10 +163,6 @@ export async function checkAndClearStaleCache() {
             // 1. Clear API response cache (IndexedDB)
             await _clearIndexedDBCache('api_cache');
 
-            // 1b. Clear stale homepage HTML cache
-            await _clearObjectStore('MonochromeDB', 'home_cache');
-            await _clearObjectStore('MonochromeDB', 'page_cache');
-
             // 2. Clear Service Worker runtime caches (if any)
             if ('caches' in window) {
                 const keys = await caches.keys();

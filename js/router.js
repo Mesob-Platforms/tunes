@@ -1,6 +1,7 @@
 //router.js
 import { getTrackArtists } from './utils.js';
 import { isNative } from './platform.js';
+import { isOnline } from './networkMonitor.js';
 
 export function navigate(path) {
     if (path === window.location.pathname) {
@@ -15,7 +16,12 @@ export function createRouter(ui) {
     const router = async () => {
         const { authManager } = window.__tunesRefs || {};
         if (!isNative && authManager && authManager._sessionRestored && !authManager.user) {
-            return;
+            const wasSignedIn = localStorage.getItem('tunes_was_signed_in') === 'true';
+            if (!isOnline() && wasSignedIn) {
+                /* allow offline navigation for previously authenticated users */
+            } else {
+                return;
+            }
         }
 
         if (window.location.hash && window.location.hash.length > 1) {

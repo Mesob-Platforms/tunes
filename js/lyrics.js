@@ -26,12 +26,27 @@ const SHADOW_OVERRIDE_CSS = `
         transition: opacity 2.5s ease, color 2.5s ease !important;
     }
 
+    /* Keep all lines the same size — active line differs by color/glow only */
+    .lyrics-line {
+        font-size: inherit !important;
+    }
+    .lyrics-line.active {
+        font-size: inherit !important;
+    }
+
     /* Disable scale transform on active line — keeps glow/color, kills size jump */
     .lyrics-line-container {
         transform: none !important;
+        transition: transform 0.15s ease-out !important;
     }
     .lyrics-line.active .lyrics-line-container {
         transform: none !important;
+    }
+
+    /* Snappy scroll to active line */
+    .lyrics-container {
+        scroll-behavior: smooth;
+        transition: scroll-position 0.15s ease-out;
     }
 ` + (IS_NATIVE ? `
     /* Native: kill expensive per-line blur, use opacity dimming only */

@@ -7,7 +7,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
+
 import android.graphics.Color;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
@@ -270,14 +270,6 @@ public class TunesActivity extends AppCompatActivity {
         try {
             startForegroundService(serviceIntent);
 
-            SharedPreferences prefs = getSharedPreferences(TunesWidget.PREFS_NAME, MODE_PRIVATE);
-            prefs.edit()
-                .putString("title", args.optString("title", ""))
-                .putString("artist", args.optString("artist", ""))
-                .putString("albumArt", args.optString("albumArt", ""))
-                .putBoolean("isPlaying", args.optBoolean("isPlaying", false))
-                .apply();
-            TunesWidget.triggerUpdate(this);
         } catch (Exception e) {
             Log.e(TAG, "Failed to start foreground service", e);
         }
