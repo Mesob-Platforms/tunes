@@ -1,5 +1,12 @@
-# Dependencies (regenerated via npm install)
+# Dependencies
 node_modules/
+
+# Build outputs
+dist/
+android/app/src/main/assets/public/
+
+# APK artifacts
+*.apk
 
 # IDE / Editor
 .cursor/
@@ -13,8 +20,12 @@ Desktop.ini
 # Wrangler local state
 .wrangler/
 
-# Android build caches (machine-specific)
+# Android build caches
 android/.gradle/
 android/app/build/
 android/build/
 android/local.properties
+
+# Sensitive files
+SHA1_FOR_GOOGLE.txt
+*.jks
