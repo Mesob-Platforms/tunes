@@ -834,10 +834,11 @@ export class MusicDatabase {
         const entry = await this.performTransaction('home_cache', 'readonly', (store) => store.get('home_content'));
         if (!entry) return null;
         const age = Date.now() - entry.timestamp;
-        const ttl = 7 * 24 * 60 * 60 * 1000; // 7 days — stale is fine, background refresh replaces it
+        const ttl = 7 * 24 * 60 * 60 * 1000; // Soft TTL only; keep stale cache for offline resilience.
         if (age > ttl) {
-            await this.performTransaction('home_cache', 'readwrite', (store) => store.delete('home_content'));
-            return null;
+            // Do not delete home cache automatically. We prefer stale-but-usable content
+            // over an empty homepage when refresh fails or network is unstable.
+            return entry.data;
         }
         return entry.data;
     }

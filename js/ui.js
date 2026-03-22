@@ -3336,18 +3336,7 @@ export class UIRenderer {
     }
 
     async _refreshHomeInBackground() {
-        this._invalidateHomeDataCache();
-        this._renderHomeShortcuts();
-        try {
-            await Promise.all([
-                this.renderHomeSongs(true),
-                this.renderHomeAlbums(true),
-                this.renderHomeArtists(true),
-                this.renderHomeTrending()
-            ]);
-        } catch (e) {
-            console.warn('[Home] Background refresh partially failed:', e);
-        }
+        await this._refreshHomeAndPersistCache();
     }
 
     _invalidateHomeDataCache() {
@@ -3424,6 +3413,7 @@ export class UIRenderer {
             const c = document.getElementById('home-trending-albums');
             if (sec && c) {
                 sec.style.display = '';
+                this._lastTrendingAlbums = cached.trendingAlbums;
                 c.classList.toggle('few-items', cached.trendingAlbums.length <= 3);
                 c.innerHTML = cached.trendingAlbums.map(a => this.createAlbumCardHTML(a)).join('');
                 cached.trendingAlbums.forEach(a => {
@@ -3438,6 +3428,7 @@ export class UIRenderer {
             const c = document.getElementById('home-trending-tracks');
             if (sec && c) {
                 sec.style.display = '';
+                this._lastTrendingTracks = cached.trendingTracks;
                 this.renderListWithTracks(c, cached.trendingTracks, true);
             }
         }
@@ -3447,6 +3438,7 @@ export class UIRenderer {
             const c = document.getElementById('home-trending-artists');
             if (sec && c) {
                 sec.style.display = '';
+                this._lastTrendingArtists = cached.trendingArtists;
                 c.classList.toggle('few-items', cached.trendingArtists.length <= 3);
                 c.innerHTML = cached.trendingArtists.map(a => this.createArtistCardHTML(a)).join('');
                 cached.trendingArtists.forEach(a => {
@@ -4092,6 +4084,39 @@ export class UIRenderer {
 
         if (!trendingAlbumsSection || !trendingTracksSection) return;
 
+        const renderAlbumsFromCache = () => {
+            if (!trendingAlbumsSection || !trendingAlbumsContainer || !this._lastTrendingAlbums?.length) return false;
+            const albums = this._lastTrendingAlbums;
+            trendingAlbumsSection.style.display = '';
+            trendingAlbumsContainer.classList.toggle('few-items', albums.length <= 3);
+            trendingAlbumsContainer.innerHTML = albums.map(a => this.createAlbumCardHTML(a)).join('');
+            albums.forEach(a => {
+                const el = trendingAlbumsContainer.querySelector(`[data-album-id="${a.id}"]`);
+                if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
+            });
+            return true;
+        };
+
+        const renderTracksFromCache = () => {
+            if (!trendingTracksSection || !trendingTracksContainer || !this._lastTrendingTracks?.length) return false;
+            trendingTracksSection.style.display = '';
+            this.renderListWithTracks(trendingTracksContainer, this._lastTrendingTracks, true);
+            return true;
+        };
+
+        const renderArtistsFromCache = () => {
+            if (!trendingArtistsSection || !trendingArtistsContainer || !this._lastTrendingArtists?.length) return false;
+            const artists = this._lastTrendingArtists;
+            trendingArtistsSection.style.display = '';
+            trendingArtistsContainer.classList.toggle('few-items', artists.length <= 3);
+            trendingArtistsContainer.innerHTML = artists.map(a => this.createArtistCardHTML(a)).join('');
+            artists.forEach(a => {
+                const el = trendingArtistsContainer.querySelector(`[data-artist-id="${a.id}"]`);
+                if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
+            });
+            return true;
+        };
+
         try {
             const trending = await syncManager.getGlobalTrending(15);
             const trendingAlbumIds = (trending.albums || []).filter(a => a.count >= 1).slice(0, 12);
@@ -4133,7 +4158,7 @@ export class UIRenderer {
                         if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
                     });
                 } else {
-                    trendingAlbumsSection.style.display = 'none';
+                    if (!renderAlbumsFromCache()) trendingAlbumsSection.style.display = 'none';
                 }
             })();
 
@@ -4168,7 +4193,7 @@ export class UIRenderer {
                     this._lastTrendingTracks = tracks;
                     this.renderListWithTracks(trendingTracksContainer, tracks, true);
                 } else {
-                    trendingTracksSection.style.display = 'none';
+                    if (!renderTracksFromCache()) trendingTracksSection.style.display = 'none';
                 }
             })();
 
@@ -4192,16 +4217,16 @@ export class UIRenderer {
                         if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
                     });
                 } else {
-                    trendingArtistsSection.style.display = 'none';
+                    if (!renderArtistsFromCache()) trendingArtistsSection.style.display = 'none';
                 }
             })();
 
             await Promise.all([albumsTask, tracksTask, artistsTask]);
         } catch (e) {
             console.error('Failed to load trending data:', e);
-            if (trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
-            if (trendingTracksSection) trendingTracksSection.style.display = 'none';
-            if (trendingArtistsSection) trendingArtistsSection.style.display = 'none';
+            if (!renderAlbumsFromCache() && trendingAlbumsSection) trendingAlbumsSection.style.display = 'none';
+            if (!renderTracksFromCache() && trendingTracksSection) trendingTracksSection.style.display = 'none';
+            if (!renderArtistsFromCache() && trendingArtistsSection) trendingArtistsSection.style.display = 'none';
         }
     }
 
