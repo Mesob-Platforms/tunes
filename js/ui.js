@@ -3219,26 +3219,29 @@ export class UIRenderer {
 
             this._renderHomeShortcuts();
             this._renderHomeRecentlyPlayed();
-            try {
-                await Promise.all([
+            const runInitialLoad = async () => {
+                const results = await Promise.allSettled([
                     this.renderHomeSongs(),
                     this.renderHomeAlbums(),
                     this.renderHomeArtists(),
                     this.renderHomeTrending()
                 ]);
-            } catch (e) {
-                console.warn('[Home] Initial load failed, retrying in 3s:', e);
-                await new Promise(r => setTimeout(r, 3000));
-                try {
-                    await Promise.all([
-                        this.renderHomeSongs(),
-                        this.renderHomeAlbums(),
-                        this.renderHomeArtists(),
-                        this.renderHomeTrending()
-                    ]);
-                } catch (e2) {
-                    console.warn('[Home] Retry also failed:', e2);
+                return results.some((r) => r.status === 'fulfilled');
+            };
+
+            let homeLoadSucceeded = false;
+            try {
+                homeLoadSucceeded = await runInitialLoad();
+                if (!homeLoadSucceeded) {
+                    console.warn('[Home] Initial load failed, retrying in 3s');
+                    await new Promise(r => setTimeout(r, 3000));
+                    homeLoadSucceeded = await runInitialLoad();
+                    if (!homeLoadSucceeded) {
+                        console.warn('[Home] Retry also failed');
+                    }
                 }
+            } catch (e) {
+                console.warn('[Home] Initial load threw unexpectedly:', e);
             }
 
             if (shell) {
@@ -3247,7 +3250,9 @@ export class UIRenderer {
                 setTimeout(() => shell.remove(), 300);
             }
 
-            this._persistHomeCache();
+            if (homeLoadSucceeded) {
+                this._persistHomeCache();
+            }
         }
     }
 
@@ -3366,18 +3371,21 @@ export class UIRenderer {
 
         if (cached.songs?.length) {
             const c = document.getElementById('home-recommended-songs');
-            const s = c?.closest('.content-section');
+            const s = c?.closest('.home-section') || document.getElementById('home-songs-section');
             if (c) {
                 if (s) s.style.display = '';
                 this._homeDataCache.songs = cached.songs;
                 this._homeDataCache.songsTime = Date.now();
                 this.renderListWithTracks(c, cached.songs, true);
             }
+        } else {
+            const s = document.getElementById('home-songs-section');
+            if (s) s.style.display = 'none';
         }
 
         if (cached.albums?.length) {
             const c = document.getElementById('home-recommended-albums');
-            const s = c?.closest('.content-section');
+            const s = c?.closest('.home-section') || document.getElementById('home-albums-section');
             if (c) {
                 if (s) s.style.display = '';
                 this._homeDataCache.albums = cached.albums;
@@ -3388,6 +3396,9 @@ export class UIRenderer {
                     if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'album', a.id); }
                 });
             }
+        } else {
+            const s = document.getElementById('home-albums-section');
+            if (s) s.style.display = 'none';
         }
 
         if (cached.artists?.length) {
@@ -3403,6 +3414,9 @@ export class UIRenderer {
                     if (el) { trackDataStore.set(el, a); this.updateLikeState(el, 'artist', a.id); }
                 });
             }
+        } else {
+            const s = document.getElementById('home-artists-section');
+            if (s) s.style.display = 'none';
         }
 
         if (cached.trendingAlbums?.length) {
@@ -3489,6 +3503,17 @@ export class UIRenderer {
                 trendingTracks: this._lastTrendingTracks || null,
                 trendingArtists: this._lastTrendingArtists || null,
             };
+            const hasContent = !!(
+                data.songs?.length ||
+                data.albums?.length ||
+                data.artists?.length ||
+                data.shortcuts?.length ||
+                data.recentlyPlayed?.length ||
+                data.trendingAlbums?.length ||
+                data.trendingTracks?.length ||
+                data.trendingArtists?.length
+            );
+            if (!hasContent) return;
             await db.saveHomeCache(data);
             this._cacheHomeCoverArt(data);
         } catch {}
@@ -3534,7 +3559,6 @@ export class UIRenderer {
         this._homeRefreshAbort = new AbortController();
         const signal = this._homeRefreshAbort.signal;
 
-        this._invalidateHomeDataCache();
         this._renderHomeShortcuts();
         this._renderHomeRecentlyPlayed();
         try {
@@ -3729,7 +3753,7 @@ export class UIRenderer {
 
     async renderHomeSongs(forceRefresh = false) {
         const songsContainer = document.getElementById('home-recommended-songs');
-        const section = songsContainer?.closest('.content-section');
+        const section = songsContainer?.closest('.home-section') || document.getElementById('home-songs-section');
 
         if (!homePageSettings.shouldShowRecommendedSongs()) {
             if (section) section.style.display = 'none';
@@ -3773,11 +3797,13 @@ export class UIRenderer {
                             this._homeDataCache.songsTime = Date.now();
                             this.renderListWithTracks(songsContainer, topSongs, true);
                         } else {
-                            songsContainer.innerHTML = createPlaceholder('No songs found.');
+                            const canReplace = !forceRefresh || songsContainer.children.length === 0 || !!songsContainer.querySelector('.skeleton');
+                            if (canReplace) songsContainer.innerHTML = createPlaceholder('No songs found.');
                         }
                     } catch (e) {
                         console.error('Failed to load Billboard songs:', e);
-                        songsContainer.innerHTML = createPlaceholder('Failed to load songs.');
+                        const canReplace = !forceRefresh || songsContainer.children.length === 0 || !!songsContainer.querySelector('.skeleton');
+                        if (canReplace) songsContainer.innerHTML = createPlaceholder('Failed to load songs.');
                     }
                     return;
                 }
@@ -3796,14 +3822,15 @@ export class UIRenderer {
                 }
             } catch (e) {
                 console.error(e);
-                songsContainer.innerHTML = createPlaceholder('Failed to load song recommendations.');
+                const canReplace = !forceRefresh || songsContainer.children.length === 0 || !!songsContainer.querySelector('.skeleton');
+                if (canReplace) songsContainer.innerHTML = createPlaceholder('Failed to load song recommendations.');
             }
         }
     }
 
     async renderHomeAlbums(forceRefresh = false) {
         const albumsContainer = document.getElementById('home-recommended-albums');
-        const section = albumsContainer?.closest('.content-section');
+        const section = albumsContainer?.closest('.home-section') || document.getElementById('home-albums-section');
 
         if (!homePageSettings.shouldShowRecommendedAlbums()) {
             if (section) section.style.display = 'none';
@@ -3861,11 +3888,13 @@ export class UIRenderer {
                                 }
                             });
                         } else {
-                            albumsContainer.innerHTML = `<div style="grid-column: 1/-1; padding: 2rem 0;">${createPlaceholder('No albums found.')}</div>`;
+                            const canReplace = !forceRefresh || albumsContainer.children.length === 0 || !!albumsContainer.querySelector('.skeleton');
+                            if (canReplace) albumsContainer.innerHTML = `<div style="grid-column: 1/-1; padding: 2rem 0;">${createPlaceholder('No albums found.')}</div>`;
                         }
                     } catch (e) {
                         console.error('Failed to load Billboard albums:', e);
-                        albumsContainer.innerHTML = createPlaceholder('Failed to load albums.');
+                        const canReplace = !forceRefresh || albumsContainer.children.length === 0 || !!albumsContainer.querySelector('.skeleton');
+                        if (canReplace) albumsContainer.innerHTML = createPlaceholder('Failed to load albums.');
                     }
                     return;
                 }
@@ -3937,7 +3966,8 @@ export class UIRenderer {
                 }
             } catch (e) {
                 console.error(e);
-                albumsContainer.innerHTML = createPlaceholder('Failed to load album recommendations.');
+                const canReplace = !forceRefresh || albumsContainer.children.length === 0 || !!albumsContainer.querySelector('.skeleton');
+                if (canReplace) albumsContainer.innerHTML = createPlaceholder('Failed to load album recommendations.');
             }
         }
     }

@@ -21,7 +21,7 @@ export default defineConfig({
     base: './',
     define: {
         '__BUILD_TIMESTAMP__': JSON.stringify(buildTimestamp),
-        '__APP_VERSION__': JSON.stringify('1.1.4'),
+        '__APP_VERSION__': JSON.stringify('1.1.5'),
     },
     build: {
         outDir: 'dist',

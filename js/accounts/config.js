@@ -21,7 +21,12 @@ const GOOGLE_ANDROID_CLIENT_ID = '917537000667-uji450r9mdj0a9vkjh7m8h66q519cht3.
 let supabase = null;
 
 try {
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: true,
+        },
+    });
     console.log('Supabase client initialized');
 } catch (error) {
     console.error('Error initializing Supabase:', error);

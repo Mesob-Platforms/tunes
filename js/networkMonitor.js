@@ -273,6 +273,7 @@ function _clearStaleLocalStorage() {
         'volume',
         'queue',
         'player',
+        'tunes_was_signed_in',
     ];
 
     const keysToRemove = [];

@@ -197,6 +197,11 @@ onNetworkChange((online) => {
             searchInput.disabled = false;
             searchInput.placeholder = 'Search for tracks, artists, albums...';
         }
+        if (supabase?.auth?.refreshSession) {
+            supabase.auth.refreshSession().catch((err) => {
+                console.warn('[Auth] refreshSession failed after reconnect:', err);
+            });
+        }
     } else {
         document.body.classList.add('app-offline');
         showNotification('You\'re offline — playing downloaded music only');
@@ -230,7 +235,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ]);
 
     // ── Unified network monitoring (Capacitor Network on native, browser events on web) ──
-    initNetworkMonitor();
+    await initNetworkMonitor();
 
     const api = new LosslessAPI(apiSettings);
 

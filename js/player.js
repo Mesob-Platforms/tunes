@@ -410,22 +410,43 @@ export class Player {
         this.updateMediaSessionPlaybackState();
 
         const isOffline = !isOnline();
+        let cachedBlob = null;
         try {
-            const cachedBlob = await db.getCachedTrackBlob(track.id);
-            if (gen !== this._playGeneration) return;
-            if (cachedBlob) {
-                if (this.dashInitialized) {
-                    this.dashPlayer.reset();
-                    this.dashInitialized = false;
-                }
-                const blobUrl = URL.createObjectURL(cachedBlob);
+            cachedBlob = await db.getCachedTrackBlob(track.id);
+        } catch (cacheErr) {
+            console.warn('Cache lookup failed:', cacheErr);
+        }
+
+        if (gen !== this._playGeneration) return;
+        if (cachedBlob) {
+            if (this.dashInitialized) {
+                this.dashPlayer.reset();
+                this.dashInitialized = false;
+            }
+
+            let blobUrl = URL.createObjectURL(cachedBlob);
+            try {
                 await this._setSourceAndPlay(blobUrl, startTime);
                 if (gen !== this._playGeneration) return;
                 this.preloadNextTracks();
                 return;
+            } catch (playErr) {
+                console.warn('Cached playback failed, retrying once:', playErr);
+                URL.revokeObjectURL(blobUrl);
+                blobUrl = URL.createObjectURL(cachedBlob);
+                try {
+                    await this._setSourceAndPlay(blobUrl, startTime);
+                    if (gen !== this._playGeneration) return;
+                    this.preloadNextTracks();
+                    return;
+                } catch (retryErr) {
+                    console.error('Cached playback retry failed:', retryErr);
+                    URL.revokeObjectURL(blobUrl);
+                    const { showNotification } = await import('./downloads.js');
+                    showNotification('Playback error — try re-downloading this track');
+                    return;
+                }
             }
-        } catch (cacheErr) {
-            console.warn('Cache lookup failed:', cacheErr);
         }
 
         if (isOffline) {

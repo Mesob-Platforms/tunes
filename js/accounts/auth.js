@@ -1,7 +1,6 @@
 // js/accounts/auth.js
 import { supabase, isAdminEmail, GOOGLE_WEB_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID } from './config.js';
 import { isNative } from '../platform.js';
-import { isOnline } from '../networkMonitor.js';
 
 // Helper: show an inline message in the gate
 function showGateMessage(elementId, text, type = 'error') {
@@ -90,14 +89,16 @@ export class AuthManager {
             this._initialSessionChecked = true;
             this._sessionRestored = true;
 
-            if (!this.user && !isOnline() && this._wasSignedIn()) {
+            if (!this.user && this._wasSignedIn()) {
                 const authGate = document.getElementById('auth-gate');
                 if (authGate) authGate.style.display = 'none';
                 this.authListeners.forEach(listener => listener(null));
                 return;
             }
 
-            this._cacheAuthState(!!this.user);
+            if (this.user) {
+                this._cacheAuthState(true);
+            }
             this.updateUI(this.user);
             this.authListeners.forEach(listener => listener(this.user));
         }).catch(() => {
@@ -117,11 +118,13 @@ export class AuthManager {
             this.session = session;
             this.user = this._extractUser(session?.user);
 
-            if (!this.user && !isOnline() && this._wasSignedIn()) {
+            if (!this.user && this._wasSignedIn()) {
                 return;
             }
 
-            this._cacheAuthState(!!this.user);
+            if (this.user) {
+                this._cacheAuthState(true);
+            }
 
             if (this._skipGateHide && this.user) {
                 this.authListeners.forEach(listener => listener(this.user));
@@ -351,7 +354,7 @@ export class AuthManager {
             if (user) {
                 authGate.style.display = 'none';
             } else if (this._sessionRestored) {
-                if (!isOnline() && this._wasSignedIn()) {
+                if (this._wasSignedIn()) {
                     authGate.style.display = 'none';
                 } else {
                     authGate.style.display = 'flex';
