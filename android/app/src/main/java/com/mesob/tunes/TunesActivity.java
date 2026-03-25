@@ -106,13 +106,14 @@ public class TunesActivity extends AppCompatActivity {
         ws.setAllowFileAccessFromFileURLs(true);
         ws.setAllowUniversalAccessFromFileURLs(true);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+        ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
         ws.setTextZoom(100);
         ws.setUseWideViewPort(false);
         ws.setLoadWithOverviewMode(false);
         ws.setSupportZoom(false);
         ws.setBuiltInZoomControls(false);
 
+        webView.clearCache(true);
         webView.setBackgroundColor(Color.BLACK);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
