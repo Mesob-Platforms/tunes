@@ -23,7 +23,7 @@ let supabase = null;
 try {
     supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
-            autoRefreshToken: false,
+            autoRefreshToken: true,
             persistSession: true,
         },
     });

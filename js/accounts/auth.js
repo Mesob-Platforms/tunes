@@ -59,6 +59,17 @@ export class AuthManager {
         return localStorage.getItem('tunes_was_signed_in') === 'true';
     }
 
+    _hasAnyPriorSession() {
+        if (this._wasSignedIn()) return true;
+        if (isNative) {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('sb-')) return true;
+            }
+        }
+        return false;
+    }
+
     _cacheAuthState(signedIn) {
         if (signedIn) {
             localStorage.setItem('tunes_was_signed_in', 'true');
@@ -89,7 +100,7 @@ export class AuthManager {
             this._initialSessionChecked = true;
             this._sessionRestored = true;
 
-            if (!this.user && this._wasSignedIn()) {
+            if (!this.user && this._hasAnyPriorSession()) {
                 const authGate = document.getElementById('auth-gate');
                 if (authGate) authGate.style.display = 'none';
                 this.authListeners.forEach(listener => listener(null));
@@ -104,7 +115,7 @@ export class AuthManager {
         }).catch(() => {
             this._initialSessionChecked = true;
             this._sessionRestored = true;
-            if (this._wasSignedIn()) {
+            if (this._hasAnyPriorSession()) {
                 const authGate = document.getElementById('auth-gate');
                 if (authGate) authGate.style.display = 'none';
             } else {
@@ -118,7 +129,7 @@ export class AuthManager {
             this.session = session;
             this.user = this._extractUser(session?.user);
 
-            if (!this.user && this._wasSignedIn()) {
+            if (!this.user && this._hasAnyPriorSession()) {
                 return;
             }
 
@@ -354,7 +365,7 @@ export class AuthManager {
             if (user) {
                 authGate.style.display = 'none';
             } else if (this._sessionRestored) {
-                if (this._wasSignedIn()) {
+                if (this._hasAnyPriorSession()) {
                     authGate.style.display = 'none';
                 } else {
                     authGate.style.display = 'flex';

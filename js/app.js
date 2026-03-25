@@ -268,7 +268,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const path = window.location.pathname;
             if (path === '/' || path === '/home' || path.endsWith('index.html')) {
-                ui._invalidateHomeDataCache?.();
                 await ui._refreshHomeAndPersistCache?.();
                 _refreshUpdatesAndAnnouncements();
             } else if (path.startsWith('/search/') || path === '/search' || path === '/explore') {
@@ -393,7 +392,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             ui._forceHomeRefresh = true;
             const path = window.location.pathname;
             if (path === '/' || path === '/home' || path.endsWith('index.html')) {
-                ui._invalidateHomeDataCache?.();
                 ui._refreshHomeAndPersistCache?.();
                 _refreshUpdatesAndAnnouncements();
             }
@@ -759,8 +757,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (ui) {
                             if (path === '/' || path === '/home') {
                                 ui._pageHtmlCache?.delete('home');
-                                ui._invalidateHomeDataCache?.();
-                                try { const { db } = await import('./db.js'); await db.open(); await db.performTransaction('home_cache', 'readwrite', (s) => s.clear()); } catch {}
+                                ui._forceHomeRefresh = true;
                                 await ui.renderHomePage();
                                 _refreshUpdatesAndAnnouncements();
                             } else if (path.startsWith('/search/') || path === '/search' || path === '/explore') {

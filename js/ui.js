@@ -3182,8 +3182,7 @@ export class UIRenderer {
 
         this._bindHomeRefreshButtons();
 
-        let cached = null;
-        try { cached = await db.getHomeCache(); } catch {}
+        const cached = this._readHomeSnapshot();
 
         if (!isOnline()) {
             if (cached) {
@@ -3201,8 +3200,9 @@ export class UIRenderer {
             const shell = document.getElementById('app-loading-shell');
             if (shell) shell.remove();
             this._forceHomeRefresh = false;
-            this._refreshHomeAndPersistCache();
-            this._homeSessionRefreshed = true;
+            this._refreshHomeAndPersistCache().then(() => {
+                this._homeSessionRefreshed = true;
+            });
         } else {
             const shell = document.getElementById('app-loading-shell');
             if (shell) {
@@ -3483,6 +3483,25 @@ export class UIRenderer {
         });
     }
 
+    _readHomeSnapshot() {
+        try {
+            return JSON.parse(localStorage.getItem('tunes-home-snapshot') || 'null');
+        } catch { return null; }
+    }
+
+    _saveHomeSnapshot(data) {
+        const existing = this._readHomeSnapshot() || {};
+        const merged = { ...existing };
+        for (const [k, v] of Object.entries(data)) {
+            if (Array.isArray(v) && v.length > 0) {
+                merged[k] = v;
+            }
+        }
+        try {
+            localStorage.setItem('tunes-home-snapshot', JSON.stringify(merged));
+        } catch { /* quota -- keep existing */ }
+    }
+
     async _persistHomeCache() {
         try {
             const data = {
@@ -3495,18 +3514,7 @@ export class UIRenderer {
                 trendingTracks: this._lastTrendingTracks || null,
                 trendingArtists: this._lastTrendingArtists || null,
             };
-            const hasContent = !!(
-                data.songs?.length ||
-                data.albums?.length ||
-                data.artists?.length ||
-                data.shortcuts?.length ||
-                data.recentlyPlayed?.length ||
-                data.trendingAlbums?.length ||
-                data.trendingTracks?.length ||
-                data.trendingArtists?.length
-            );
-            if (!hasContent) return;
-            await db.saveHomeCache(data);
+            this._saveHomeSnapshot(data);
             this._cacheHomeCoverArt(data);
         } catch {}
     }
@@ -3763,7 +3771,8 @@ export class UIRenderer {
                 return;
             }
 
-            if (songsContainer.children.length === 0) {
+            const songsHasReal = songsContainer.children.length > 0 && !songsContainer.querySelector('.skeleton');
+            if (!songsHasReal && songsContainer.children.length === 0) {
                 songsContainer.innerHTML = this.createSkeletonTracks(5, true);
             }
 
@@ -3845,7 +3854,8 @@ export class UIRenderer {
                 return;
             }
 
-            if (albumsContainer.children.length === 0) {
+            const albumsHasReal = albumsContainer.children.length > 0 && !albumsContainer.querySelector('.skeleton');
+            if (!albumsHasReal && albumsContainer.children.length === 0) {
                 albumsContainer.innerHTML = this.createSkeletonScrollCards(6, false);
             }
 
@@ -3951,9 +3961,14 @@ export class UIRenderer {
                                     this.updateLikeState(el, 'album', a.id);
                                 }
                             });
+                        } else if (!albumsHasReal) {
+                            if (section) section.style.display = 'none';
                         }
                     } catch (e) {
                         console.warn('Fallback popular albums also failed:', e);
+                        if (!albumsHasReal) {
+                            if (section) section.style.display = 'none';
+                        }
                     }
                 }
             } catch (e) {
