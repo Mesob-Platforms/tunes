@@ -17,6 +17,7 @@ import { sidePanelManager } from './side-panel.js';
 import { isLyricsOpen, closeLyricsFullscreen } from './lyrics.js';
 import { downloadQualitySettings } from './storage.js';
 import { showNotification } from './downloads.js';
+import { getCurrentPath } from './router.js';
 
 export function initializeUIInteractions(player, api, ui) {
     const sidebar = document.querySelector('.sidebar');
@@ -413,7 +414,7 @@ export function initializeUIInteractions(player, api, ui) {
             e.preventDefault();
             folderPage.classList.remove('drag-over-folder-page');
             const playlistId = e.dataTransfer.getData('text/playlist-id');
-            const folderId = window.location.pathname.split('/')[2];
+            const folderId = getCurrentPath().split('/')[2];
             if (playlistId && folderId) {
                 const { db } = await import('./db.js');
                 const { syncManager } = await import('./accounts/supabaseSync.js');
@@ -562,7 +563,7 @@ export function initializeUIInteractions(player, api, ui) {
     document.querySelectorAll('.bottom-nav a, #sidebar-nav a').forEach(link => {
         link.addEventListener('click', (e) => {
             const href = link.getAttribute('href');
-            const isActive = window.location.hash === href || window.location.pathname === href;
+            const isActive = window.location.hash === href || getCurrentPath() === href;
             if (isActive) {
                 e.preventDefault();
                 const mainContent = document.getElementById('main-content');
