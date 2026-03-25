@@ -16,9 +16,8 @@ export function createRouter(ui) {
     const router = async () => {
         const { authManager } = window.__tunesRefs || {};
         if (!isNative && authManager && authManager._sessionRestored && !authManager.user) {
-            const wasSignedIn = localStorage.getItem('tunes_was_signed_in') === 'true';
-            if (!isOnline() && wasSignedIn) {
-                /* allow offline navigation for previously authenticated users */
+            if (authManager._hasAnyPriorSession?.() || localStorage.getItem('tunes_was_signed_in') === 'true') {
+                /* allow navigation for previously authenticated users */
             } else {
                 return;
             }

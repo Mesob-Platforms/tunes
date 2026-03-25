@@ -64,7 +64,12 @@ export class AuthManager {
         if (isNative) {
             for (let i = 0; i < localStorage.length; i++) {
                 const k = localStorage.key(i);
-                if (k && k.startsWith('sb-')) return true;
+                if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+                    try {
+                        const val = JSON.parse(localStorage.getItem(k));
+                        if (val?.user) return true;
+                    } catch {}
+                }
             }
         }
         return false;
