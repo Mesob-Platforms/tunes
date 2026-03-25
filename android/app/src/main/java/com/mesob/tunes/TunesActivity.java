@@ -120,7 +120,24 @@ public class TunesActivity extends AppCompatActivity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                try {
+                    // Mark runtime as native as early as possible so JS boots in native mode.
+                    view.evaluateJavascript("window.__TUNES_NATIVE__ = true;", null);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to inject __TUNES_NATIVE__ onPageStarted", e);
+                }
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
+                try {
+                    // Reinforce native flag in case early injection raced initial script execution.
+                    view.evaluateJavascript("window.__TUNES_NATIVE__ = true;", null);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to inject __TUNES_NATIVE__ onPageFinished", e);
+                }
                 bridgeReady = true;
                 Log.i(TAG, "Page loaded, bridge ready: " + url);
             }
