@@ -190,7 +190,7 @@ public class TunesActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl("file:///android_asset/index.html");
+        webView.loadUrl("file:///android_asset/index.html?native=1");
 
         handleIntent(getIntent());
     }
