@@ -17,7 +17,7 @@ import {
 import { crossfadeSettings } from './storage.js';
 import { showNotification, downloadTrackWithMetadata, downloadAlbumAsZip, downloadPlaylistAsZip } from './downloads.js';
 import { downloadQualitySettings } from './storage.js';
-import { updateTabTitle, navigate, getCurrentPath } from './router.js';
+import { updateTabTitle, navigate } from './router.js';
 import { db } from './db.js';
 import { syncManager } from './accounts/supabaseSync.js';
 import { audioContextManager } from './audio-context.js';
@@ -1202,7 +1202,7 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
 
             // If no item from element (e.g. header buttons), try to get from hash
             if (!item && action === 'toggle-like') {
-                const id = getCurrentPath().split('/')[2];
+                const id = window.location.pathname.split('/')[2];
                 if (id) {
                     try {
                         if (type === 'album') {
@@ -1323,7 +1323,8 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
             if (href) {
                 if (e.target.closest('a')) return;
                 e.preventDefault();
-                try { navigate(href); } catch {}
+
+                navigate(href);
             }
         }
     });

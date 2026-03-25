@@ -4,7 +4,7 @@ import { apiSettings, themeManager, downloadQualitySettings, sidebarSettings } f
 import { UIRenderer } from './ui.js';
 import { Player } from './player.js';
 import { LyricsManager, openLyricsFullscreen, closeLyricsFullscreen, isLyricsOpen, updateLyricsTrack, initLyricsOverlayGestures } from './lyrics.js';
-import { createRouter, updateTabTitle, navigate, getCurrentPath } from './router.js';
+import { createRouter, updateTabTitle, navigate } from './router.js';
 import { initializePlayerEvents, initializeTrackInteractions, handleTrackAction } from './events.js';
 import { initializeUIInteractions } from './ui-interactions.js';
 import { debounce, SVG_PLAY, showConfirmDialog, copyToClipboard, openExternalUrl } from './utils.js';
@@ -266,7 +266,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
         try {
-            const path = getCurrentPath();
+            const path = window.location.pathname;
             if (path === '/' || path === '/home' || path.endsWith('index.html')) {
                 await ui._refreshHomeAndPersistCache?.();
                 _refreshUpdatesAndAnnouncements();
@@ -390,7 +390,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.NativeBridge.on('appResumed', () => {
             if (!isOnline()) return;
             ui._forceHomeRefresh = true;
-            const path = getCurrentPath();
+            const path = window.location.pathname;
             if (path === '/' || path === '/home' || path.endsWith('index.html')) {
                 ui._refreshHomeAndPersistCache?.();
                 _refreshUpdatesAndAnnouncements();
@@ -752,7 +752,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     indicator.classList.add('refreshing');
                     indicator.style.height = '40px';
                     try {
-                        const path = getCurrentPath();
+                        const path = window.location.pathname;
                         const ui = window.__tunesRefs?.ui;
                         if (ui) {
                             if (path === '/' || path === '/home') {
@@ -1082,7 +1082,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#play-album-btn');
             if (btn.disabled) return;
 
-            const pathParts = getCurrentPath().split('/');
+            const pathParts = window.location.pathname.split('/');
             const albumIndex = pathParts.indexOf('album');
             const albumId = albumIndex !== -1 ? pathParts[albumIndex + 1] : null;
 
@@ -1116,7 +1116,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#shuffle-album-btn');
             if (btn.disabled) return;
 
-            const pathParts = getCurrentPath().split('/');
+            const pathParts = window.location.pathname.split('/');
             const albumIndex = pathParts.indexOf('album');
             const albumId = albumIndex !== -1 ? pathParts[albumIndex + 1] : null;
 
@@ -1150,7 +1150,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#download-mix-btn');
             if (btn.disabled) return;
 
-            const mixId = getCurrentPath().split('/')[2];
+            const mixId = window.location.pathname.split('/')[2];
             if (!mixId) return;
 
             btn.disabled = true;
@@ -1175,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#download-playlist-btn');
             if (btn.disabled) return;
 
-            const playlistId = getCurrentPath().split('/')[2];
+            const playlistId = window.location.pathname.split('/')[2];
             if (!playlistId) return;
 
             btn.disabled = true;
@@ -1254,7 +1254,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (e.target.closest('#delete-folder-btn')) {
-            const folderId = getCurrentPath().split('/')[2];
+            const folderId = window.location.pathname.split('/')[2];
             if (folderId && await showConfirmDialog('Delete folder?', 'This cannot be undone.')) {
                 await db.deleteFolder(folderId);
                 navigate('/library');
@@ -1292,7 +1292,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             syncManager.syncUserPlaylist(playlist, 'update');
                             ui.renderLibraryPage();
                             // Also update current page if we are on it
-                            if (getCurrentPath() === `/userplaylist/${editingId}`) {
+                            if (window.location.pathname === `/userplaylist/${editingId}`) {
                                 ui.renderPlaylistPage(editingId, 'user');
                             }
                             modal.classList.remove('active');
@@ -1425,7 +1425,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Delete button removed from library grid - only available on detail page
 
         if (e.target.closest('#edit-playlist-btn')) {
-            const playlistId = getCurrentPath().split('/')[2];
+            const playlistId = window.location.pathname.split('/')[2];
             db.getPlaylist(playlistId).then((playlist) => {
                 if (playlist) {
                     const modal = document.getElementById('playlist-modal');
@@ -1453,7 +1453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (e.target.closest('#delete-playlist-btn')) {
-            const playlistId = getCurrentPath().split('/')[2];
+            const playlistId = window.location.pathname.split('/')[2];
             const deleteModal = document.getElementById('delete-playlist-modal');
             if (deleteModal && playlistId) {
                 deleteModal.classList.add('active');
@@ -1511,7 +1511,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target.closest('.remove-from-playlist-btn')) {
             e.stopPropagation();
             const btn = e.target.closest('.remove-from-playlist-btn');
-            const playlistId = getCurrentPath().split('/')[2];
+            const playlistId = window.location.pathname.split('/')[2];
 
             db.getPlaylist(playlistId).then(async (playlist) => {
                 let trackId = null;
@@ -1541,7 +1541,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#play-playlist-btn');
             if (btn.disabled) return;
 
-            const playlistId = getCurrentPath().split('/')[2];
+            const playlistId = window.location.pathname.split('/')[2];
             if (!playlistId) return;
 
             try {
@@ -1578,7 +1578,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#download-album-btn');
             if (btn.disabled) return;
 
-            const albumId = getCurrentPath().split('/')[2];
+            const albumId = window.location.pathname.split('/')[2];
             if (!albumId) return;
 
             btn.disabled = true;
@@ -1603,7 +1603,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#add-album-to-playlist-btn');
             if (btn.disabled) return;
 
-            const albumId = getCurrentPath().split('/')[2];
+            const albumId = window.location.pathname.split('/')[2];
             if (!albumId) return;
 
             try {
@@ -1700,7 +1700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#play-artist-radio-btn');
             if (btn.disabled) return;
 
-            const artistId = getCurrentPath().split('/')[2];
+            const artistId = window.location.pathname.split('/')[2];
             if (!artistId) return;
 
             btn.disabled = true;
@@ -1818,7 +1818,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('#download-discography-btn');
             if (btn.disabled) return;
 
-            const artistId = getCurrentPath().split('/')[2];
+            const artistId = window.location.pathname.split('/')[2];
             if (!artistId) return;
 
             try {
@@ -1967,17 +1967,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             const { offlineSync } = await import('./offlineSync.js');
             offlineSync.syncPendingEvents();
             if (_authInitDone && isNative && window.NativeBridge && isOnline()) {
-                const path = getCurrentPath();
+                const path = window.location.pathname;
                 if (path === '/' || path === '/home' || path.endsWith('index.html')) {
-                    try { window.NativeBridge.call('startRefreshing'); } catch {}
-                    const _spinnerSafety = setTimeout(() => {
-                        try { window.NativeBridge.call('refreshDone'); } catch {}
-                    }, 8000);
-                    try {
-                        await window.__tunesRefs.pullRefresh();
-                    } catch {} finally {
-                        clearTimeout(_spinnerSafety);
-                    }
+                    try { await window.NativeBridge.call('startRefreshing'); } catch {}
+                    try { await window.__tunesRefs.pullRefresh(); } catch {}
                 }
             }
         }
@@ -2014,7 +2007,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             showNotification('Press back again to exit');
             setTimeout(() => {
                 if (history.state && history.state.exitTrap) {
-                    try { history.pushState({ app: true }, '', getCurrentPath()); } catch {}
+                    history.pushState({ app: true }, '', window.location.pathname);
                 }
             }, 2000);
             return;
@@ -2078,24 +2071,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateTabTitle(player);
     });
 
-    // PWA Update Logic — web only (APK bundles its own assets and must not auto-reload)
-    if (!isNative) {
-        const updateSW = registerSW({
-            onNeedRefresh() {
-                console.log('[PWA] New version detected — reloading');
-                updateSW(true);
-            },
-            onOfflineReady() {
-                console.log('[PWA] App ready to work offline');
-            },
-        });
+    // PWA Update Logic — auto-reload so deployed changes reach users immediately
+    const updateSW = registerSW({
+        onNeedRefresh() {
+            console.log('[PWA] New version detected — reloading');
+            updateSW(true);
+        },
+        onOfflineReady() {
+            console.log('[PWA] App ready to work offline');
+        },
+    });
 
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                console.log('[PWA] New service worker activated — reloading');
-                window.location.reload();
-            });
-        }
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('[PWA] New service worker activated — reloading');
+            window.location.reload();
+        });
     }
 
     document.getElementById('show-shortcuts-btn')?.addEventListener('click', () => {
@@ -2104,7 +2095,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Listener for Supabase Sync updates
     window.addEventListener('library-changed', () => {
-        const path = getCurrentPath();
+        const path = window.location.pathname;
         if (path === '/library') {
             ui.renderLibraryPage();
         } else if (path === '/' || path === '/home') {
@@ -2119,7 +2110,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
     window.addEventListener('history-changed', () => {
-        const path = getCurrentPath();
+        const path = window.location.pathname;
         if (path === '/recent') {
             ui.renderRecentPage();
         }

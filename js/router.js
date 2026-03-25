@@ -3,28 +3,12 @@ import { getTrackArtists } from './utils.js';
 import { isNative } from './platform.js';
 import { isOnline } from './networkMonitor.js';
 
-let _currentRoute = null;
-
-/**
- * On native (file:// protocol), pushState may silently fail or throw.
- * _currentRoute tracks the intended path independently of the actual URL,
- * so the router always knows which page the user navigated to.
- */
-export function getCurrentPath() {
-    return _currentRoute || window.location.pathname;
-}
-
 export function navigate(path) {
-    if (path === getCurrentPath()) {
+    if (path === window.location.pathname) {
         window.dispatchEvent(new PopStateEvent('popstate'));
         return;
     }
-    _currentRoute = path;
-    try {
-        window.history.pushState({}, '', path);
-    } catch (e) {
-        // pushState can throw SecurityError on file:// (opaque origin)
-    }
+    window.history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
@@ -43,12 +27,11 @@ export function createRouter(ui) {
             const hash = window.location.hash.substring(1);
             if (hash.includes('/')) {
                 const newPath = hash.startsWith('/') ? hash : '/' + hash;
-                _currentRoute = newPath;
-                try { window.history.replaceState(null, '', newPath); } catch {}
+                window.history.replaceState(null, '', newPath);
             }
         }
 
-        let path = getCurrentPath();
+        let path = window.location.pathname;
 
         if (path.startsWith('/')) path = path.substring(1);
         if (path.endsWith('/')) path = path.substring(0, path.length - 1);
@@ -79,16 +62,14 @@ export function createRouter(ui) {
                     await ui.renderMixPage(param);
                     break;
                 case 'track':
-                    _currentRoute = '/';
-                    try { window.history.replaceState(null, '', '/'); } catch {}
+                    window.history.replaceState(null, '', '/');
                     await ui.renderHomePage();
                     break;
                 case 'library':
                     await ui.renderLibraryPage();
                     break;
                 case 'recent':
-                    _currentRoute = '/library';
-                    try { window.history.replaceState(null, '', '/library'); } catch {}
+                    window.history.replaceState(null, '', '/library');
                     await ui.renderLibraryPage();
                     break;
                 case 'wrapped':
@@ -129,7 +110,7 @@ export function updateTabTitle(player) {
         const track = player.currentTrack;
         document.title = `${track.title} • ${getTrackArtists(track)}`;
     } else {
-        const path = getCurrentPath();
+        const path = window.location.pathname;
         if (path.startsWith('/album/') || path.startsWith('/playlist/')) {
             return;
         }

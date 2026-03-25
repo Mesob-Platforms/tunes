@@ -37,7 +37,7 @@ import { buildAccountPageData, getAvatarUrl } from './accounts/profile.js';
 import { db } from './db.js';
 import { getVibrantColorFromImage } from './vibrant-color.js';
 import { syncManager } from './accounts/supabaseSync.js';
-import { navigate, getCurrentPath } from './router.js';
+import { navigate } from './router.js';
 import { apiUrl, isNative } from './platform.js';
 
 function sortTracks(tracks, sortType) {
@@ -5096,7 +5096,7 @@ export class UIRenderer {
                             const trackData = trackDataStore.get(item);
                             if (trackData) {
                                 try {
-                                    const path = getCurrentPath();
+                                    const path = window.location.pathname;
                                     const playlistMatch = path.match(/\/userplaylist\/([^/]+)/);
                                     if (playlistMatch) {
                                         const playlistId = playlistMatch[1];
